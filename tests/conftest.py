@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from ylang.core import Engine
+from ylang.core.memory import open_memory
 from ylang.improver import Improver
 from ylang.library.store import open_library
 from ylang.mcp.deps import YlangDeps
@@ -26,13 +28,16 @@ def ylang_deps(db_path: Path) -> Iterator[YlangDeps]:
     """Wired backends matching production MCP startup."""
     store = open_store(db_path)
     library = open_library(db_path)
-    improver = Improver(store, surface="mcp")
-    deps = YlangDeps(improver=improver, library=library, store=store)
+    memory = open_memory(db_path)
+    engine = Engine(store, surface="mcp")
+    improver = Improver(engine)
+    deps = YlangDeps(improver=improver, library=library, store=store, memory=memory)
     try:
         yield deps
     finally:
         library.close()
         store.close()
+        memory.close()
 
 
 @pytest.fixture

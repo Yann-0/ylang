@@ -42,7 +42,7 @@ async def test_improve_prompt_mocked_litellm(mcp_server: Any) -> None:
     mock_response.usage = MagicMock(prompt_tokens=42)
     mock_response._hidden_params = {"response_cost": 0.001}
 
-    with patch("ylang.improver.improver.litellm.completion", return_value=mock_response):
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
         result = await call_mcp_tool(
             mcp_server,
             "improve_prompt",
@@ -165,8 +165,23 @@ async def test_list_templates_source_filter(mcp_server: Any) -> None:
     assert len(seed_rows) == 3
 
 
-async def test_remember_unavailable(mcp_server: Any) -> None:
-    """remember returns ok=False until core.memory exists."""
+async def test_remember_persists_fact(mcp_server: Any) -> None:
+    """remember persists a fact under private scope."""
+    result = await call_mcp_tool(
+        mcp_server,
+        "remember",
+        {"fact": "prefers dark mode", "scope": "private"},
+    )
+
+    assert result["ok"] is True
+    assert result["id"] == 1
+    assert result["fact"] == "prefers dark mode"
+    assert result["scope"] == "private"
+    assert "created_at" in result
+
+
+async def test_remember_invalid_scope(mcp_server: Any) -> None:
+    """remember returns ok=False for invalid scope values."""
     result = await call_mcp_tool(
         mcp_server,
         "remember",
@@ -174,7 +189,7 @@ async def test_remember_unavailable(mcp_server: Any) -> None:
     )
 
     assert result["ok"] is False
-    assert "ylang.core.memory" in result["error"]
+    assert "scope must be private or shareable" in result["error"]
 
 
 async def test_recall_usage_last_hours(mcp_server: Any, ylang_deps: Any) -> None:
