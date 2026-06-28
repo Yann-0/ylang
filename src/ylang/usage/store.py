@@ -26,6 +26,12 @@ CREATE TABLE IF NOT EXISTS usage (
 CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage (timestamp);
 """
 
+def _open_connection(db_path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(db_path)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=5000")
+    return connection
+
 
 def _require_utc(value: datetime) -> None:
     if value.tzinfo is None:
@@ -101,7 +107,7 @@ class UsageStore:
     def open(cls, db_path: Path) -> Self:
         """Open (or create) the usage database file."""
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(db_path)
+        connection = _open_connection(db_path)
         store = cls(connection)
         store._ensure_schema()
         return store

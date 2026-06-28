@@ -34,6 +34,12 @@ CREATE INDEX IF NOT EXISTS idx_template_versions_source
     ON template_versions (source);
 """
 
+def _open_connection(db_path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(db_path)
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA busy_timeout=5000")
+    return connection
+
 
 def _require_utc(value: datetime) -> None:
     if value.tzinfo is None:
@@ -89,7 +95,7 @@ class Library:
     def open(cls, db_path: Path) -> Self:
         """Open (or create) the library tables at db_path."""
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(db_path)
+        connection = _open_connection(db_path)
         library = cls(connection)
         library._ensure_schema()
         ensure_seeds(library)
