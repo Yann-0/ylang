@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ylang.core.memory import MemoryStore
 from ylang.improver import Improver
 from ylang.library import Library
 from ylang.usage import UsageStore
@@ -16,4 +17,5 @@ class YlangDeps:
     improver: Improver
     library: Library
     store: UsageStore
+    memory: MemoryStore
     surface: str = "mcp"

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
 from datetime import datetime, timezone
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from ylang.core.memory import RememberResult
 from ylang.improver.types import Change, ImprovementResult
 from ylang.library.types import Template, TemplateParam, TemplateSource, TemplateSummary
 from ylang.mcp.deps import YlangDeps
@@ -69,18 +69,11 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
     @server.tool()
     def remember(fact: str, scope: str) -> dict[str, Any]:
         """Persist a user fact under a named scope via core memory."""
-        remember_fn = _load_core_remember()
-        if remember_fn is None:
-            return {
-                "ok": False,
-                "error": "remember is unavailable until ylang.core.memory is implemented",
-            }
-        result = remember_fn(fact, scope)
-        if hasattr(result, "__dataclass_fields__"):
-            return {"ok": True, **_dataclass_to_dict(result)}
-        if isinstance(result, dict):
-            return {"ok": True, **result}
-        return {"ok": True, "result": result}
+        try:
+            result = deps.memory.remember(fact, scope)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return _serialize_remember(result)
 
     @server.tool()
     def recall_usage(
@@ -215,19 +208,11 @@ def _parse_utc(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def _load_core_remember() -> Any | None:
-    try:
-        module = importlib.import_module("ylang.core.memory")
-    except ModuleNotFoundError:
-        return None
-    return getattr(module, "remember", None)
-
-
-def _dataclass_to_dict(value: Any) -> dict[str, Any]:
-    from dataclasses import asdict
-
-    payload = asdict(value)
-    for key, item in payload.items():
-        if isinstance(item, datetime):
-            payload[key] = item.isoformat()
-    return payload
+def _serialize_remember(result: RememberResult) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "id": result.id,
+        "fact": result.fact,
+        "scope": result.scope,
+        "created_at": result.created_at.isoformat(),
+    }

@@ -6,6 +6,8 @@ import sys
 
 from mcp.server.fastmcp import FastMCP
 
+from ylang.core import Engine
+from ylang.core.memory import open_memory
 from ylang.improver import Improver
 from ylang.library import open_library
 from ylang.mcp.deps import YlangDeps
@@ -47,11 +49,14 @@ def run_server() -> None:
     path = settings.resolved_storage_path()
     store = open_store(path)
     library = open_library(path)
-    improver = Improver(store, surface="mcp")
-    deps = YlangDeps(improver=improver, library=library, store=store)
+    memory = open_memory(path)
+    engine = Engine(store, surface="mcp")
+    improver = Improver(engine)
+    deps = YlangDeps(improver=improver, library=library, store=store, memory=memory)
     _print_connection_details(settings)
     try:
         create_server(deps).run(transport="stdio")
     finally:
         library.close()
         store.close()
+        memory.close()
