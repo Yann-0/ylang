@@ -1,19 +1,8 @@
 # Dead code and stub audit
 
-Audit of `src/ylang/` as of Phase 1 scaffold. **Nothing listed here should be deleted without an explicit decision** — this document flags unused exports, stub seams, and wiring gaps only.
+Audit of `src/ylang/` as of current `main`. **Nothing listed here should be deleted without an explicit decision** — this document flags unused exports, stub seams, and wiring gaps only.
 
 Method: read all modules under `src/ylang/`, then grep for imports and call sites across the repo.
-
----
-
-## Missing module: `ylang.core.memory`
-
-| Location | Notes |
-|----------|-------|
-| `src/ylang/mcp/tools.py` L70–83, L218–223 | `remember` MCP tool dynamically imports `ylang.core.memory` and calls `remember(fact, scope)`. `ModuleNotFoundError` → returns `{ok: false, error: "remember is unavailable until ylang.core.memory is implemented"}`. |
-| *(missing)* `src/ylang/core/memory.py` | No file exists. Facts are not persisted anywhere today. |
-
-The tool is registered and callable but always fails until `core.memory` is implemented and wired (likely through `YlangDeps`, not ad-hoc import).
 
 ---
 
@@ -30,24 +19,7 @@ Entire module is a documented stub; nothing in the running MCP path invokes it.
 | `propose_template_from_pattern` | `patterns.py` L56–59 | Always returns `None`. |
 | Re-exports | `library/__init__.py` L3–8, L13–24 | Exported in public API but unused outside `patterns.py` / `__init__.py`. |
 
-Related: `Library.save(..., source="learned")` is rejected at `store.py` L116–118 — reserved for the future pattern hook.
-
----
-
-## Unused core engine (`ylang.core`)
-
-The shared engine is implemented but **not wired into MCP or improver**.
-
-| Symbol | File:line | Status |
-|--------|-----------|--------|
-| `Engine` | `core/engine.py` L27–86 | Never instantiated outside `core/`. |
-| `Engine.complete` | `core/engine.py` L43–86 | No call sites. |
-| `_call_litellm`, `_parse_response` | `core/engine.py` L89–116 | Only used by `Engine`. |
-| `DEFAULT_ACTIVITY_MODELS` | `core/engine.py` L14–19 | Exported via `core/__init__.py`; no external use. |
-| `FALLBACK_MODEL` | `core/engine.py` L21 | Exported via `core/__init__.py`; no external use. |
-| `Activity`, `Message`, `CompletionResult` | `core/types.py` | Exported via `core/__init__.py`; only referenced inside `core/engine.py`. |
-
-**Architectural note:** `improver/improver.py` calls LiteLLM directly (`_call_litellm` L96–112) instead of delegating to `Engine`. Duplicated LiteLLM/usage-logging pattern until core is unified.
+Related: `Library.save(..., source="learned")` is rejected at `store.py` L116–118 — reserved for the future pattern hook. `list_templates` accepts `source="learned"` as a filter (`tools.py` L174–175) but no code path creates learned templates today.
 
 ---
 
@@ -55,31 +27,63 @@ The shared engine is implemented but **not wired into MCP or improver**.
 
 | Symbol | File:line | Status |
 |--------|-----------|--------|
-| `default_auto_apply` | `registry.py` L19–22 | **Used** by `improver.py` L59. Always returns `False` (Phase 1); `tool` parameter ignored (`_ = tool`). |
+| `default_auto_apply` | `registry.py` L19–22 | **Used** by `improver.py` L56. Always returns `False` (Phase 1); `tool` parameter ignored (`_ = tool`). |
 | `is_precision_tool` | `registry.py` L14–16 | Exported in `improver/__init__.py` L14; **never called** anywhere in repo. |
 | `PRECISION_TOOLS` | `registry.py` L5–11 | Exported in `improver/__init__.py` L12; **never referenced** outside `registry.py`. |
+| `ChangeKind` | `types.py` L8 | Exported in `improver/__init__.py` L9; **never imported** externally (only used as `Change.kind` annotation). |
 
 Precision-tool classification is defined for future auto-apply policy but not consumed yet.
 
 ---
 
-## MCP layer: exports and deps wiring
+## Core package re-exports (unused externally)
+
+`Engine` is wired: `mcp/server.py` L53–54 instantiates it; `improver/improver.py` L57–66 calls `Engine.complete()`.
+
+These symbols are exported via `core/__init__.py` but have **no imports outside `core/`**:
+
+| Symbol | File:line | Status |
+|--------|-----------|--------|
+| `DEFAULT_ACTIVITY_MODELS` | `engine.py` L14–19 | Used only inside `Engine.__init__`. |
+| `FALLBACK_MODEL` | `engine.py` L21 | Used only as `Engine.__init__` default. |
+| `Activity`, `Message`, `CompletionResult` | `types.py` | Referenced only inside `engine.py`. |
+
+---
+
+## Memory recall (write wired, read unwired)
+
+`MemoryStore.remember` is wired: `mcp/server.py` L52 → `YlangDeps.memory` (`deps.py` L20) → MCP `remember` (`tools.py` L73).
+
+These recall paths are implemented but have **no call sites** (no MCP tool, no tests):
+
+| Symbol | File:line | Status |
+|--------|-----------|--------|
+| `MemoryStore.recall` | `memory.py` L123–152 | Never called. |
+| `Fact` | `memory.py` L60–67 | Return type of `recall` only. |
+| `bind_memory` | `memory.py` L172–175 | Never called. |
+| Module-level `remember()` | `memory.py` L178–183 | Never called (MCP uses `deps.memory.remember`). |
+| Module-level `recall()` | `memory.py` L186–191 | Never called. |
+
+---
+
+## Usage schema fields (written, not yet consumed)
 
 | Item | File:line | Status |
 |------|-----------|--------|
-| `YlangDeps.surface` | `mcp/deps.py` L19 | Field defaults to `"mcp"`; **never read** by tool handlers or server. |
-| `create_server` | `mcp/server.py` L26–30 | Exported from `mcp/__init__.py`; only called from `run_server()` L54 — not used by external callers in-repo. |
-| `remember` bypasses `YlangDeps` | `mcp/tools.py` L70–83 | Uses dynamic import instead of a dependency injected at startup (inconsistent with improver/library/store). |
+| `improver_accepted=True` | `engine.py` L51, L85 | Never assigned `True`; improver always passes `False` (`improver.py` L65). |
+| `CompletionResult.error` | `types.py` L27, set `engine.py` L76, L96 | Improver reads only `.success` and `.content` (`improver.py` L67–70). |
 
-### Store opened before / alongside deps (observation, not a crash bug)
+---
 
-`run_server()` in `mcp/server.py` L47–51:
+## MCP layer and deps
 
-1. Opens `UsageStore` and `Library` on the same `resolved_storage_path()` (two separate SQLite connections to one file).
-2. Builds `Improver(store, ...)`.
-3. Builds `YlangDeps(improver, library, store)`.
+| Item | File:line | Status |
+|------|-----------|--------|
+| `YlangDeps.surface` | `deps.py` L21 | Field defaults to `"mcp"`; **never read** by tool handlers or server (`Engine` gets its own `surface="mcp"` at `server.py` L53). |
 
-Order is consistent for current tools. **Gap:** `remember` is not given `store` or a future memory backend via `YlangDeps`. Dual connections to one DB file are valid for Phase 1 but may need a single connection or WAL tuning later.
+### Multiple SQLite connections (observation, not a crash bug)
+
+`run_server()` in `mcp/server.py` L50–55 opens `UsageStore`, `Library`, and `MemoryStore` on the same `resolved_storage_path()` — three separate connections to one file. Valid for Phase 1; may need a single connection or WAL tuning later.
 
 ---
 
@@ -88,8 +92,9 @@ Order is consistent for current tools. **Gap:** `remember` is not given `store` 
 | Symbol | File:line | Status |
 |--------|-----------|--------|
 | `__version__` | `__init__.py` L3 | Not in `__all__`; not referenced elsewhere in repo. |
-| `SeedTemplateSpec`, `SEED_TEMPLATES` | `library/seeds.py` L15–55 | Module-private usage only (`ensure_seeds` L60); not re-exported from `library/__init__.py`. |
-| `_dataclass_to_dict` | `mcp/tools.py` L226–233 | Only reachable when `ylang.core.memory.remember` exists and returns a dataclass — dead path today. |
+| `SeedTemplateSpec`, `SEED_TEMPLATES` | `seeds.py` L15–55 | Module-private; used only by `ensure_seeds()` (L60), not re-exported from `library/__init__.py`. |
+| `ylang.mcp` package exports | `mcp/__init__.py` L3–6 | `YlangDeps`, `create_server`, `run_server` re-exported; callers import from submodules instead. |
+| `usage` re-exports | `usage/__init__.py` L3 | `UsageRecord`, `UsageWindow`, `open_store` re-exported; callers import from `ylang.usage.store` directly. |
 
 ---
 
@@ -97,20 +102,25 @@ Order is consistent for current tools. **Gap:** `remember` is not given `store` 
 
 | Tool | Backend used | Gap |
 |------|--------------|-----|
-| `improve_prompt` | `deps.improver` | OK |
+| `improve_prompt` | `deps.improver` → `Engine` | OK |
 | `save_template`, `recall_template`, `list_templates` | `deps.library` | OK |
 | `recall_usage` | `deps.store` | OK |
-| `remember` | Dynamic `ylang.core.memory` | **Stub / missing module** |
+| `remember` | `deps.memory` | OK (recall not exposed) |
+
+---
+
+## `importer/` (CLI-only, not dead)
+
+Separate entry point `python -m ylang.importer` (`importer/__main__.py`). Not wired into MCP or `python -m ylang`. Tested in `tests/test_importer.py`. Intentionally outside the MCP surface.
 
 ---
 
 ## Summary counts
 
-- **1 missing module** blocking a registered MCP tool (`core.memory`).
 - **1 full stub module** (`library/patterns.py`) exported but inactive.
-- **1 major unused subsystem** (`core.Engine` and related exports).
-- **Several exported symbols** never called (`is_precision_tool`, `PRECISION_TOOLS`, pattern APIs).
+- **Several exported symbols** never called (`is_precision_tool`, `PRECISION_TOOLS`, pattern APIs, core type re-exports).
 - **1 deps field** never read (`YlangDeps.surface`).
-- **1 inconsistent wiring pattern** (`remember` vs injected deps).
+- **Memory recall API** implemented but no read face yet.
+- **2 usage-schema fields** reserved for future improver-acceptance / error surfacing.
 
 No deletions recommended in Phase 1; implement or wire when the corresponding feature lands.

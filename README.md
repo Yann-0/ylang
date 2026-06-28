@@ -72,7 +72,7 @@ After `pip install -e .`, you can omit `PYTHONPATH`. Optionally set `YLANG_STORA
 | `save_template` | Save a new user template version to the local library. |
 | `recall_template` | Fetch a template by id; optionally render with param values. |
 | `list_templates` | List templates with latest-version metadata (filter by `source`: `seed`, `user`, or `learned`). |
-| `remember` | Persist a user fact under a named scope (requires `ylang.core.memory`; see [docs/dead-code.md](docs/dead-code.md)). |
+| `remember` | Persist a user fact under a named scope (`private` or `shareable`). |
 | `recall_usage` | Return raw usage rows for a time window (`last_hours`, `last_days`, or `since`/`until`). |
 
 ## Local-first and privacy
@@ -81,14 +81,14 @@ Ylang is local-first by default:
 
 - **Storage:** SQLite at `~/.ylang/ylang.db`. Override with the `YLANG_STORAGE_PATH` environment variable (path to the database file).
 - **Templates and usage:** Saved and read only from your local database. Ylang does not upload templates, facts, or usage history to any Ylang-operated cloud service.
-- **Usage logging:** Every improver call and (when wired) core completion writes a row to the local `usage` table.
+- **Usage logging:** Every improver call writes a row to the local `usage` table via the core engine.
 - **LLM providers:** Calls go to whatever models you configure via LiteLLM (OpenAI, Anthropic, Ollama, etc.). Provider traffic is governed by your API keys and provider policies, not by Ylang cloud storage.
 
 ## Project layout
 
 ```
 src/ylang/
-├── core/       # Shared engine (LiteLLM routing, completion, future memory)
+├── core/       # Shared engine (LiteLLM routing, completion, memory)
 ├── improver/   # Propose-only structural text improvement
 ├── usage/      # SQLite usage store (write on every request)
 ├── library/    # Local versioned prompt template library
