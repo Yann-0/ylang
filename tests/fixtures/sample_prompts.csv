@@ -1,0 +1,4 @@
+act,prompt,for_devs,type,contributor
+Character,"I want you to act like {character} from {series}. Answer like {character}. Hi {character}.",FALSE,TEXT,test
+Job Interviewer,"Ask interview questions for the ${Position:Software Developer} role. My first sentence is ""Hi""",FALSE,TEXT,test
+Plain Role,"You are a helpful writing assistant.",FALSE,TEXT,test
