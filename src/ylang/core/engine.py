@@ -43,22 +43,33 @@ class Engine:
     def complete(
         self,
         messages: list[Message],
-        activity: Activity,
+        activity: Activity | str,
+        *,
+        model: str | None = None,
+        response_format: dict[str, str] | None = None,
+        improver_fired: bool = False,
+        improver_accepted: bool = False,
     ) -> CompletionResult:
         """Resolve model from activity, complete via LiteLLM, write usage."""
-        model = self._activity_models[activity]
+        if model is not None:
+            resolved_model = model
+        elif activity in self._activity_models:
+            resolved_model = self._activity_models[activity]  # type: ignore[index]
+        else:
+            resolved_model = self._activity_models["other"]
         started = time.perf_counter()
         content = ""
-        model_used = model
+        model_used = resolved_model
         prompt_tokens = 0
         cost = 0.0
         error: str | None = None
         success = False
         try:
             content, model_used, prompt_tokens, cost = _call_litellm(
-                model,
+                resolved_model,
                 messages,
                 fallback_model=self._fallback_model,
+                response_format=response_format,
             )
             success = True
         except Exception as exc:
@@ -70,8 +81,8 @@ class Engine:
             model_used=model_used,
             prompt_tokens=prompt_tokens,
             cost=cost,
-            improver_fired=False,
-            improver_accepted=False,
+            improver_fired=improver_fired,
+            improver_accepted=improver_accepted,
             latency_ms=latency_ms,
             success=success,
         )
@@ -91,14 +102,18 @@ def _call_litellm(
     messages: list[Message],
     *,
     fallback_model: str,
+    response_format: dict[str, str] | None = None,
 ) -> tuple[str, str, int, float]:
     """Call LiteLLM with caching and fallback; return content and usage metadata."""
-    response = litellm.completion(
-        model=model,
-        messages=messages,
-        fallbacks=[fallback_model],
-        caching=True,
-    )
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "fallbacks": [fallback_model],
+        "caching": True,
+    }
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+    response = litellm.completion(**kwargs)
     return _parse_response(response, default_model=model)
 
 

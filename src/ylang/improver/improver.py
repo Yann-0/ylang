@@ -1,15 +1,13 @@
-"""Propose-only structural text improvement via LiteLLM."""
+"""Propose-only structural text improvement via the core engine."""
 
 from __future__ import annotations
 
 import json
 import re
-import time
-import litellm
 
+from ylang.core.engine import Engine
 from ylang.improver.registry import default_auto_apply
 from ylang.improver.types import Change, ImprovementResult
-from ylang.usage.store import UsageStore
 
 _ALLOWED_KINDS: frozenset[str] = frozenset({"clarity", "format", "constraint", "example"})
 _NUMBER_RE = re.compile(r"\d+")
@@ -44,9 +42,8 @@ Respond with JSON only:
 class Improver:
     """Propose-only improver: returns suggestions, never applies them."""
 
-    def __init__(self, store: UsageStore, *, surface: str) -> None:
-        self._store = store
-        self._surface = surface
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
 
     def improve(
         self,
@@ -57,31 +54,24 @@ class Improver:
     ) -> ImprovementResult:
         """Propose structural improvements; log usage; never mutate caller state."""
         apply_default = default_auto_apply(tool)
-        started = time.perf_counter()
-        result = _safe_result(text, apply_default)
-        model_used = model
-        prompt_tokens = 0
-        cost = 0.0
-        success = False
-        try:
-            raw, model_used, prompt_tokens, cost = _call_litellm(text, tool, model=model)
-            parsed_improved, changes = _parse_model_output(raw)
-            result, success = _validate(text, parsed_improved, changes, apply_default)
-        except Exception:
-            success = False
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        self._store.write_usage(
-            surface=self._surface,
+        completion = self._engine.complete(
+            [
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": f"Tool context: {tool}\n\nText:\n{text}"},
+            ],
             activity=f"improve:{tool}",
-            model_used=model_used,
-            prompt_tokens=prompt_tokens,
-            cost=cost,
+            model=model,
+            response_format={"type": "json_object"},
             improver_fired=True,
-            improver_accepted=False,
-            latency_ms=latency_ms,
-            success=success,
         )
-        return result
+        if not completion.success:
+            return _safe_result(text, apply_default)
+        try:
+            parsed_improved, changes = _parse_model_output(completion.content)
+            result, _success = _validate(text, parsed_improved, changes, apply_default)
+            return result
+        except Exception:
+            return _safe_result(text, apply_default)
 
 
 def _safe_result(text: str, auto_apply_default: bool) -> ImprovementResult:
@@ -91,25 +81,6 @@ def _safe_result(text: str, auto_apply_default: bool) -> ImprovementResult:
         changes=[],
         auto_apply_default=auto_apply_default,
     )
-
-
-def _call_litellm(text: str, tool: str, *, model: str) -> tuple[str, str, int, float]:
-    """Call LiteLLM and return raw JSON content plus usage metadata."""
-    response = litellm.completion(
-        model=model,
-        messages=[
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": f"Tool context: {tool}\n\nText:\n{text}"},
-        ],
-        response_format={"type": "json_object"},
-    )
-    content = response.choices[0].message.content or "{}"
-    model_used = getattr(response, "model", None) or model
-    usage = getattr(response, "usage", None)
-    prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-    hidden = getattr(response, "_hidden_params", {}) or {}
-    cost = float(hidden.get("response_cost", 0.0) or 0.0)
-    return content, str(model_used), prompt_tokens, cost
 
 
 def _parse_model_output(raw: str) -> tuple[str, list[Change]]:
