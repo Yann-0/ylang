@@ -3,22 +3,26 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import litellm
 from litellm.caching.caching import Cache
 
 from ylang.core.types import Activity, CompletionResult, Message
+from ylang.settings import (
+    DEFAULT_ACTIVITY_MODELS,
+    DEFAULT_FALLBACK_MODEL,
+    ProviderKeys,
+    api_key_for_model,
+    effective_activity_models,
+    resolve_available_model,
+)
 from ylang.usage.store import UsageStore
 
-DEFAULT_ACTIVITY_MODELS: dict[Activity, str] = {
-    "code": "anthropic/claude-3-5-sonnet-latest",
-    "search": "openai/gpt-4o-mini",
-    "reason": "openai/o3-mini",
-    "other": "openai/gpt-4o-mini",
-}
+if TYPE_CHECKING:
+    from ylang.settings import Settings
 
-FALLBACK_MODEL: str = "ollama/qwen2.5"
+FALLBACK_MODEL: str = DEFAULT_FALLBACK_MODEL
 
 if litellm.cache is None:
     litellm.cache = Cache()
@@ -33,12 +37,36 @@ class Engine:
         *,
         surface: str,
         activity_models: dict[Activity, str] | None = None,
+        provider_keys: ProviderKeys | None = None,
         fallback_model: str = FALLBACK_MODEL,
     ) -> None:
         self._store = store
         self._surface = surface
-        self._activity_models = activity_models or DEFAULT_ACTIVITY_MODELS
+        self._activity_models = activity_models or dict(DEFAULT_ACTIVITY_MODELS)
+        self._provider_keys = provider_keys or ProviderKeys()
         self._fallback_model = fallback_model
+        self._effective_activity_models = effective_activity_models(
+            self._activity_models,
+            self._provider_keys,
+            self._fallback_model,
+        )
+
+    @classmethod
+    def from_settings(
+        cls,
+        store: UsageStore,
+        *,
+        surface: str,
+        settings: Settings,
+    ) -> Engine:
+        """Build an engine from a loaded Settings instance."""
+        return cls(
+            store,
+            surface=surface,
+            activity_models=settings.activity_models,
+            provider_keys=settings.provider_keys,
+            fallback_model=settings.fallback_model,
+        )
 
     def complete(
         self,
@@ -53,10 +81,19 @@ class Engine:
         """Resolve model from activity, complete via LiteLLM, write usage."""
         if model is not None:
             resolved_model = model
-        elif activity in self._activity_models:
-            resolved_model = self._activity_models[activity]  # type: ignore[index]
+        elif activity in self._effective_activity_models:
+            resolved_model = self._effective_activity_models[activity]  # type: ignore[index]
         else:
-            resolved_model = self._activity_models["other"]
+            resolved_model = self._effective_activity_models["other"]
+
+        resolved_model = resolve_available_model(
+            resolved_model,
+            self._activity_models,
+            self._provider_keys,
+            self._fallback_model,
+        )
+        api_key = api_key_for_model(resolved_model, self._provider_keys)
+
         started = time.perf_counter()
         content = ""
         model_used = resolved_model
@@ -69,6 +106,7 @@ class Engine:
                 resolved_model,
                 messages,
                 fallback_model=self._fallback_model,
+                api_key=api_key,
                 response_format=response_format,
             )
             success = True
@@ -102,6 +140,7 @@ def _call_litellm(
     messages: list[Message],
     *,
     fallback_model: str,
+    api_key: str | None = None,
     response_format: dict[str, str] | None = None,
 ) -> tuple[str, str, int, float]:
     """Call LiteLLM with caching and fallback; return content and usage metadata."""
@@ -111,6 +150,8 @@ def _call_litellm(
         "fallbacks": [fallback_model],
         "caching": True,
     }
+    if api_key is not None:
+        kwargs["api_key"] = api_key
     if response_format is not None:
         kwargs["response_format"] = response_format
     response = litellm.completion(**kwargs)
