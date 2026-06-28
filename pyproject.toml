@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ylang"
+version = "0.1.0"
+description = "Personal AI efficiency layer — MCP server (Phase 1)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp>=1.27,<2",
+    "litellm",
+    "pydantic",
+]
+
+[project.scripts]
+ylang = "ylang.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ylang"]

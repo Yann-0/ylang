@@ -1,0 +1,6 @@
+---
+description: Human-owned core
+globs: ["src/ylang/core/**", "src/ylang/improver/**", "src/ylang/usage/**", "src/ylang/library/**"]
+alwaysApply: false
+---
+Human-owned. Behave as a careful junior, not an autonomous senior. Propose, don't broadly refactor. Smallest change that works; no speculative abstraction. One-line purpose comment per function. If a change spans more than ~3 files, stop and present a plan first.

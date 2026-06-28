@@ -1,0 +1,5 @@
+---
+description: Stack and style
+alwaysApply: true
+---
+Python 3.12, stdlib first, type hints everywhere, small functions. Config via one typed settings object. LiteLLM for providers (OpenAI + Anthropic faces, Ollama, fallback, caching). MCP via the official Python SDK. Local store: SQLite. No framework unless it removes more code than it adds.
