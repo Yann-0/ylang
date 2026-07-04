@@ -107,6 +107,40 @@ def summarize_usage(store: UsageStore, window: UsageWindow) -> UsageSummary:
     )
 
 
+@dataclass(frozen=True, slots=True)
+class DailyUsageBucket:
+    """Aggregated usage for one UTC calendar day."""
+
+    date: str
+    requests: int
+    cost: float
+    successes: int
+
+
+def daily_usage_buckets(store: UsageStore, window: UsageWindow) -> list[DailyUsageBucket]:
+    """Return per-day request, cost, and success counts within a window."""
+    rows = _cached_recall_usage(store, window)
+    buckets: dict[str, DailyUsageBucket] = {}
+    for row in rows:
+        day = row.timestamp.date().isoformat()
+        existing = buckets.get(day)
+        if existing is None:
+            buckets[day] = DailyUsageBucket(
+                date=day,
+                requests=1,
+                cost=row.cost,
+                successes=1 if row.success else 0,
+            )
+        else:
+            buckets[day] = DailyUsageBucket(
+                date=day,
+                requests=existing.requests + 1,
+                cost=existing.cost + row.cost,
+                successes=existing.successes + (1 if row.success else 0),
+            )
+    return sorted(buckets.values(), key=lambda item: item.date)
+
+
 def default_daily_window(*, now: datetime | None = None) -> UsageWindow:
     """Return a UTC window covering the last 24 hours."""
     anchor = now or datetime.now(timezone.utc)

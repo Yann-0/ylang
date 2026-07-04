@@ -170,6 +170,7 @@ def sse_chunk_payload(
     request_model: str,
     delta: dict[str, Any],
     finish_reason: str | None = None,
+    usage: dict[str, int] | None = None,
 ) -> str:
     """Encode one OpenAI streaming chunk as an SSE ``data:`` line."""
     payload: dict[str, Any] = {
@@ -185,6 +186,8 @@ def sse_chunk_payload(
             }
         ],
     }
+    if usage is not None:
+        payload["usage"] = usage
     return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
 

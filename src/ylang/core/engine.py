@@ -42,6 +42,7 @@ if litellm.cache is None:
 @dataclass
 class _StreamUsage:
     prompt_tokens: int = 0
+    completion_tokens: int = 0
     cost: float = 0.0
     model_used: str = ""
 
@@ -199,6 +200,8 @@ class Engine:
         model: str | None = None,
         improver_fired: bool = False,
         improver_accepted: bool = False,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> Iterator[StreamChunk]:
         """Stream completion deltas via LiteLLM; write exactly one usage row at end."""
         attempt_chain = self._router.build_attempt_chain(
@@ -224,8 +227,10 @@ class Engine:
                         messages,
                         api_key=api_key,
                         usage=stream_usage,
+                        tools=tools,
+                        tool_choice=tool_choice,
                     ):
-                        if chunk.content:
+                        if chunk.content or chunk.tool_calls_delta or chunk.usage is not None:
                             emitted = True
                             yield chunk
                     model_used = stream_usage.model_used or candidate
@@ -341,6 +346,8 @@ def _iter_litellm_stream(
     *,
     api_key: str | None = None,
     usage: _StreamUsage,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
 ) -> Iterator[StreamChunk]:
     """Yield streamed deltas from LiteLLM; updates ``usage`` from stream metadata."""
     kwargs: dict[str, Any] = {
@@ -348,32 +355,63 @@ def _iter_litellm_stream(
         "messages": messages,
         "caching": True,
         "stream": True,
+        "stream_options": {"include_usage": True},
     }
     if api_key is not None:
         kwargs["api_key"] = api_key
+    if tools is not None:
+        kwargs["tools"] = tools
+    if tool_choice is not None:
+        kwargs["tool_choice"] = tool_choice
 
     usage.model_used = model
     response = litellm.completion(**kwargs)
+    saw_usage = False
     for chunk in response:
         choices = getattr(chunk, "choices", None) or []
+        content = ""
+        tool_calls_delta: list[dict[str, Any]] = []
+        finish_reason: str | None = None
         if choices:
             choice = choices[0]
             delta = getattr(choice, "delta", None)
-            content = ""
             if delta is not None:
                 content = getattr(delta, "content", None) or ""
-            if content:
-                yield StreamChunk(content=content)
+                tool_calls_delta = _serialize_stream_tool_calls(
+                    getattr(delta, "tool_calls", None),
+                )
+            finish_reason = getattr(choice, "finish_reason", None)
+
         response_model = getattr(chunk, "model", None)
         if response_model:
             usage.model_used = str(response_model)
         chunk_usage = getattr(chunk, "usage", None)
         if chunk_usage is not None:
             usage.prompt_tokens = int(getattr(chunk_usage, "prompt_tokens", 0) or 0)
+            usage.completion_tokens = int(getattr(chunk_usage, "completion_tokens", 0) or 0)
+            saw_usage = True
+            total = usage.prompt_tokens + usage.completion_tokens
+            yield StreamChunk(
+                content="",
+                usage={
+                    "prompt_tokens": usage.prompt_tokens,
+                    "completion_tokens": usage.completion_tokens,
+                    "total_tokens": total,
+                },
+            )
         hidden = getattr(chunk, "_hidden_params", {}) or {}
         response_cost = hidden.get("response_cost")
         if response_cost is not None:
             usage.cost = float(response_cost or 0.0)
+
+        if content or tool_calls_delta:
+            yield StreamChunk(
+                content=content,
+                tool_calls_delta=tool_calls_delta,
+                finish_reason=finish_reason,
+            )
+        elif finish_reason and not saw_usage:
+            yield StreamChunk(content="", finish_reason=finish_reason)
 
 
 def _parse_response(
@@ -413,4 +451,35 @@ def _serialize_tool_calls(raw: Any) -> list[dict[str, Any]]:
                 },
             }
         )
+    return result
+
+
+def _serialize_stream_tool_calls(raw: Any) -> list[dict[str, Any]]:
+    """Convert streaming tool_call deltas into OpenAI-compatible dicts."""
+    if not raw:
+        return []
+    result: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            result.append(item)
+            continue
+        function = getattr(item, "function", None)
+        entry: dict[str, Any] = {"index": getattr(item, "index", 0)}
+        item_id = getattr(item, "id", None)
+        if item_id:
+            entry["id"] = item_id
+        item_type = getattr(item, "type", None)
+        if item_type:
+            entry["type"] = item_type
+        if function is not None:
+            fn: dict[str, Any] = {}
+            name = getattr(function, "name", None)
+            if name:
+                fn["name"] = name
+            arguments = getattr(function, "arguments", None)
+            if arguments:
+                fn["arguments"] = arguments
+            if fn:
+                entry["function"] = fn
+        result.append(entry)
     return result

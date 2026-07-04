@@ -43,7 +43,19 @@ There is no separate `typecheck` script — use your editor or `pyright` if desi
 
 ## Testing
 
-Tests use **pytest** with `asyncio_mode = auto` for MCP integration tests. The suite currently collects **135** tests.
+Tests use **pytest** with `asyncio_mode = auto` for MCP integration tests.
+
+### Optional LLM e2e smoke
+
+Tests marked `@pytest.mark.llm_e2e` call a live Ollama instance. They skip automatically when `OLLAMA_HOST` (default `http://localhost:11434`) is unreachable:
+
+```bash
+# Run everything except LLM smoke (default CI path)
+pytest -q -m "not llm_e2e"
+
+# Run LLM smoke when Ollama is up
+OLLAMA_HOST=http://localhost:11434 pytest -q -m llm_e2e
+```
 
 ### Fixtures (`tests/conftest.py`)
 

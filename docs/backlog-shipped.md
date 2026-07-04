@@ -1,7 +1,7 @@
 # Ylang — Backlog shipped
 
 **Date:** 2026-06-30 (updated 2026-07-04)  
-**Status:** All Phase 2 + 3 backlog items shipped
+**Status:** All Phase 2 + 3 + 4 backlog items shipped (v0.2.0)
 
 See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (historical). This addendum records what was shipped.
 
@@ -49,8 +49,17 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (histo
 - [x] Gateway tool calling passthrough — `tools` / `tool_choice` forwarded; `tool_calls` in response
 - [x] Async SQLite — sync store ops run via `anyio.to_thread.run_sync` in gateway handlers
 
+### Phase 4 (2026-07-04) — v0.2.0
+
+- [x] Streaming tool-call passthrough — SSE `tool_calls` deltas; `tools` / `tool_choice` in streams
+- [x] Streaming usage token counts — final SSE chunk with `usage` when LiteLLM provides it
+- [x] Rich usage dashboard — Chart.js charts, cost over time, daily success rate, auto-refresh on `GET /usage`
+- [x] CLI learning loop — `ylang patterns suggest` for template proposals
+- [x] Template list cache — in-memory cache with invalidation on save
+- [x] Optional LLM e2e smoke — `@pytest.mark.llm_e2e` against reachable Ollama
+- [x] Docs polish — gateway parity table, hooks vs gateway recipe, audit banner, dead-code refresh
+
 ## Remaining (future)
 
-- Rich usage analytics UI with live charts (beyond static HTML)
-- Streaming tool-call passthrough
 - Full aiosqlite migration (only if profiling shows thread offload insufficient)
+- FTS5 keyword search for template retrieval (if library grows beyond in-memory cache)

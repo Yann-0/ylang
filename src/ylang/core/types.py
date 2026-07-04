@@ -32,10 +32,12 @@ class CompletionResult:
 
 @dataclass(frozen=True, slots=True)
 class StreamChunk:
-    """One streamed text delta from a core completion."""
+    """One streamed delta from a core completion (content, tool_calls, or usage)."""
 
-    content: str
+    content: str = ""
+    tool_calls_delta: list[dict[str, Any]] = field(default_factory=list)
     finish_reason: str | None = None
+    usage: dict[str, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -2,7 +2,7 @@
 
 Audit of `src/ylang/` for unused exports, stub seams, and wiring gaps. **Nothing listed here should be deleted without an explicit decision** — this document flags items only.
 
-Last updated: 2026-07-04 (full doc sync with gateway face).
+Last updated: 2026-07-04 (Phase 4 / v0.2.0).
 
 Method: read modules under `src/ylang/`, grep for imports and call sites across the repo.
 
@@ -28,7 +28,8 @@ See [gateway.md](gateway.md).
 |--------|--------|
 | `register_pattern_detector` | Called in `mcp/server.py` and test fixtures |
 | `UsagePatternDetector.detect` | Used by `detect_patterns` tool |
-| `propose_template_from_pattern` | Used by `detect_patterns` tool |
+| `propose_template_from_pattern` | Used by `detect_patterns` tool and `ylang patterns suggest` CLI |
+| `Library.clear_list_cache` | Test helper; production cache invalidates on `save()` |
 | `Library.save(..., source="learned")` | Used by `save_learned_template` |
 
 `PatternDetector` ABC remains the extension point for alternate detectors.

@@ -91,3 +91,30 @@ def test_select_reference_prompts_respects_char_budget(library) -> None:
     ids = {item.template_id for item in results}
     assert "small-template" in ids
     assert "huge-template" not in ids
+
+
+def test_library_list_cache_invalidates_on_save(library) -> None:
+    library.save(
+        "cache-test",
+        name="Cache Test",
+        body="body",
+        params=[],
+        source="user",
+        visibility="public",
+        tags=["test"],
+    )
+    first = library.list()
+    second = library.list()
+    assert first is second
+    library.save(
+        "cache-test-2",
+        name="Cache Test 2",
+        body="body2",
+        params=[],
+        source="user",
+        visibility="public",
+        tags=["test"],
+    )
+    third = library.list()
+    assert third is not first
+    assert len(third) == len(first) + 1

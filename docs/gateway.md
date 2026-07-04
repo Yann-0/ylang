@@ -244,7 +244,7 @@ After a successful request, `usage_summary` should show a row with `surface=gate
 
 ### Usage dashboard
 
-When `YLANG_TRANSPORT=http`, open `GET /usage` (same bearer auth as gateway routes) for a minimal HTML dashboard of the last 7 days: total cost, requests, and bar charts by activity and model.
+When `YLANG_TRANSPORT=http`, open `GET /usage` (same bearer auth as gateway routes) for a Chart.js dashboard of the last 7 days: cost over time, requests by activity and model, daily success rate. The page auto-refreshes every 30 seconds.
 
 Alternatively, generate a standalone file:
 
@@ -259,10 +259,10 @@ The gateway implements enough of the OpenAI chat API for Cursor routing. Known g
 | Field | Behavior |
 |-------|----------|
 | `usage.completion_tokens` | From LiteLLM usage metadata (non-streaming) |
-| `usage.total_tokens` | `prompt_tokens + completion_tokens` (non-streaming) |
-| Streaming token counts | Not emitted per chunk |
-| `tools` / `tool_choice` | Forwarded to LiteLLM on non-streaming requests; `tool_calls` returned when the provider responds with them |
-| Streaming tool calls | Not supported |
+| `usage.total_tokens` | `prompt_tokens + completion_tokens` (non-streaming and streaming final chunk) |
+| Streaming token counts | Emitted in final SSE chunk when LiteLLM includes usage (`stream_options.include_usage`) |
+| `tools` / `tool_choice` | Forwarded to LiteLLM on streaming and non-streaming requests |
+| Streaming tool calls | `tool_calls` deltas emitted in SSE chunks; finish reason `tool_calls` |
 | `/v1/models` catalog | Lists virtual `route-*` models only; passthrough slugs are accepted but not advertised |
 
 ## Related docs

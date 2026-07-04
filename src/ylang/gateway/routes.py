@@ -24,7 +24,7 @@ from ylang.gateway.openai import (
     sse_chunk_payload,
     sse_done,
 )
-from ylang.usage.aggregates import summarize_usage
+from ylang.usage.aggregates import daily_usage_buckets, summarize_usage
 from ylang.usage.async_ops import run_store_sync
 from ylang.usage.dashboard import render_usage_dashboard_html
 from ylang.usage.store import UsageWindow
@@ -60,6 +60,8 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
                 route_activity=route.activity,
                 explicit_model=route.explicit_model,
                 request_model=route.request_model,
+                tools=tools,
+                tool_choice=tool_choice,
             )
 
         return await _complete_response(
@@ -81,7 +83,13 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
         """Minimal HTML dashboard for the last 7 days of usage."""
         window = UsageWindow.last_days(7)
         summary = await run_store_sync(summarize_usage, engine.store, window)
-        html = render_usage_dashboard_html(summary, title="Ylang Usage Dashboard")
+        buckets = await run_store_sync(daily_usage_buckets, engine.store, window)
+        html = render_usage_dashboard_html(
+            summary,
+            title="Ylang Usage Dashboard",
+            daily_buckets=buckets,
+            live=True,
+        )
         return HTMLResponse(html)
 
 
@@ -138,6 +146,8 @@ def _start_stream(
     messages: list,
     route_activity: str,
     explicit_model: str | None,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
 ) -> tuple[Iterator[StreamChunk] | None, StreamCompletionError | None]:
     """Pull the first stream chunk so pre-stream failures become JSON errors."""
     generator = engine.complete_stream(
@@ -145,6 +155,8 @@ def _start_stream(
         route_activity,
         model=explicit_model,
         improver_fired=False,
+        tools=tools,
+        tool_choice=tool_choice,
     )
     iterator = iter(generator)
     try:
@@ -168,6 +180,8 @@ async def _stream_response(
     route_activity: str,
     explicit_model: str | None,
     request_model: str,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
 ) -> Response:
     completion_id = new_completion_id()
     chunks, stream_error = await run_store_sync(
@@ -176,6 +190,8 @@ async def _stream_response(
         messages=messages,
         route_activity=route_activity,
         explicit_model=explicit_model,
+        tools=tools,
+        tool_choice=tool_choice,
     )
     if stream_error is not None:
         return openai_error_response(
@@ -188,8 +204,36 @@ async def _stream_response(
 
     def event_stream() -> Iterator[str]:
         role_sent = False
+        content_sent = False
+        tool_calls_sent = False
+        finish_reason = "stop"
         try:
             for chunk in chunks:
+                if chunk.usage is not None:
+                    yield sse_chunk_payload(
+                        completion_id=completion_id,
+                        request_model=request_model,
+                        delta={},
+                        usage=chunk.usage,
+                    )
+                    continue
+                if chunk.tool_calls_delta:
+                    if not role_sent:
+                        yield sse_chunk_payload(
+                            completion_id=completion_id,
+                            request_model=request_model,
+                            delta={"role": "assistant"},
+                        )
+                        role_sent = True
+                    tool_calls_sent = True
+                    yield sse_chunk_payload(
+                        completion_id=completion_id,
+                        request_model=request_model,
+                        delta={"tool_calls": chunk.tool_calls_delta},
+                    )
+                    if chunk.finish_reason:
+                        finish_reason = chunk.finish_reason
+                    continue
                 if chunk.content:
                     if not role_sent:
                         yield sse_chunk_payload(
@@ -198,17 +242,22 @@ async def _stream_response(
                             delta={"role": "assistant"},
                         )
                         role_sent = True
+                    content_sent = True
                     yield sse_chunk_payload(
                         completion_id=completion_id,
                         request_model=request_model,
                         delta={"content": chunk.content},
                     )
-            if role_sent:
+                    if chunk.finish_reason:
+                        finish_reason = chunk.finish_reason
+            if tool_calls_sent:
+                finish_reason = "tool_calls"
+            if role_sent or content_sent or tool_calls_sent:
                 yield sse_chunk_payload(
                     completion_id=completion_id,
                     request_model=request_model,
                     delta={},
-                    finish_reason="stop",
+                    finish_reason=finish_reason,
                 )
             else:
                 yield sse_chunk_payload(

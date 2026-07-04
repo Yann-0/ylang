@@ -461,6 +461,30 @@ Restart: `sudo systemctl restart ylang`
 
 ---
 
+## Hooks vs gateway
+
+Use **one primary LLM path per request** to avoid paying twice:
+
+| Workflow | What runs | When to use |
+|----------|-----------|-------------|
+| **Hooks only** | `beforeSubmitPrompt` → MCP `improve_prompt` | Improve every user prompt; agent uses Cursor's built-in model |
+| **Gateway only** | `POST /v1/chat/completions` → Ylang router | Route agent chat through Ylang models; set `YLANG_HOOK_DISABLED=1` |
+| **Both (advanced)** | Hook improves prompt, gateway routes completion | Acceptable if you want both; costs two LLM calls per turn |
+
+Tune improver models separately from gateway routing:
+
+```bash
+# Improver (hooks / MCP improve_prompt)
+YLANG_MODELS_IMPROVE=anthropic/claude-3-5-sonnet-latest,openai/gpt-4o
+
+# Gateway agent traffic uses route-* virtual models → YLANG_MODELS_CODE etc.
+YLANG_MODELS_CODE=openai/gpt-4o,anthropic/claude-3-5-sonnet-latest
+```
+
+Skip the hook during gateway testing: `export YLANG_HOOK_DISABLED=1` in your shell or Cursor env.
+
+---
+
 ## Programmatic access
 
 ```python

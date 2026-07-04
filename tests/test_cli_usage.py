@@ -80,3 +80,5 @@ def test_usage_dashboard_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch) 
     html = output.read_text(encoding="utf-8")
     assert "Ylang Usage Dashboard" in html
     assert "Requests" in html
+    assert "chart.js" in html.lower()
+    assert "costChart" in html

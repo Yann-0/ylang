@@ -66,6 +66,23 @@ Passthrough models (e.g. `ollama/qwen2.5`, `gpt-4o`) are also accepted. Requires
 
 MCP improver hooks and gateway routing are complementary: hooks improve prompts; the gateway routes model completions.
 
+**Avoid double LLM calls:** use either the global `beforeSubmitPrompt` hook *or* gateway routing for agent chat — not both on the same traffic. Typical setup: hooks for prompt improvement (MCP `improve_prompt`), gateway for model selection on agent completions. Set `YLANG_HOOK_DISABLED=1` when testing gateway-only routing. See [configuration.md](configuration.md#hooks-vs-gateway).
+
+## Learned templates workflow
+
+Close the learning loop from repeated improver prompts to saved templates:
+
+1. **Detect** — MCP `detect_patterns` or CLI `ylang patterns suggest --window-days 30`
+2. **Review** — inspect proposals (template id, rationale, sample text)
+3. **Save** — MCP `save_learned_template` with the approved body and params
+
+Example:
+
+```bash
+ylang patterns suggest
+# Review output, then via MCP or API save the template you want to keep
+```
+
 ## Auto prompt improvement (global hooks)
 
 This workflow calls `improve_prompt` on **every user message** and writes the result to `.cursor/ylang-improved-prompt.md` in the workspace. A global Cursor rule tells the agent to treat that file as the canonical task.

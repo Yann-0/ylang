@@ -15,6 +15,11 @@ def main() -> None:
 
         raise SystemExit(run_usage_cli(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "patterns":
+        from ylang.cli.patterns import run_patterns_cli
+
+        raise SystemExit(run_patterns_cli(sys.argv[2:]))
+
     parser = argparse.ArgumentParser(prog="ylang", description="Ylang MCP server")
     parser.parse_args(sys.argv[1:] if len(sys.argv) > 1 else [])
     run_server()

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ylang.core.stores import open_stores
 from ylang.settings import Settings
-from ylang.usage.aggregates import summarize_usage
+from ylang.usage.aggregates import daily_usage_buckets, summarize_usage
 from ylang.usage.dashboard import render_usage_dashboard_html
 from ylang.usage.store import UsageWindow
 
@@ -81,13 +81,18 @@ def run_usage_cli(argv: list[str] | None = None) -> int:
     try:
         window = _resolve_window(args)
         summary = summarize_usage(stores.store, window)  # type: ignore[attr-defined]
+        buckets = daily_usage_buckets(stores.store, window)  # type: ignore[attr-defined]
 
         if args.command == "summary":
             print_usage_summary(summary)
             return 0
 
         if args.command == "dashboard":
-            html = render_usage_dashboard_html(summary, title="Ylang Usage Dashboard")
+            html = render_usage_dashboard_html(
+                summary,
+                title="Ylang Usage Dashboard",
+                daily_buckets=buckets,
+            )
             args.output.write_text(html, encoding="utf-8")
             print(f"Wrote dashboard to {args.output.resolve()}", file=sys.stderr)
             try:

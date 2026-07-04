@@ -1,6 +1,10 @@
 # Ylang — Deep-Dive Audit & Roadmap
 
-> **Historical document (2026-06-30).** This audit predates the live OpenAI gateway, 11 MCP tools, consolidated SQLite connection, and expanded test suite. For current status see [README.md](../README.md#status), [backlog-shipped.md](backlog-shipped.md), and [architecture.md](architecture.md).
+> **Historical document (2026-06-30).** This audit predates the live OpenAI gateway, 11 MCP tools, consolidated SQLite connection, expanded test suite, and **Phase 4 (v0.2.0)** shipping. For current status see [README.md](../README.md#status), [backlog-shipped.md](backlog-shipped.md), and [architecture.md](architecture.md).
+
+## Phase 4 status (2026-07-04)
+
+All Phase 4 backlog items shipped in v0.2.0 — see [backlog-shipped.md](backlog-shipped.md#phase-4-2026-07-04--v020). This section supersedes remaining gaps listed below for gateway streaming, dashboard, and pattern CLI.
 
 **Date:** 2026-06-30  
 **Scope:** Phase 1 codebase at `src/ylang/`  

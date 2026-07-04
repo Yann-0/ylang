@@ -121,6 +121,11 @@ class Library:
 
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
+        self._list_cache: dict[tuple[TemplateSource | None, TemplateVisibility | None], list[TemplateSummary]] = {}
+
+    def clear_list_cache(self) -> None:
+        """Clear the in-memory template list cache (primarily for tests)."""
+        self._list_cache.clear()
 
     @classmethod
     def open(cls, db_path: Path) -> Self:
@@ -225,6 +230,7 @@ class Library:
                 (name, version, _to_iso(now), resolved_visibility, tags_json, template_id),
             )
         self._connection.commit()
+        self._list_cache.clear()
         return Template(
             template_id=template_id,
             name=name,
@@ -289,6 +295,10 @@ class Library:
         visibility: TemplateVisibility | None = None,
     ) -> list[TemplateSummary]:
         """Return latest-version metadata for each template."""
+        cache_key = (source, visibility)
+        cached = self._list_cache.get(cache_key)
+        if cached is not None:
+            return cached
         rows = self._connection.execute(
             """
             SELECT
@@ -324,6 +334,7 @@ class Library:
                     tags=_tags_from_json(str(row[7])),
                 )
             )
+        self._list_cache[cache_key] = summaries
         return summaries
 
     def render(

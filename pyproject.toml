@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ylang"
-version = "0.1.0"
+version = "0.2.0"
 description = "Personal AI efficiency layer – MCP server (Phase 1)"
 readme = "README.md"
 license = "MIT"
@@ -42,3 +42,6 @@ packages = ["src/ylang"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
+markers = [
+    "llm_e2e: optional smoke tests requiring a reachable OLLAMA_HOST",
+]

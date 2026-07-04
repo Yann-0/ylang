@@ -7,11 +7,12 @@ from unittest.mock import patch
 
 from ylang.usage.aggregates import (
     clear_aggregate_cache,
+    daily_usage_buckets,
     default_daily_window,
     rolling_cost,
     summarize_usage,
 )
-from ylang.usage.store import open_store
+from ylang.usage.store import UsageWindow, open_store
 
 
 def test_cached_recall_avoids_repeated_store_reads(tmp_path: object) -> None:
@@ -61,3 +62,36 @@ def test_cache_expires_after_ttl(tmp_path: object) -> None:
             assert rolling_cost(store, window) == 2.0
             assert rolling_cost(store, window) == 2.0
         assert recall.call_count == 2
+
+
+def test_daily_usage_buckets_groups_by_utc_day(tmp_path: object) -> None:
+    store = open_store(tmp_path / "buckets.db")  # type: ignore[operator]
+    now = datetime.now(timezone.utc)
+    store.write_usage(
+        surface="test",
+        activity="code",
+        model_used="openai/gpt-4o",
+        prompt_tokens=10,
+        cost=0.5,
+        improver_fired=False,
+        improver_accepted=False,
+        latency_ms=1,
+        success=True,
+        timestamp=now - timedelta(days=1),
+    )
+    store.write_usage(
+        surface="test",
+        activity="code",
+        model_used="openai/gpt-4o",
+        prompt_tokens=10,
+        cost=0.3,
+        improver_fired=False,
+        improver_accepted=False,
+        latency_ms=1,
+        success=False,
+        timestamp=now - timedelta(hours=2),
+    )
+    clear_aggregate_cache()
+    buckets = daily_usage_buckets(store, UsageWindow.last_days(7, now=now))
+    assert len(buckets) >= 1
+    assert sum(bucket.requests for bucket in buckets) == 2
