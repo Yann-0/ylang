@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Learned templates auto-surfaced in improver context (`YLANG_LEARNED_TEMPLATE_LIMIT`, default 2)
 - Preference routing uses `improver_accepted` counts for improver buckets (`improve`, `code`, `reason`)
 - Gateway load test script `scripts/gateway_load_test.py`
+- Deploy docs and scripts: `setup-cli-access.sh`, `ylang-cli` wrapper, shared `ylang` group permissions for systemd SQLite CLI
 
 ### Changed
 

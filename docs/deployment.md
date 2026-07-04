@@ -237,9 +237,33 @@ That script:
 - Adds CLI users to group **`ylang`** (`usermod -aG ylang …`)
 - Sets **`/srv/ylang/ylang.env`** to **`admin:ylang`** mode **`640`** (systemd reads the env file as root before dropping privileges)
 
-**Start a new login session** (or `newgrp ylang`) so group membership applies, then:
+**Activate group `ylang`** before CLI commands that touch `/srv/ylang/data`:
+
+- **Permanent:** log out and back in (or reboot) after `setup-cli-access.sh` adds you to the group.
+- **Current shell only:** use `sg ylang -c '…'` (recommended) or `newgrp ylang` (starts a **subshell**).
+
+`newgrp` does **not** run following lines in your original shell. This fails silently (still not in group `ylang`):
 
 ```bash
+newgrp ylang
+set -a && source /srv/ylang/ylang.env && set +a   # never runs in the parent shell
+ylang usage digest --last-days 7
+```
+
+Use one of these instead:
+
+```bash
+# Option A: one-shot with sg (no subshell surprise)
+sg ylang -c 'set -a && source /srv/ylang/ylang.env && set +a && ylang usage digest --last-days 7'
+
+# Option B: newgrp subshell — run everything inside it
+newgrp ylang <<'EOF'
+set -a && source /srv/ylang/ylang.env && set +a
+ylang usage digest --last-days 7
+ylang patterns apply
+EOF
+
+# Option C: after logout/login, normal shell already has group ylang
 set -a && source /srv/ylang/ylang.env && set +a
 ylang usage digest --last-days 7
 ylang patterns apply

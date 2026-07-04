@@ -87,7 +87,7 @@ set -a && source /srv/ylang/ylang.env && set +a
 ylang usage digest --last-days 7
 ```
 
-The `ylang` system user owns `/srv/ylang/data/`. Run **`sudo deploy/setup-cli-access.sh`** once as root, then use a new login session. See [deployment.md](deployment.md#shared-cli-access).
+The `ylang` system user owns `/srv/ylang/data/`. Run **`sudo deploy/setup-cli-access.sh`** once as root (sets data **`770`**, `ylang.env` **`640`**, group **`ylang`**). **Log out/in** for permanent group membership, or run CLI via `sg ylang -c '…'` — `newgrp ylang` alone does not apply to the next command in the same shell. See [deployment.md](deployment.md#shared-cli-access).
 
 ## First run
 

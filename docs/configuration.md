@@ -435,6 +435,8 @@ YLANG_MODELS_IMPROVE=anthropic/claude-3-5-sonnet-latest,openai/gpt-4o
 YLANG_MODELS_IMPROVE=mistral/mistral-large-latest,anthropic/claude-3-5-sonnet-latest
 ```
 
+`ylang usage digest` often shows most spend under **`improve:*`** activities. Put cheaper or local models **first** in `YLANG_MODELS_IMPROVE` (and optionally lower `YLANG_QUALITY_BAND`) before trimming gateway lists — hooks call the improver on every submitted prompt when enabled.
+
 ### Cost-conscious setup
 
 ```bash
