@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Cross-links from README, deployment, cursor-integration, architecture docs to configuration guide
 - Improver: salvage plain-markdown model output and recover improved-only JSON when `changes[]` is missing (fixes `parse error: could not locate changes array`)
+- Improver: accept restructured markdown specs when the model omits `changes[]` after successful parse
+- Improver: pass through original prompt when the model replies in clarifying prose instead of JSON
 
 ## [0.1.0] - 2026
 

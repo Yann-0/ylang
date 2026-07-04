@@ -288,6 +288,30 @@ def test_numbers_ignore_iso_timestamps_and_html_comments() -> None:
     assert _numbers_preserved(original, improved) is True
 
 
+def test_numbers_ignore_file_reference_line_ranges() -> None:
+    from ylang.improver.improver import _numbers_preserved
+
+    original = r"@terminals\8.txt:7-31"
+    improved = (
+        "## Goal\nReview terminal output and confirm gateway tests pass.\n"
+        "## Deliverables\n- Summarize ruff and pytest results"
+    )
+    assert _numbers_preserved(original, improved) is True
+
+
+def test_improver_skips_reference_only_prompt(improver: Improver) -> None:
+    with patch("ylang.core.engine.litellm.completion") as mock_completion:
+        result = improver.improve(
+            r"@\home\yann\.cursor\projects\srv-ylang\terminals\8.txt:7-31",
+            "edit_file",
+            model="test-model",
+        )
+    mock_completion.assert_not_called()
+    assert result.validated is True
+    assert result.improved == result.original
+    assert result.changes == []
+
+
 def test_validate_rejects_number_change() -> None:
     original = "process 42 items"
     improved = "process 43 items"
@@ -353,6 +377,35 @@ def test_validate_accepts_short_prompt_spec_expansion() -> None:
     assert ok is True
     assert result.validated is True
     assert result.improved.startswith("## Goal")
+
+
+def test_improver_salvages_improved_only_broken_json(improver: Improver) -> None:
+    """Regression: broken JSON with improved but no changes[] must not fail parse."""
+    original = (
+        "Implement the plan as specified, it is attached for your reference. "
+        "Do NOT edit the plan file itself."
+    )
+    raw = """{
+  "improved": "## Goal
+Implement the plan exactly as written in the attached plan file.
+
+## Deliverables
+- Complete all plan to-dos without editing the plan file"
+}"""
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=MagicMock(content=raw))]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = improver.improve(original, "cursor-agent", model="test-model")
+
+    assert result.validated is True
+    assert result.rejection_reason is None
+    assert "Implement the plan" in result.improved
+    assert len(result.changes) == 1
+    assert result.changes[0].kind == "scope"
 
 
 def test_improver_salvages_plain_markdown_model_output(improver: Improver) -> None:

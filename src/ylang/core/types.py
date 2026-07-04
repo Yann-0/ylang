@@ -26,3 +26,22 @@ class CompletionResult:
     latency_ms: int
     success: bool
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StreamChunk:
+    """One streamed text delta from a core completion."""
+
+    content: str
+    finish_reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StreamCompletionError(Exception):
+    """Stream failed; usage was already logged by ``Engine.complete_stream``."""
+
+    message: str
+    model_used: str
+
+    def __str__(self) -> str:
+        return self.message

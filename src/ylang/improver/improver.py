@@ -15,6 +15,7 @@ from ylang.improver.registry import (
     mode_guidance,
     resolve_cursor_mode,
 )
+from ylang.improver.reference import is_reference_only_prompt, scrub_file_reference_numbers
 from ylang.improver.types import Change, ImprovementResult
 
 logger = logging.getLogger(__name__)
@@ -97,6 +98,8 @@ class Improver:
         """Propose prompt improvements; log usage; never mutate caller state."""
         resolved = resolve_cursor_mode(tool, text, explicit_mode=mode)
         apply_default = default_auto_apply(tool, resolved.mode)
+        if is_reference_only_prompt(text):
+            return _safe_result(text, apply_default, resolved=resolved)
         user_content = _build_user_message(text, resolved, context)
         completion = self._engine.complete(
             [
@@ -317,6 +320,18 @@ def _try_parse_plain_spec(raw: str) -> str | None:
     return None
 
 
+def _is_model_prose_response(raw: str) -> bool:
+    """Return True when the model replied in plain prose instead of JSON or a spec."""
+    text = _extract_json_payload(raw).strip()
+    if not text:
+        return False
+    if text.startswith("{") or text.startswith("["):
+        return False
+    if text.startswith("## ") or "\n## " in text:
+        return False
+    return True
+
+
 def _try_salvage_parse_failure(
     original: str,
     raw: str,
@@ -325,6 +340,8 @@ def _try_salvage_parse_failure(
     resolved: ResolvedCursorMode,
 ) -> ImprovementResult | None:
     """Salvage structured output when JSON parsing fails."""
+    if _is_model_prose_response(raw):
+        return _safe_result(original, auto_apply_default, resolved=resolved)
     plain = _try_parse_plain_spec(raw)
     if plain is None:
         return None
@@ -487,6 +504,21 @@ def _validate(
     if original == improved and not changes:
         return _safe_result(original, auto_apply_default, resolved=resolved), True
     if improved != original and not changes:
+        if (
+            _is_restructured_spec(original, improved)
+            and _numbers_preserved(original, improved)
+            and _quoted_spans_preserved(original, improved)
+        ):
+            return (
+                _salvage_result(
+                    original,
+                    improved,
+                    auto_apply_default,
+                    resolved=resolved,
+                    description="Accepted restructured spec with omitted changes[]",
+                ),
+                True,
+            )
         return _safe_result(
             original,
             auto_apply_default,
@@ -615,7 +647,7 @@ def _extract_numbers(text: str) -> list[str]:
 
 def _numbers_preserved(original: str, improved: str) -> bool:
     """Ensure improved text does not drop or alter numeric literals from the original."""
-    orig = Counter(_extract_numbers(original))
+    orig = Counter(_extract_numbers(scrub_file_reference_numbers(original)))
     imp = Counter(_extract_numbers(improved))
     return all(imp.get(num, 0) >= count for num, count in orig.items())
 

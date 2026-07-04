@@ -16,6 +16,8 @@ from typing import Any
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
+from ylang.improver.reference import is_reference_only_prompt
+
 _HOOK_LOG = Path.home() / ".cursor" / "hooks" / "ylang-improve-prompt.log"
 _IMPROVED_FILENAME = "ylang-improved-prompt.md"
 _SKIP_PREFIXES = ("/loop", "/YOLO", "/ylang-skip")
@@ -133,6 +135,7 @@ def _is_hook_meta_prompt(prompt: str) -> bool:
 
 
 def _should_skip(prompt: str) -> bool:
+    """Return True when the hook should not call improve_prompt at all."""
     stripped = prompt.strip()
     if not stripped:
         return True
@@ -142,6 +145,11 @@ def _should_skip(prompt: str) -> bool:
         return True
     lowered = stripped.lower()
     return any(lowered.startswith(prefix.lower()) for prefix in _SKIP_PREFIXES)
+
+
+def _is_reference_passthrough(prompt: str) -> bool:
+    """Return True for bare file/terminal pointers that should not be LLM-improved."""
+    return is_reference_only_prompt(prompt.strip())
 
 
 def _improved_prompt_path() -> Path:
@@ -237,6 +245,24 @@ def main() -> None:
             else "skipped (empty, disabled, or command prefix)"
         )
         _log(reason)
+        _fail_open()
+        return
+
+    if _is_reference_passthrough(prompt):
+        mode = _resolve_mode(payload)
+        try:
+            _write_improved_file(
+                path=_improved_prompt_path(),
+                original=prompt,
+                improved=prompt,
+                cursor_mode=mode,
+                mode_source="explicit",
+                validated=True,
+                changed=False,
+            )
+        except OSError as exc:
+            _log(f"failed to write improved prompt file: {exc}")
+        _log(f"passthrough mode={mode} validated=True changed=False (file/terminal reference)")
         _fail_open()
         return
 

@@ -12,6 +12,7 @@ from ylang.core.stores import open_stores
 from ylang.improver import Improver
 from ylang.library.pattern_detector import UsagePatternDetector
 from ylang.library.patterns import register_pattern_detector
+from ylang.gateway import VIRTUAL_MODEL_NAMES, register_gateway_routes
 from ylang.mcp.auth import BearerTokenMiddleware
 from ylang.mcp.deps import YlangDeps
 from ylang.mcp.tools import register_tools
@@ -32,7 +33,12 @@ _TOOL_NAMES = (
 )
 
 
-def create_server(deps: YlangDeps, settings: Settings | None = None) -> FastMCP:
+def create_server(
+    deps: YlangDeps,
+    settings: Settings | None = None,
+    *,
+    gateway_engine: Engine | None = None,
+) -> FastMCP:
     """Create and configure the MCP server instance."""
     if settings is not None and settings.transport == "http":
         server = FastMCP(
@@ -41,6 +47,8 @@ def create_server(deps: YlangDeps, settings: Settings | None = None) -> FastMCP:
             port=settings.port,
             streamable_http_path="/mcp",
         )
+        if gateway_engine is not None:
+            register_gateway_routes(server, gateway_engine)
     else:
         server = FastMCP("ylang")
     register_tools(server, deps)
@@ -59,6 +67,12 @@ def _print_connection_details(settings: Settings) -> None:
         print("  transport: http (streamable-http)", file=sys.stderr)
         print(f"  listen: {settings.host}:{settings.port}/mcp", file=sys.stderr)
         print("  auth: Bearer token required", file=sys.stderr)
+        print("  gateway: enabled", file=sys.stderr)
+        print("  gateway routes: POST /v1/chat/completions, GET /v1/models", file=sys.stderr)
+        print(
+            f"  virtual models: {', '.join(VIRTUAL_MODEL_NAMES)}",
+            file=sys.stderr,
+        )
         print("  ready - waiting for MCP client", file=sys.stderr)
     print(f"  storage: {storage}", file=sys.stderr)
     print(f"  tools ({len(_TOOL_NAMES)}): {', '.join(_TOOL_NAMES)}", file=sys.stderr)
@@ -89,6 +103,11 @@ def run_server() -> None:
     stores = open_stores(path)
     register_pattern_detector(UsagePatternDetector(stores.store))
     engine = Engine.from_settings(stores.store, surface="mcp", settings=settings)
+    gateway_engine = (
+        Engine.from_settings(stores.store, surface="gateway", settings=settings)
+        if settings.transport == "http"
+        else None
+    )
     improver = Improver(engine)
     deps = YlangDeps(
         improver=improver,
@@ -97,7 +116,7 @@ def run_server() -> None:
         memory=stores.memory,
         surface="mcp",
     )
-    server = create_server(deps, settings)
+    server = create_server(deps, settings, gateway_engine=gateway_engine)
     _print_connection_details(settings)
     settings.log_llm_config(router=engine.router)
     try:

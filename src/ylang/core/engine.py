@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import litellm
 from litellm.caching.caching import Cache
 
 from ylang.core.model_router import ModelRouter
-from ylang.core.types import Activity, CompletionResult, Message
+from ylang.core.types import (
+    Activity,
+    CompletionResult,
+    Message,
+    StreamChunk,
+    StreamCompletionError,
+)
 from ylang.settings import (
     DEFAULT_FALLBACK_MODEL,
     ProviderKeys,
@@ -29,6 +37,13 @@ _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 if litellm.cache is None:
     litellm.cache = Cache()
+
+
+@dataclass
+class _StreamUsage:
+    prompt_tokens: int = 0
+    cost: float = 0.0
+    model_used: str = ""
 
 
 class Engine:
@@ -154,6 +169,87 @@ class Engine:
             error=error,
         )
 
+    def complete_stream(
+        self,
+        messages: list[Message],
+        activity: Activity | str,
+        *,
+        model: str | None = None,
+        improver_fired: bool = False,
+        improver_accepted: bool = False,
+    ) -> Iterator[StreamChunk]:
+        """Stream completion deltas via LiteLLM; write exactly one usage row at end."""
+        attempt_chain = self._router.build_attempt_chain(
+            activity,
+            explicit_model=model,
+        )
+
+        started = time.perf_counter()
+        model_used = attempt_chain[0] if attempt_chain else self._router.fallback_model
+        prompt_tokens = 0
+        cost = 0.0
+        error: str | None = None
+        success = False
+        emitted = False
+
+        try:
+            for index, candidate in enumerate(attempt_chain):
+                api_key = api_key_for_model(candidate, self._router.provider_keys)
+                try:
+                    stream_usage = _StreamUsage(model_used=candidate)
+                    for chunk in _iter_litellm_stream(
+                        candidate,
+                        messages,
+                        api_key=api_key,
+                        usage=stream_usage,
+                    ):
+                        if chunk.content:
+                            emitted = True
+                            yield chunk
+                    model_used = stream_usage.model_used or candidate
+                    prompt_tokens = stream_usage.prompt_tokens
+                    cost = stream_usage.cost
+                    success = True
+                    return
+                except Exception as exc:
+                    error = str(exc)
+                    if emitted:
+                        raise StreamCompletionError(
+                            message=str(exc),
+                            model_used=model_used,
+                        ) from exc
+                    if index + 1 >= len(attempt_chain) or not _should_try_next_model(exc):
+                        break
+                    next_model = attempt_chain[index + 1]
+                    if _is_retryable_llm_error(exc):
+                        self._router.cooldown.mark_failed(candidate)
+                    logger.warning(
+                        "LLM stream fallback: %s -> %s (%s)",
+                        candidate,
+                        next_model,
+                        _error_reason(exc),
+                    )
+                    model_used = next_model
+        finally:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            self._store.write_usage(
+                surface=self._surface,
+                activity=activity,
+                model_used=model_used,
+                prompt_tokens=prompt_tokens,
+                cost=cost,
+                improver_fired=improver_fired,
+                improver_accepted=improver_accepted,
+                latency_ms=latency_ms,
+                success=success,
+            )
+
+        if not success:
+            raise StreamCompletionError(
+                message=error or "completion failed",
+                model_used=model_used,
+            )
+
 
 def _should_try_next_model(exc: BaseException) -> bool:
     """Return True when the attempt chain should continue to the next candidate."""
@@ -209,6 +305,47 @@ def _call_litellm(
         kwargs["response_format"] = response_format
     response = litellm.completion(**kwargs)
     return _parse_response(response, default_model=model)
+
+
+def _iter_litellm_stream(
+    model: str,
+    messages: list[Message],
+    *,
+    api_key: str | None = None,
+    usage: _StreamUsage,
+) -> Iterator[StreamChunk]:
+    """Yield streamed deltas from LiteLLM; updates ``usage`` from stream metadata."""
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "caching": True,
+        "stream": True,
+    }
+    if api_key is not None:
+        kwargs["api_key"] = api_key
+
+    usage.model_used = model
+    response = litellm.completion(**kwargs)
+    for chunk in response:
+        choices = getattr(chunk, "choices", None) or []
+        if choices:
+            choice = choices[0]
+            delta = getattr(choice, "delta", None)
+            content = ""
+            if delta is not None:
+                content = getattr(delta, "content", None) or ""
+            if content:
+                yield StreamChunk(content=content)
+        response_model = getattr(chunk, "model", None)
+        if response_model:
+            usage.model_used = str(response_model)
+        chunk_usage = getattr(chunk, "usage", None)
+        if chunk_usage is not None:
+            usage.prompt_tokens = int(getattr(chunk_usage, "prompt_tokens", 0) or 0)
+        hidden = getattr(chunk, "_hidden_params", {}) or {}
+        response_cost = hidden.get("response_cost")
+        if response_cost is not None:
+            usage.cost = float(response_cost or 0.0)
 
 
 def _parse_response(

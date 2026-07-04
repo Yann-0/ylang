@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ylang.improver.improver import (
     _extract_json_payload,
+    _is_model_prose_response,
     _parse_model_output,
     _try_parse_plain_spec,
     _try_salvage_parse_failure,
@@ -93,6 +94,29 @@ def test_try_parse_plain_spec_accepts_markdown_sections() -> None:
 def test_try_parse_plain_spec_rejects_json_like_text() -> None:
     raw = '{"improved": "broken'
     assert _try_parse_plain_spec(raw) is None
+
+
+def test_is_model_prose_response_detects_clarifying_answer() -> None:
+    raw = (
+        'The input prompt "fix this rejection reason" is too vague to produce a '
+        "meaningful spec without more context."
+    )
+    assert _is_model_prose_response(raw) is True
+    assert _is_model_prose_response('{"improved": "broken') is False
+    assert _is_model_prose_response("## Goal\nFix the bug") is False
+
+
+def test_salvage_parse_failure_passthrough_for_prose_response() -> None:
+    original = "fix this rejection reason"
+    raw = (
+        "The input prompt is too vague to produce a meaningful spec. "
+        "Please provide the rejection reason text and relevant files."
+    )
+    salvaged = _try_salvage_parse_failure(original, raw, True, resolved=_AGENT)
+    assert salvaged is not None
+    assert salvaged.validated is True
+    assert salvaged.improved == original
+    assert salvaged.changes == []
 
 
 def test_salvage_parse_failure_from_plain_markdown() -> None:

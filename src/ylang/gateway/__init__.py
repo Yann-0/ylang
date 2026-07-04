@@ -1,16 +1,8 @@
-"""Desktop gateway seam — future face over the shared core engine."""
+"""OpenAI-compatible gateway face over the shared core engine."""
 
 from __future__ import annotations
 
+from ylang.gateway.mapping import VIRTUAL_MODEL_NAMES
+from ylang.gateway.routes import register_gateway_routes
 
-def run_gateway() -> None:
-    """Start the desktop gateway face (not yet implemented).
-
-    The gateway will be a thin adapter over ``ylang.core.Engine``,
-    mirroring the MCP server's separation of concerns.
-    """
-    msg = (
-        "Desktop gateway is not implemented yet. "
-        "Use `python -m ylang` for the MCP face."
-    )
-    raise NotImplementedError(msg)
+__all__ = ["VIRTUAL_MODEL_NAMES", "register_gateway_routes"]

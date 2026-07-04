@@ -91,6 +91,7 @@ The `beforeSubmitPrompt` hook:
 - Reads conversation from `CURSOR_TRANSCRIPT_PATH` when available
 - Calls Ylang `improve_prompt` via HTTP MCP client
 - Writes `.cursor/ylang-improved-prompt.md` with original, improved, validation status
+- Passes through bare file/terminal references unchanged (`validated=True`, no LLM call)
 - Skips meta-prompts (prior hook output, `/loop`, `/YOLO`, `/ylang-skip`)
 
 ### Output file format
@@ -136,6 +137,7 @@ Mode changes the structure and scope of improved prompts (e.g. plan mode avoids 
 | Symptom | Fix |
 |---------|-----|
 | Hook silent, no markdown file | Check `~/.cursor/hooks/ylang-improve-prompt.log`; verify MCP URL and token |
+| `validated=False`, `numbers changed` on a file/terminal `@` reference | Redeploy hook from `deploy/cursor/hooks/`; bare references now pass through without LLM improvement |
 | `Unauthorized` from HTTP MCP | Set matching `YLANG_AUTH_TOKEN` in service env and mcp.json headers |
 | Improvement always skipped | Remove `/ylang-skip` prefix; check `YLANG_HOOK_DISABLED` |
 | Wrong Python in hook | Fix shebang in `ylang-improve-prompt.py` |
