@@ -12,7 +12,7 @@ If you use **both Windows and WSL** on the same clone, create the venv in the en
 
 ```bash
 git clone https://github.com/Yann-0/ylang.git
-cd ylang
+cd ylang/app
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -24,7 +24,7 @@ On Ubuntu/Debian, `python3` is the default interpreter. Optionally install `pyth
 
 ```powershell
 git clone https://github.com/Yann-0/ylang.git
-cd ylang
+cd ylang/app
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
@@ -41,11 +41,11 @@ pip install -e ".[dev]"
 ## Verify installation
 
 ```bash
-python -m ylang --help 2>&1 | head -1   # starts MCP server (Ctrl+C to stop)
 python -c "import ylang; print(ylang.__version__)"
+python -m ylang    # starts MCP server on stdio — press Ctrl+C to stop
 ```
 
-The MCP server prints connection details to **stderr** and waits for MCP traffic on stdin/stdout (stdio transport).
+There is no `--help` flag; `python -m ylang` always starts the server. The process prints connection details to **stderr** and waits for MCP traffic on stdin/stdout (stdio transport).
 
 ## First run
 

@@ -2,7 +2,14 @@
 
 Ylang exposes an **OpenAI-compatible HTTP gateway** on the same host, port, and bearer auth as the MCP HTTP transport. Point Cursor (or any OpenAI-compatible client) at it to route real coding traffic through Ylang's activity-based model selection.
 
-The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr logs the route paths and virtual model names.
+The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr logs the route paths and virtual model names. **Stdio transport has no `/v1/*` routes** — use HTTP for the gateway.
+
+## Availability
+
+| Transport | MCP | Gateway (`/v1/*`) |
+|-----------|-----|-------------------|
+| `stdio` (default) | Yes | No |
+| `http` | Yes (`/mcp`) | Yes (requires `YLANG_AUTH_TOKEN`) |
 
 ## Endpoints
 
@@ -234,6 +241,18 @@ curl -N http://127.0.0.1:8787/v1/chat/completions \
 ```
 
 After a successful request, `usage_summary` should show a row with `surface=gateway` and the matching activity (e.g. `code` for `route-code`).
+
+## OpenAI parity limits
+
+The gateway implements enough of the OpenAI chat API for Cursor routing. Known gaps:
+
+| Field | Behavior |
+|-------|----------|
+| `usage.completion_tokens` | Always `0` (non-streaming) |
+| `usage.total_tokens` | Equals `prompt_tokens` only |
+| Streaming token counts | Not emitted per chunk |
+| Tools / function calling | Not supported |
+| `/v1/models` catalog | Lists virtual `route-*` models only; passthrough slugs are accepted but not advertised |
 
 ## Related docs
 

@@ -6,7 +6,7 @@ Guide for contributors and maintainers working on the Ylang codebase.
 
 ```bash
 git clone https://github.com/Yann-0/ylang.git
-cd ylang
+cd ylang/app
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -35,12 +35,15 @@ ylang/
 | `ruff check .` | Lint |
 | `ruff format .` | Format |
 | `python -m ylang` | Start MCP server (stdio) |
+| `ylang` | Same as `python -m ylang` (console script from `pyproject.toml`) |
+
+There is no `--help` flag on the main entry point.
 
 There is no separate `typecheck` script — use your editor or `pyright` if desired. Ruff targets Python 3.12.
 
 ## Testing
 
-Tests use **pytest** with `asyncio_mode = auto` for MCP integration tests.
+Tests use **pytest** with `asyncio_mode = auto` for MCP integration tests. The suite currently collects **135** tests.
 
 ### Fixtures (`tests/conftest.py`)
 
@@ -48,10 +51,19 @@ Tests use **pytest** with `asyncio_mode = auto` for MCP integration tests.
 - `ylang_deps` — wired `YlangDeps` matching production MCP startup
 - MCP server fixtures for integration tests
 
-### Integration tests
+### Unit and integration tests
 
 | File | Coverage |
 |------|----------|
+| `tests/test_engine.py` | Engine completion, fallback chain |
+| `tests/test_engine_stream.py` | Gateway streaming via `complete_stream()` |
+| `tests/test_model_router.py` | Activity routing, cooldown, budget, preferences |
+| `tests/test_auth.py` | Bearer token middleware |
+| `tests/test_gateway_routes.py` | `/v1/chat/completions`, `/v1/models` |
+| `tests/test_gateway_mapping.py` | Virtual and passthrough model mapping |
+| `tests/test_usage_activity.py` | Usage activity normalization |
+| `tests/test_improver_validate.py` | Improver validation and salvage |
+| `tests/test_importer.py` | Public prompt CSV import |
 | `tests/integration/test_mcp_tools.py` | MCP tool registration and handlers |
 | `tests/integration/test_improve_prompt_e2e.py` | End-to-end improver (may call LLM if keys set) |
 
@@ -72,8 +84,8 @@ pytest --cov=ylang --cov-report=term-missing
 
 ## Architecture rules (enforced by convention)
 
-1. **Faces are thin** — `mcp/tools.py` only serializes; no business logic.
-2. **One engine** — all LLM calls go through `Engine.complete()`.
+1. **Faces are thin** — `mcp/tools.py` and `gateway/routes.py` only serialize; no business logic.
+2. **One engine** — all LLM calls go through `Engine.complete()` or `Engine.complete_stream()`.
 3. **Propose-only improver** — never auto-apply to user files from server code.
 4. **Phase 1 scope** — see `.cursor/rules/00-project.mdc` and [architecture.md](architecture.md).
 
@@ -99,7 +111,7 @@ Separate from the MCP server:
 python -m ylang.importer --help
 ```
 
-Imports public prompt CSVs into the library database. Tested in `tests/test_importer.py` (if present) and callable via MCP `import_public_prompts`.
+Imports public prompt CSVs into the library database. Covered by `tests/test_importer.py` and callable via MCP `import_public_prompts`.
 
 ## Local database inspection
 

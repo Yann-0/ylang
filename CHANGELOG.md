@@ -15,11 +15,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Full documentation sync: README, docs index, architecture, MCP tools, database schema, installation, deployment, development, cursor integration, gateway parity notes
 - README and docs updated for live gateway (replaces "stubbed for later" wording)
 - HTTP bearer auth uses `secrets.compare_digest` for timing-safe comparison
 - Improver: salvage plain-markdown model output and recover improved-only JSON when `changes[]` is missing (fixes `parse error: could not locate changes array`)
 - Improver: accept restructured markdown specs when the model omits `changes[]` after successful parse
 - Improver: pass through original prompt when the model replies in clarifying prose instead of JSON
+- `detect_patterns` docs aligned with activity-suffix clustering (not prompt text)
+- Historical banner on [audit-and-roadmap.md](docs/audit-and-roadmap.md); [backlog-shipped.md](docs/backlog-shipped.md) counts updated (11 tools, 135 tests)
 
 ## [0.1.0] - 2026
 

@@ -2,12 +2,12 @@
 description: Ylang project guardrails
 alwaysApply: true
 ---
-Ylang is a personal AI efficiency layer: an MCP server (first), later a desktop gateway, over ONE shared core engine. Phase 1 only.
+Ylang is a personal AI efficiency layer: MCP server + HTTP OpenAI gateway over ONE shared core engine. Phase 1 only.
 - ONE core engine; faces are thin adapters; never duplicate logic.
 - Keep the surface small enough for one person to understand every file.
-- Improver is PROPOSE-ONLY: returns {original, improved, changes}; expands to full specs with pertinent scope; auto-apply defaults OFF for precision tools.
+- Improver is PROPOSE-ONLY: returns {original, improved, changes}; expands to full specs with pertinent scope; auto-apply defaults OFF for precision tools and plan/debug modes.
 - Local-first by default; storage location is a parameter.
-- Write the usage store from day one even though nothing reads it yet.
+- Usage store is written on every LLM call; MCP tools and router read it for aggregates, preferences, and budget.
 - No features beyond Phase 1 (no optimizer, provenance, GitHub/KB sources, hosted/team). If a change implies one, stop and flag it.
 - No new dependency without asking first and saying why.
 - Explain every non-trivial change in plain English before the diff.

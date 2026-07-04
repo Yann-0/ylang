@@ -16,7 +16,7 @@ source .venv/bin/activate   # Windows: .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 ```
 
-See [docs/development.md](docs/development.md) for the full workflow.
+See [docs/development.md](docs/development.md) for the full workflow (135 tests, gateway and auth coverage).
 
 ## Pull request checklist
 

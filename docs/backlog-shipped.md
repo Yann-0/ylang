@@ -1,9 +1,9 @@
-# Ylang — Deep-Dive Audit & Roadmap
+# Ylang — Backlog shipped
 
-**Date:** 2026-06-30  
-**Status:** Backlog implemented — 54 tests passing; 10 MCP tools live
+**Date:** 2026-06-30 (updated 2026-07-04)  
+**Status:** 135 tests passing; 11 MCP tools live; OpenAI gateway on HTTP transport
 
-See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit. This addendum records what was shipped.
+See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (historical). This addendum records what was shipped.
 
 ## Shipped (backlog execution)
 
@@ -27,10 +27,12 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit. This 
 - [x] Preference ordering (2C) — success-based model boost from usage
 - [x] Precision-tool auto-apply policy — non-precision tools get `auto_apply_default=True` hint
 - [x] Usage analytics — `usage_summary` MCP tool
+- [x] `import_public_prompts` MCP tool — public CSV import wired
 - [x] OpenAI-compatible gateway — `POST /v1/chat/completions`, `GET /v1/models`, streaming SSE
+- [x] Usage activity normalization at write time (`improve:Cursor` → `improve:agent`)
 
 ## Remaining (future)
 
 - Rich usage analytics UI (L)
-- Store improver input text for text-based pattern clustering
+- Text-based pattern clustering from improver input (today: clusters on `improve:*` activity suffix counts)
 - Wire `improver_accepted` tracking from client acceptance events

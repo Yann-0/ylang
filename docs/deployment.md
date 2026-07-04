@@ -131,10 +131,12 @@ Ylang does not expose a separate health endpoint. Verify the service:
 
 ```bash
 sudo systemctl status ylang
-curl -s -o /dev/null -w "%{http_code}" \
+curl -s -o /dev/null -w "%{http_code}\n" \
   -H "Authorization: Bearer YOUR_TOKEN" \
-  http://127.0.0.1:8787/mcp
+  http://127.0.0.1:8787/v1/models
 ```
+
+Expect **200** when the service and token are valid. A bare GET to `/mcp` is not a reliable health probe (MCP uses the streamable HTTP protocol).
 
 Startup stderr (journalctl) shows transport, storage path, tools, gateway routes, and LLM routing:
 

@@ -45,7 +45,7 @@ flowchart TB
 
 ## Design principles
 
-1. **One engine** — `Engine.complete()` is the only path for LLM calls. Faces never call LiteLLM directly.
+1. **One engine** — `Engine.complete()` and `Engine.complete_stream()` are the only paths for LLM calls. Faces never call LiteLLM directly.
 2. **Propose-only improver** — `improve_prompt` returns suggestions; it does not auto-apply edits to files or commands.
 3. **Local-first** — SQLite at a configurable path; no Ylang cloud storage.
 4. **Usage from day one** — Every completion writes a row to the `usage` table.
@@ -67,6 +67,7 @@ src/ylang/
 ├── improver/
 │   ├── improver.py      # Propose-only prompt improvement
 │   ├── context.py       # Conversation, facts, reference prompts
+│   ├── reference.py     # Reference-only prompt pass-through (no LLM)
 │   ├── registry.py      # Cursor mode resolution, auto-apply defaults
 │   └── types.py         # ImprovementResult, Change
 ├── library/
@@ -78,7 +79,12 @@ src/ylang/
 │   └── types.py         # Template, TemplateParam, visibility
 ├── usage/
 │   ├── store.py         # Usage row writes and time-window reads
+│   ├── activity.py      # Canonical activity labels at write time
 │   └── aggregates.py    # Summaries by activity, model, cost
+├── gateway/
+│   ├── routes.py        # /v1/chat/completions, /v1/models handlers
+│   ├── mapping.py       # Virtual route-* model resolution
+│   └── openai.py        # Request parsing and response shaping
 ├── importer/            # CSV public-prompt import (CLI + MCP tool)
 ├── mcp/
 │   ├── server.py        # FastMCP wiring and transport
@@ -127,7 +133,7 @@ sequenceDiagram
     Tools->>Ctx: build_improve_context (optional)
     Ctx->>DB: recall facts, list templates
     Tools->>Imp: improver.improve(...)
-    Imp->>Eng: complete(messages, activity="improve")
+    Imp->>Eng: complete(messages, activity=improve:{mode})
     Eng->>Rtr: build_attempt_chain
     loop fallback chain
         Eng->>LLM: completion
@@ -186,6 +192,15 @@ Mode affects improver guidance (e.g. plan mode avoids implementation deliverable
 | `http` | Shared remote instance, MCP + gateway, Cursor hooks | Bearer `YLANG_AUTH_TOKEN` |
 
 HTTP uses FastMCP's streamable HTTP app with gateway routes registered on the same app, wrapped with `BearerTokenMiddleware`.
+
+On HTTP startup, `run_server()` creates **two** `Engine` instances sharing one usage store:
+
+| Engine | `surface` | Used by |
+|--------|-----------|---------|
+| MCP engine | `mcp` | `improve_prompt` and other MCP tools |
+| Gateway engine | `gateway` | `/v1/chat/completions` (only when `YLANG_TRANSPORT=http`) |
+
+Usage rows distinguish faces via the `surface` column.
 
 See [gateway.md](gateway.md) for virtual models and Cursor setup.
 

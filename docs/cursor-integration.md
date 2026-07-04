@@ -62,7 +62,7 @@ To send Cursor **chat/agent** requests through Ylang's activity router (not just
 | API key | Your `YLANG_AUTH_TOKEN` |
 | Model | `route-code` (or `route-search`, `route-reason`, `route-other`) |
 
-Passthrough models (e.g. `ollama/qwen2.5`, `gpt-4o`) are also accepted. See [gateway.md](gateway.md) for curl examples and streaming notes.
+Passthrough models (e.g. `ollama/qwen2.5`, `gpt-4o`) are also accepted. Requires `YLANG_TRANSPORT=http`. See [gateway.md](gateway.md) for curl examples and streaming notes.
 
 MCP improver hooks and gateway routing are complementary: hooks improve prompts; the gateway routes model completions.
 
@@ -113,7 +113,7 @@ The `beforeSubmitPrompt` hook:
 `.cursor/ylang-improved-prompt.md` contains:
 
 - Improved prompt text (agent should follow this)
-- `validated`, `changed`, `rejection_reason` metadata
+- Hook metadata: `validated`, `changed`, `rejection_reason` (these are **hook file fields**, not MCP `improve_prompt` response fields)
 - Original prompt for reference
 
 ### Environment overrides
@@ -140,8 +140,8 @@ The repository includes [`.cursor/rules/00-project.mdc`](../.cursor/rules/00-pro
 `improve_prompt` resolves the active Cursor mode (`agent`, `plan`, `debug`, `ask`, `multitask`) from:
 
 1. Explicit `mode` parameter (if passed by the hook/client)
-2. Tool name
-3. Prompt keywords
+2. MCP tool name defaults (`edit_file`/`grep` → `agent`, `read_file`/`search` → `ask`, `analyze` → `plan`)
+3. Tool name aliases and prompt keywords
 4. Default `agent`
 
 Mode changes the structure and scope of improved prompts (e.g. plan mode avoids implementation deliverables). See [architecture.md](architecture.md#cursor-mode-resolution).

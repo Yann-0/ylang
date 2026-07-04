@@ -20,7 +20,7 @@ All data stays on your machine unless you send it to an LLM provider you configu
 
 ```bash
 git clone https://github.com/Yann-0/ylang.git
-cd ylang
+cd ylang/app          # repository root is the app/ directory
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
@@ -72,7 +72,7 @@ Details: [docs/mcp-tools.md](docs/mcp-tools.md)
 
 ## Architecture (one paragraph)
 
-One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs thin **faces**: MCP (stdio/HTTP) and an **OpenAI-compatible gateway** (`POST /v1/chat/completions`, `GET /v1/models`) on the same HTTP server. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` trigger activity routing; any other model string passthroughs to a named provider. Business logic never lives in face handlers — they only parse, map, and serialize.
+One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs thin **faces**: MCP (stdio/HTTP) and an **OpenAI-compatible gateway** (`POST /v1/chat/completions`, `GET /v1/models`) on the same HTTP server when `YLANG_TRANSPORT=http`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` trigger activity routing; any other model string passthroughs to a named provider. Business logic never lives in face handlers — they only parse, map, and serialize.
 
 ```
 src/ylang/

@@ -51,14 +51,14 @@ erDiagram
 
 ## Table: usage
 
-Written on **every** `Engine.complete()` call.
+Written on **every** `Engine.complete()` or `Engine.complete_stream()` call.
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | INTEGER PK | Auto-increment row id |
 | `timestamp` | TEXT | ISO 8601 UTC |
-| `surface` | TEXT | Calling face (e.g. `mcp`) |
-| `activity` | TEXT | Activity or `improve:<tool>` for improver |
+| `surface` | TEXT | Calling face: `mcp` or `gateway` |
+| `activity` | TEXT | Routing bucket (e.g. `code`, `reason`) or `improve:<cursor_mode>` for improver |
 | `model_used` | TEXT | LiteLLM model string that succeeded |
 | `prompt_tokens` | INTEGER | Prompt token count |
 | `cost` | REAL | Estimated USD cost from LiteLLM |
@@ -68,6 +68,15 @@ Written on **every** `Engine.complete()` call.
 | `success` | INTEGER | 1 if completion succeeded |
 
 Index: `idx_usage_timestamp` on `timestamp`.
+
+### Activity normalization
+
+At insert time, `usage/store.py` calls `normalize_usage_activity()` (`usage/activity.py`):
+
+- Non-improver activities are lowercased (e.g. `code`, `gateway`).
+- `improve:*` suffixes map to canonical Cursor modes: `improve:Cursor` and `improve:cursor-agent` → `improve:agent`; unknown suffixes (e.g. legacy tool slugs) are lowercased only.
+
+The improver logs `improve:{cursor_mode}` (e.g. `improve:agent`, `improve:plan`), not the MCP `tool` name.
 
 ## Table: templates
 

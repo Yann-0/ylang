@@ -1,6 +1,6 @@
 # Ylang documentation
 
-Ylang is a **local-first personal AI efficiency layer**. Phase 1 ships an [MCP](https://modelcontextprotocol.io) server that improves prompts, manages a template library, tracks LLM usage, and remembers user facts — all backed by a single SQLite database.
+Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelcontextprotocol.io) server plus an OpenAI-compatible HTTP gateway that improves prompts, manages a template library, tracks LLM usage, and remembers user facts — all backed by a single SQLite database.
 
 ## Quick links
 
@@ -22,7 +22,7 @@ Ylang is a **local-first personal AI efficiency layer**. Phase 1 ships an [MCP](
 |----------|-------------|
 | [CHANGELOG](../CHANGELOG.md) | Version history |
 | [Dead code audit](dead-code.md) | Unused exports and stub seams (audit only) |
-| [Audit and roadmap](audit-and-roadmap.md) | Phase planning notes |
+| [Audit and roadmap](audit-and-roadmap.md) | **Historical** snapshot (2026-06-30) — superseded by current code |
 | [Backlog shipped](backlog-shipped.md) | Completed backlog items |
 
 ## Status

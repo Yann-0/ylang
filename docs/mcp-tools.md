@@ -52,8 +52,16 @@ Expand a rough user prompt into a structured, actionable specification. **Propos
 |-------|-------------|
 | `validated` | `false` when the LLM output failed structural validation |
 | `rejection_reason` | Present when `validated` is `false` |
-| `auto_apply_default` | Hint whether auto-apply would be appropriate (always conservative for precision tools) |
+| `auto_apply_default` | Hint for hooks/clients: `false` for precision tools (`run_command`, `edit_file`, `execute_sql`) and for `plan`/`debug` modes; `true` otherwise |
 | `changes[].kind` | One of: `clarity`, `format`, `constraint`, `example`, `scope` |
+
+### Behavior notes
+
+- **Reference-only pass-through** — Bare `@file` or `@terminal` references skip the LLM (`validated=True`, original returned). See `improver/reference.py`.
+- **Clarifying prose pass-through** — When the model replies with questions instead of JSON, the original prompt is returned unchanged.
+- **Salvage paths** — Non-JSON or partial JSON model output may be recovered as restructured markdown when structurally valid.
+- **JSON mode** — The improver requests `response_format={"type": "json_object"}` from LiteLLM.
+- **Usage logging** — Activity is logged as `improve:{cursor_mode}` (e.g. `improve:agent`), normalized at write time.
 
 ### Example
 
@@ -261,7 +269,7 @@ Default when none specified: last 7 days.
       "id": 1,
       "timestamp": "2026-07-04T12:00:00+00:00",
       "surface": "mcp",
-      "activity": "improve:edit_file",
+      "activity": "improve:agent",
       "model_used": "anthropic/claude-3-5-sonnet-latest",
       "prompt_tokens": 1200,
       "cost": 0.003,
@@ -298,7 +306,7 @@ Default: last 7 days.
   "total_cost": 1.23,
   "total_tokens": 45000,
   "success_rate": 0.98,
-  "by_activity": {"improve": 80, "code": 70},
+  "by_activity": {"improve:agent": 45, "improve:plan": 20, "code": 70},
   "by_model": {"anthropic/claude-3-5-sonnet-latest": 100},
   "model_costs": {"anthropic/claude-3-5-sonnet-latest": 0.95}
 }
@@ -308,7 +316,7 @@ Default: last 7 days.
 
 ## detect_patterns
 
-Detect repeated improver usage patterns and propose learned templates.
+Detect repeated improver usage by **Cursor mode** (from normalized `improve:*` activity suffixes in usage rows) and propose learned templates.
 
 ### Parameters
 
@@ -323,24 +331,24 @@ Detect repeated improver usage patterns and propose learned templates.
   "ok": true,
   "patterns": [
     {
-      "pattern_id": "add unit tests for",
-      "sample_text": "add unit tests for",
-      "occurrence_count": 5
+      "pattern_id": "agent",
+      "sample_text": "agent",
+      "occurrence_count": 12
     }
   ],
   "proposals": [
     {
-      "suggested_template_id": "learned-add-unit-tests",
-      "name": "Add unit tests",
-      "body": "...",
-      "params": [],
-      "rationale": "Seen 5 times in the last 30 days"
+      "suggested_template_id": "learned-agent",
+      "name": "Learned: Agent",
+      "body": "Reuse the prompt pattern detected from your improver history:\n\n{sample}",
+      "params": [{"name": "sample", "description": "Example text from detected pattern", "default": "agent"}],
+      "rationale": "Detected 12 improver calls for tool 'agent' in the last 30 days."
     }
   ]
 }
 ```
 
-Patterns require at least **3 occurrences** in improver usage rows.
+Patterns require at least **3 occurrences** of the same normalized `improve:*` suffix (e.g. `improve:agent` → pattern id `agent`). Prompt text is **not** clustered today — only activity suffix counts from usage history.
 
 ---
 

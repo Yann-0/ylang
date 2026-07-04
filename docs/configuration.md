@@ -96,6 +96,8 @@ Client config:
 }
 ```
 
+When transport is `http`, the same process also serves the OpenAI gateway at `/v1/*` (see [gateway.md](gateway.md)). Stdio transport has **no** gateway routes.
+
 ---
 
 ## LLM provider API keys
@@ -325,6 +327,23 @@ YLANG_DAILY_BUDGET_USD=5.00
 Ylang reads your local usage history (last 24h) and **boosts models with higher success counts** earlier in the candidate list — without changing your configured `YLANG_MODELS_*` order permanently.
 
 This is automatic when a usage store is wired (always true for the MCP server). No env var to toggle. Effect is subtle: a model you use successfully often may jump ahead of a higher-ranked model that you rarely use.
+
+---
+
+## Usage activity normalization
+
+Every usage row is normalized at write time via `normalize_usage_activity()` in `usage/activity.py`:
+
+| Raw activity | Stored as |
+|--------------|-----------|
+| `improve:Cursor`, `improve:cursor-agent` | `improve:agent` |
+| `improve:plan-mode`, `improve:planning` | `improve:plan` |
+| `improve:debug-mode`, `improve:troubleshoot` | `improve:debug` |
+| `improve:ask-mode`, `improve:question` | `improve:ask` |
+| `code`, `CODE` | `code` |
+| Unknown `improve:*` suffix | `improve:<lowercased-slug>` |
+
+The improver logs `improve:{cursor_mode}` (e.g. `improve:agent`), not the MCP `tool` parameter. Aggregates in `usage_summary` group by these stored labels.
 
 ---
 

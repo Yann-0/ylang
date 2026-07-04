@@ -2,7 +2,7 @@
 
 Audit of `src/ylang/` for unused exports, stub seams, and wiring gaps. **Nothing listed here should be deleted without an explicit decision** — this document flags items only.
 
-Last updated: 2026-07-04 (post gateway face).
+Last updated: 2026-07-04 (full doc sync with gateway face).
 
 Method: read modules under `src/ylang/`, grep for imports and call sites across the repo.
 
@@ -39,8 +39,8 @@ See [gateway.md](gateway.md).
 
 | Symbol | Status |
 |--------|--------|
-| `default_auto_apply` | **Used** by `improver.py`. Phase 1 defaults conservative. |
-| `is_precision_tool` | Exported; **never called** outside `registry.py`. |
+| `default_auto_apply` | **Used** by `improver.py`. Returns `false` for precision tools and `plan`/`debug` modes; `true` for other tools/modes. |
+| `is_precision_tool` | **Used internally** by `default_auto_apply`; not called elsewhere. |
 | `PRECISION_TOOLS` | Exported; **never referenced** outside `registry.py`. |
 | `ChangeKind` | Exported; **never imported** externally. |
 
