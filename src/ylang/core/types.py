@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, TypedDict
 
-Activity = Literal["code", "search", "reason", "other"]
+Activity = Literal["code", "search", "reason", "improve", "other"]
 
 
 class Message(TypedDict):

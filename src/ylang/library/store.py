@@ -8,15 +8,25 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Self
 
+from ylang.core.db import open_connection
 from ylang.library.seeds import ensure_seeds
-from ylang.library.types import Template, TemplateParam, TemplateSource, TemplateSummary
+from ylang.library.types import (
+    Template,
+    TemplateParam,
+    TemplateSource,
+    TemplateSummary,
+    TemplateVisibility,
+)
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS templates (
     template_id    TEXT PRIMARY KEY,
     name           TEXT    NOT NULL,
     latest_version INTEGER NOT NULL DEFAULT 0,
-    updated_at     TEXT    NOT NULL
+    updated_at     TEXT    NOT NULL,
+    visibility     TEXT    NOT NULL DEFAULT 'private'
+        CHECK (visibility IN ('public', 'private')),
+    tags_json      TEXT    NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS template_versions (
@@ -35,10 +45,16 @@ CREATE INDEX IF NOT EXISTS idx_template_versions_source
 """
 
 def _open_connection(db_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(db_path)
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA busy_timeout=5000")
-    return connection
+    return open_connection(db_path)
+
+
+def from_connection(connection: sqlite3.Connection, *, ensure_seed_data: bool = True) -> Library:
+    """Attach a library store to an existing SQLite connection."""
+    library = Library(connection)
+    library._ensure_schema()
+    if ensure_seed_data:
+        ensure_seeds(library)
+    return library
 
 
 def _require_utc(value: datetime) -> None:
@@ -85,6 +101,21 @@ def _params_from_json(raw: str) -> list[TemplateParam]:
     ]
 
 
+def _tags_to_json(tags: list[str]) -> str:
+    return json.dumps(list(tags))
+
+
+def _tags_from_json(raw: str) -> tuple[str, ...]:
+    items = json.loads(raw)
+    return tuple(str(item) for item in items)
+
+
+def _default_visibility(source: TemplateSource) -> TemplateVisibility:
+    if source == "seed":
+        return "public"
+    return "private"
+
+
 class Library:
     """Local versioned prompt template store."""
 
@@ -107,6 +138,21 @@ class Library:
 
     def _ensure_schema(self) -> None:
         self._connection.executescript(_SCHEMA_SQL)
+        columns = {
+            row[1] for row in self._connection.execute("PRAGMA table_info(templates)").fetchall()
+        }
+        if "visibility" not in columns:
+            self._connection.execute(
+                """
+                ALTER TABLE templates
+                ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'
+                    CHECK (visibility IN ('public', 'private'))
+                """
+            )
+        if "tags_json" not in columns:
+            self._connection.execute(
+                "ALTER TABLE templates ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"
+            )
         self._connection.commit()
 
     def save(
@@ -117,18 +163,33 @@ class Library:
         body: str,
         params: list[TemplateParam],
         source: TemplateSource,
+        visibility: TemplateVisibility | None = None,
+        tags: list[str] | None = None,
+        _internal_learned: bool = False,
     ) -> Template:
         """Append a new immutable version for template_id."""
-        if source == "learned":
-            msg = "source='learned' is reserved for the future pattern-detection hook"
+        if source == "learned" and not _internal_learned:
+            msg = "source='learned' is reserved for the pattern-detection pipeline"
             raise ValueError(msg)
         now = datetime.now(timezone.utc)
         row = self._connection.execute(
-            "SELECT latest_version FROM templates WHERE template_id = ?",
+            """
+            SELECT latest_version, visibility, tags_json
+            FROM templates WHERE template_id = ?
+            """,
             (template_id,),
         ).fetchone()
         version = 1 if row is None else int(row[0]) + 1
+        if row is None:
+            resolved_visibility = visibility if visibility is not None else _default_visibility(source)
+            resolved_tags = list(tags) if tags is not None else []
+        else:
+            resolved_visibility = (
+                visibility if visibility is not None else row[1]  # type: ignore[arg-type]
+            )
+            resolved_tags = list(tags) if tags is not None else list(_tags_from_json(str(row[2])))
         params_json = _params_to_json(params)
+        tags_json = _tags_to_json(resolved_tags)
         self._connection.execute(
             """
             INSERT INTO template_versions (
@@ -140,19 +201,28 @@ class Library:
         if row is None:
             self._connection.execute(
                 """
-                INSERT INTO templates (template_id, name, latest_version, updated_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO templates (
+                    template_id, name, latest_version, updated_at, visibility, tags_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (template_id, name, version, _to_iso(now)),
+                (
+                    template_id,
+                    name,
+                    version,
+                    _to_iso(now),
+                    resolved_visibility,
+                    tags_json,
+                ),
             )
         else:
             self._connection.execute(
                 """
                 UPDATE templates
-                SET name = ?, latest_version = ?, updated_at = ?
+                SET name = ?, latest_version = ?, updated_at = ?,
+                    visibility = ?, tags_json = ?
                 WHERE template_id = ?
                 """,
-                (name, version, _to_iso(now), template_id),
+                (name, version, _to_iso(now), resolved_visibility, tags_json, template_id),
             )
         self._connection.commit()
         return Template(
@@ -163,6 +233,8 @@ class Library:
             params=list(params),
             source=source,
             created_at=now,
+            visibility=resolved_visibility,
+            tags=tuple(resolved_tags),
         )
 
     def recall(
@@ -186,7 +258,9 @@ class Library:
             version = int(row[1])
         fetched = self._connection.execute(
             """
-            SELECT t.name, tv.version, tv.body, tv.params_json, tv.source, tv.created_at
+            SELECT
+                t.name, tv.version, tv.body, tv.params_json, tv.source, tv.created_at,
+                t.visibility, t.tags_json
             FROM template_versions tv
             JOIN templates t ON t.template_id = tv.template_id
             WHERE tv.template_id = ? AND tv.version = ?
@@ -204,12 +278,15 @@ class Library:
             params=params,
             source=fetched[4],  # type: ignore[arg-type]
             created_at=_from_iso(str(fetched[5])),
+            visibility=fetched[6],  # type: ignore[arg-type]
+            tags=_tags_from_json(str(fetched[7])),
         )
 
     def list(
         self,
         *,
         source: TemplateSource | None = None,
+        visibility: TemplateVisibility | None = None,
     ) -> list[TemplateSummary]:
         """Return latest-version metadata for each template."""
         rows = self._connection.execute(
@@ -220,14 +297,17 @@ class Library:
                 t.latest_version,
                 t.updated_at,
                 tv.source,
-                tv.params_json
+                tv.params_json,
+                t.visibility,
+                t.tags_json
             FROM templates t
             JOIN template_versions tv
                 ON t.template_id = tv.template_id AND t.latest_version = tv.version
-            WHERE ? IS NULL OR tv.source = ?
+            WHERE (? IS NULL OR tv.source = ?)
+              AND (? IS NULL OR t.visibility = ?)
             ORDER BY t.template_id
             """,
-            (source, source),
+            (source, source, visibility, visibility),
         ).fetchall()
         summaries: list[TemplateSummary] = []
         for row in rows:
@@ -240,6 +320,8 @@ class Library:
                     source=row[4],  # type: ignore[arg-type]
                     updated_at=_from_iso(str(row[3])),
                     param_names=tuple(param.name for param in params),
+                    visibility=row[6],  # type: ignore[arg-type]
+                    tags=_tags_from_json(str(row[7])),
                 )
             )
         return summaries
@@ -271,3 +353,22 @@ class Library:
 def open_library(db_path: Path) -> Library:
     """Open the prompt library at the given path."""
     return Library.open(db_path)
+
+
+def save_learned_template(
+    library: Library,
+    template_id: str,
+    *,
+    name: str,
+    body: str,
+    params: list[TemplateParam],
+) -> Template:
+    """Save a learned template from the pattern-detection pipeline."""
+    return library.save(
+        template_id,
+        name=name,
+        body=body,
+        params=params,
+        source="learned",
+        _internal_learned=True,
+    )

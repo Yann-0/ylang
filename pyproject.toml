@@ -7,7 +7,10 @@ name = "ylang"
 version = "0.1.0"
 description = "Personal AI efficiency layer – MCP server (Phase 1)"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
+keywords = ["mcp", "llm", "prompt-engineering", "cursor", "litellm"]
+authors = [{ name = "Yann" }]
 dependencies = [
     "mcp>=1.27,<2",
     "litellm",
@@ -18,7 +21,15 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
+    "ruff>=0.9",
 ]
+
+[tool.ruff]
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["E402"]
 
 [project.scripts]
 ylang = "ylang.__main__:main"

@@ -7,10 +7,25 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from ylang.core.memory import RememberResult
+from ylang.core.memory import Fact, RememberResult
+from ylang.importer import DEFAULT_PROMPTS_URL, import_prompts
+from ylang.improver.context import ImproveContext, build_improve_context
 from ylang.improver.types import Change, ImprovementResult
-from ylang.library.types import Template, TemplateParam, TemplateSource, TemplateSummary
+from ylang.library.patterns import (
+    TemplateProposal,
+    detect_patterns as run_pattern_detection,
+    propose_template_from_pattern,
+)
+from ylang.library.store import save_learned_template as persist_learned_template
+from ylang.library.types import (
+    Template,
+    TemplateParam,
+    TemplateSource,
+    TemplateSummary,
+    TemplateVisibility,
+)
 from ylang.mcp.deps import YlangDeps
+from ylang.usage.aggregates import summarize_usage
 from ylang.usage.store import UsageRecord, UsageWindow
 
 
@@ -18,10 +33,36 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
     """Register all Ylang MCP tools on the server."""
 
     @server.tool()
-    def improve_prompt(text: str, tool: str, model: str) -> dict[str, Any]:
-        """Propose-only structural prompt edits; never applies changes."""
-        result = deps.improver.improve(text, tool, model=model)
-        return _serialize_improvement(result)
+    def improve_prompt(
+        text: str,
+        tool: str,
+        model: str,
+        use_context: bool = True,
+        conversation: list[dict[str, str]] | None = None,
+        mode: str | None = None,
+    ) -> dict[str, Any]:
+        """Expand rough prompts into full specs; mode-aware for Cursor agent/plan/debug/ask/multitask."""
+        context: ImproveContext | None = None
+        if use_context:
+            context = build_improve_context(
+                text,
+                tool,
+                conversation,
+                deps.library,
+                deps.memory,
+                mode=mode,
+            )
+        result = deps.improver.improve(
+            text,
+            tool,
+            model=model,
+            context=context,
+            mode=mode,
+        )
+        payload = _serialize_improvement(result)
+        if use_context and context is not None:
+            payload["context_used"] = _serialize_context_used(context, conversation)
+        return payload
 
     @server.tool()
     def save_template(
@@ -29,16 +70,27 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
         name: str,
         body: str,
         params: list[dict[str, str | None]],
+        visibility: str = "private",
+        tags: list[str] | None = None,
     ) -> dict[str, Any]:
         """Save a new user template version to the local library."""
-        template = deps.library.save(
-            template_id,
-            name=name,
-            body=body,
-            params=_parse_params(params),
-            source="user",
-        )
-        return _serialize_template(template)
+        try:
+            parsed_visibility = _parse_visibility(visibility)
+            parsed_tags = list(tags) if tags is not None else []
+            template = deps.library.save(
+                template_id,
+                name=name,
+                body=body,
+                params=_parse_params(params),
+                source="user",
+                visibility=parsed_visibility,
+                tags=parsed_tags,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        payload = _serialize_template(template)
+        payload["ok"] = True
+        return payload
 
     @server.tool()
     def recall_template(
@@ -53,18 +105,47 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
         payload = _serialize_template(template)
         payload["found"] = True
         if param_values is not None:
-            payload["rendered"] = deps.library.render(
-                template_id,
-                param_values,
-                version=version,
-            )
+            try:
+                payload["rendered"] = deps.library.render(
+                    template_id,
+                    param_values,
+                    version=version,
+                )
+            except KeyError as exc:
+                return {"found": True, "ok": False, "error": str(exc)}
         return payload
 
     @server.tool()
-    def list_templates(source: str | None = None) -> list[dict[str, Any]]:
+    def list_templates(
+        source: str | None = None,
+        visibility: str | None = None,
+    ) -> dict[str, Any]:
         """List templates with latest-version metadata."""
-        parsed_source = _parse_source(source)
-        return [_serialize_summary(item) for item in deps.library.list(source=parsed_source)]
+        try:
+            parsed_source = _parse_source(source)
+            parsed_visibility = _parse_visibility(visibility) if visibility is not None else None
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "templates": []}
+        templates = [
+            _serialize_summary(item)
+            for item in deps.library.list(source=parsed_source, visibility=parsed_visibility)
+        ]
+        return {"ok": True, "templates": templates}
+
+    @server.tool()
+    def import_public_prompts(url: str | None = None) -> dict[str, Any]:
+        """Import a public prompts CSV into the local library (default: awesome-chatgpt-prompts)."""
+        source_url = url or DEFAULT_PROMPTS_URL
+        try:
+            result = import_prompts(deps.library, url=source_url)
+        except (OSError, ValueError) as exc:
+            return {"ok": False, "error": str(exc), "source_url": source_url}
+        return {
+            "ok": True,
+            "imported": result.imported,
+            "skipped": result.skipped,
+            "source_url": source_url,
+        }
 
     @server.tool()
     def remember(fact: str, scope: str) -> dict[str, Any]:
@@ -76,29 +157,114 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
         return _serialize_remember(result)
 
     @server.tool()
+    def recall_facts(
+        scope: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """Return persisted facts, newest first, optionally filtered by scope."""
+        try:
+            facts = deps.memory.recall(scope=scope, limit=limit)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "facts": []}
+        return {
+            "ok": True,
+            "facts": [_serialize_fact(fact) for fact in facts],
+        }
+
+    @server.tool()
     def recall_usage(
         last_hours: int | None = None,
         last_days: int | None = None,
         since: str | None = None,
         until: str | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> dict[str, Any]:
         """Return raw usage rows for a time window."""
-        window = _parse_window(
-            last_hours=last_hours,
-            last_days=last_days,
-            since=since,
-            until=until,
-        )
-        return [_serialize_usage(row) for row in deps.store.recall_usage(window)]
+        try:
+            window = _parse_window(
+                last_hours=last_hours,
+                last_days=last_days,
+                since=since,
+                until=until,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "rows": []}
+        rows = [_serialize_usage(row) for row in deps.store.recall_usage(window)]
+        return {"ok": True, "rows": rows}
+
+    @server.tool()
+    def usage_summary(
+        last_hours: int | None = None,
+        last_days: int | None = None,
+    ) -> dict[str, Any]:
+        """Return aggregated usage statistics for a time window."""
+        try:
+            window = _parse_window(
+                last_hours=last_hours,
+                last_days=last_days,
+                since=None,
+                until=None,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        summary = summarize_usage(deps.store, window)
+        return {
+            "ok": True,
+            "total_requests": summary.total_requests,
+            "total_cost": summary.total_cost,
+            "total_tokens": summary.total_tokens,
+            "success_rate": summary.success_rate,
+            "by_activity": summary.by_activity,
+            "by_model": summary.by_model,
+            "model_costs": summary.model_costs,
+        }
+
+    @server.tool()
+    def detect_patterns(window_days: int = 30) -> dict[str, Any]:
+        """Detect repeated improver usage patterns and propose learned templates."""
+        patterns = run_pattern_detection(window_days=window_days)
+        proposals = []
+        for pattern in patterns:
+            proposal = propose_template_from_pattern(pattern)
+            if proposal is not None:
+                proposals.append(_serialize_proposal(proposal))
+        return {"ok": True, "patterns": [_serialize_pattern(p) for p in patterns], "proposals": proposals}
+
+    @server.tool()
+    def save_learned_template(
+        template_id: str,
+        name: str,
+        body: str,
+        params: list[dict[str, str | None]],
+    ) -> dict[str, Any]:
+        """Save a learned template from an accepted pattern proposal."""
+        try:
+            template = persist_learned_template(
+                deps.library,
+                template_id,
+                name=name,
+                body=body,
+                params=_parse_params(params),
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        payload = _serialize_template(template)
+        payload["ok"] = True
+        return payload
 
 
 def _serialize_improvement(result: ImprovementResult) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "original": result.original,
         "improved": result.improved,
         "changes": [_serialize_change(change) for change in result.changes],
         "auto_apply_default": result.auto_apply_default,
+        "validated": result.validated,
+        "cursor_mode": result.cursor_mode,
+        "mode_source": result.mode_source,
     }
+    if result.rejection_reason is not None:
+        payload["rejection_reason"] = result.rejection_reason
+    return payload
 
 
 def _serialize_change(change: Change) -> dict[str, Any]:
@@ -119,6 +285,8 @@ def _serialize_template(template: Template) -> dict[str, Any]:
         "params": [_serialize_param(param) for param in template.params],
         "source": template.source,
         "created_at": template.created_at.isoformat(),
+        "visibility": template.visibility,
+        "tags": list(template.tags),
     }
 
 
@@ -138,6 +306,8 @@ def _serialize_summary(summary: TemplateSummary) -> dict[str, Any]:
         "source": summary.source,
         "updated_at": summary.updated_at.isoformat(),
         "param_names": list(summary.param_names),
+        "visibility": summary.visibility,
+        "tags": list(summary.tags),
     }
 
 
@@ -175,6 +345,40 @@ def _parse_source(source: str | None) -> TemplateSource | None:
         msg = "source must be seed, user, or learned"
         raise ValueError(msg)
     return source  # type: ignore[return-value]
+
+
+def _parse_visibility(visibility: str | None) -> TemplateVisibility:
+    if visibility is None:
+        return "private"
+    if visibility not in ("public", "private"):
+        msg = "visibility must be public or private"
+        raise ValueError(msg)
+    return visibility  # type: ignore[return-value]
+
+
+def _serialize_context_used(
+    context: ImproveContext,
+    conversation: list[dict[str, str]] | None,
+) -> dict[str, Any]:
+    conversation_turns = 0
+    if conversation and context.conversation_block:
+        conversation_turns = len(
+            [line for line in context.conversation_block.splitlines() if line.strip()]
+        )
+    facts_count = 0
+    if context.facts_block:
+        facts_count = len(
+            [line for line in context.facts_block.splitlines() if line.strip()]
+        )
+    reference_prompts_count = 0
+    if context.reference_prompts_block:
+        reference_prompts_count = context.reference_prompts_block.count("### ")
+    return {
+        "conversation_turns": conversation_turns,
+        "facts_count": facts_count,
+        "reference_prompts_count": reference_prompts_count,
+        "had_conversation_input": bool(conversation),
+    }
 
 
 def _parse_window(
@@ -215,4 +419,34 @@ def _serialize_remember(result: RememberResult) -> dict[str, Any]:
         "fact": result.fact,
         "scope": result.scope,
         "created_at": result.created_at.isoformat(),
+    }
+
+
+def _serialize_fact(fact: Fact) -> dict[str, Any]:
+    return {
+        "id": fact.id,
+        "fact": fact.fact,
+        "scope": fact.scope,
+        "created_at": fact.created_at.isoformat(),
+    }
+
+
+def _serialize_pattern(pattern: object) -> dict[str, Any]:
+    from ylang.library.patterns import DetectedPattern
+
+    assert isinstance(pattern, DetectedPattern)
+    return {
+        "pattern_id": pattern.pattern_id,
+        "sample_text": pattern.sample_text,
+        "occurrence_count": pattern.occurrence_count,
+    }
+
+
+def _serialize_proposal(proposal: TemplateProposal) -> dict[str, Any]:
+    return {
+        "suggested_template_id": proposal.suggested_template_id,
+        "name": proposal.name,
+        "body": proposal.body,
+        "params": [_serialize_param(param) for param in proposal.params],
+        "rationale": proposal.rationale,
     }

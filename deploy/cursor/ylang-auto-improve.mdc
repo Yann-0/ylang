@@ -1,0 +1,17 @@
+---
+description: Use Ylang-improved task spec written by the beforeSubmitPrompt hook
+alwaysApply: true
+---
+
+# Ylang auto-improve (global hook)
+
+A global Cursor hook runs **Ylang `improve_prompt`** on every user message before the agent starts.
+
+## What you must do
+
+1. **Read** `.cursor/ylang-improved-prompt.md` in the workspace (if it exists).
+2. Treat the **Improved prompt** section as the **canonical task specification** for the current turn.
+3. The raw user chat message may be a rough draft; prefer the improved spec when they differ.
+4. Do **not** call `improve_prompt` again unless the user explicitly asks to re-improve or the file is missing/stale.
+
+If the file is absent, proceed with the user message as written.

@@ -1,0 +1,21 @@
+[Unit]
+Description=Ylang MCP server (shared)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ylang
+Group=ylang
+EnvironmentFile=/srv/ylang/ylang.env
+ExecStartPre=+/srv/ylang/app/deploy/setup-data-dir.sh /srv/ylang/data
+ExecStart=/srv/ylang/.venv/bin/python -m ylang
+Restart=always
+RestartSec=5
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/ylang/data
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

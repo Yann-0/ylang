@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Literal
 
 TemplateSource = Literal["seed", "user", "learned"]
+TemplateVisibility = Literal["public", "private"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +30,8 @@ class Template:
     params: list[TemplateParam]
     source: TemplateSource
     created_at: datetime
+    visibility: TemplateVisibility = "private"
+    tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,3 +44,5 @@ class TemplateSummary:
     source: TemplateSource
     updated_at: datetime
     param_names: tuple[str, ...]
+    visibility: TemplateVisibility = "private"
+    tags: tuple[str, ...] = ()

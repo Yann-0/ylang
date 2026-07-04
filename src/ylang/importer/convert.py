@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import sys
 from typing import TYPE_CHECKING
 
 from ylang.importer.types import ParsedPrompt
@@ -67,6 +68,7 @@ def normalize_body(body: str) -> tuple[str, list[TemplateParam]]:
 
 def parse_csv_rows(csv_text: str) -> list[tuple[str, str]]:
     """Parse awesome-chatgpt-prompts CSV into (act, prompt) pairs."""
+    csv.field_size_limit(sys.maxsize)
     reader = csv.DictReader(io.StringIO(csv_text))
     if reader.fieldnames is None or "act" not in reader.fieldnames or "prompt" not in reader.fieldnames:
         msg = "CSV must include act and prompt columns"

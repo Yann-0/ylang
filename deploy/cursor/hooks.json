@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "./hooks/ylang-session-start.py"
+      }
+    ],
+    "beforeSubmitPrompt": [
+      {
+        "command": "./hooks/ylang-improve-prompt.py",
+        "timeout": 120
+      }
+    ],
+    "beforeMCPExecution": [
+      {
+        "command": "./hooks/ylang-allow-mcp.sh",
+        "matcher": "ylang"
+      }
+    ]
+  }
+}

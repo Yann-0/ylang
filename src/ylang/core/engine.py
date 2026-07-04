@@ -2,27 +2,30 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from typing import TYPE_CHECKING, Any
 
 import litellm
 from litellm.caching.caching import Cache
 
+from ylang.core.model_router import ModelRouter
 from ylang.core.types import Activity, CompletionResult, Message
 from ylang.settings import (
-    DEFAULT_ACTIVITY_MODELS,
     DEFAULT_FALLBACK_MODEL,
     ProviderKeys,
     api_key_for_model,
-    effective_activity_models,
-    resolve_available_model,
 )
 from ylang.usage.store import UsageStore
 
 if TYPE_CHECKING:
     from ylang.settings import Settings
 
+logger = logging.getLogger(__name__)
+
 FALLBACK_MODEL: str = DEFAULT_FALLBACK_MODEL
+
+_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 
 if litellm.cache is None:
     litellm.cache = Cache()
@@ -36,20 +39,34 @@ class Engine:
         store: UsageStore,
         *,
         surface: str,
-        activity_models: dict[Activity, str] | None = None,
+        router: ModelRouter | None = None,
+        activity_model_lists: dict[Activity, list[str]] | None = None,
         provider_keys: ProviderKeys | None = None,
         fallback_model: str = FALLBACK_MODEL,
+        quality_band: int | None = None,
+        provider_cooldown_seconds: int | None = None,
     ) -> None:
         self._store = store
         self._surface = surface
-        self._activity_models = activity_models or dict(DEFAULT_ACTIVITY_MODELS)
-        self._provider_keys = provider_keys or ProviderKeys()
-        self._fallback_model = fallback_model
-        self._effective_activity_models = effective_activity_models(
-            self._activity_models,
-            self._provider_keys,
-            self._fallback_model,
-        )
+        if router is not None:
+            self._router = router
+        else:
+            router_kwargs: dict[str, object] = {
+                "provider_keys": provider_keys or ProviderKeys(),
+                "fallback_model": fallback_model,
+            }
+            if activity_model_lists is not None:
+                router_kwargs["activity_model_lists"] = activity_model_lists
+            if quality_band is not None:
+                router_kwargs["quality_band"] = quality_band
+            if provider_cooldown_seconds is not None:
+                router_kwargs["provider_cooldown_seconds"] = provider_cooldown_seconds
+            self._router = ModelRouter(**router_kwargs)  # type: ignore[arg-type]
+
+    @property
+    def router(self) -> ModelRouter:
+        """Model router used for selection, chaining, and cooldown tracking."""
+        return self._router
 
     @classmethod
     def from_settings(
@@ -63,9 +80,7 @@ class Engine:
         return cls(
             store,
             surface=surface,
-            activity_models=settings.activity_models,
-            provider_keys=settings.provider_keys,
-            fallback_model=settings.fallback_model,
+            router=ModelRouter.from_settings(settings, usage_store=store),
         )
 
     def complete(
@@ -79,39 +94,44 @@ class Engine:
         improver_accepted: bool = False,
     ) -> CompletionResult:
         """Resolve model from activity, complete via LiteLLM, write usage."""
-        if model is not None:
-            resolved_model = model
-        elif activity in self._effective_activity_models:
-            resolved_model = self._effective_activity_models[activity]  # type: ignore[index]
-        else:
-            resolved_model = self._effective_activity_models["other"]
-
-        resolved_model = resolve_available_model(
-            resolved_model,
-            self._activity_models,
-            self._provider_keys,
-            self._fallback_model,
+        attempt_chain = self._router.build_attempt_chain(
+            activity,
+            explicit_model=model,
         )
-        api_key = api_key_for_model(resolved_model, self._provider_keys)
 
         started = time.perf_counter()
         content = ""
-        model_used = resolved_model
+        model_used = attempt_chain[0] if attempt_chain else self._router.fallback_model
         prompt_tokens = 0
         cost = 0.0
         error: str | None = None
         success = False
-        try:
-            content, model_used, prompt_tokens, cost = _call_litellm(
-                resolved_model,
-                messages,
-                fallback_model=self._fallback_model,
-                api_key=api_key,
-                response_format=response_format,
-            )
-            success = True
-        except Exception as exc:
-            error = str(exc)
+
+        for index, candidate in enumerate(attempt_chain):
+            api_key = api_key_for_model(candidate, self._router.provider_keys)
+            try:
+                content, model_used, prompt_tokens, cost = _call_litellm(
+                    candidate,
+                    messages,
+                    api_key=api_key,
+                    response_format=response_format,
+                )
+                success = True
+                break
+            except Exception as exc:
+                error = str(exc)
+                if index + 1 >= len(attempt_chain) or not _should_try_next_model(exc):
+                    break
+                next_model = attempt_chain[index + 1]
+                if _is_retryable_llm_error(exc):
+                    self._router.cooldown.mark_failed(candidate)
+                logger.warning(
+                    "LLM fallback: %s -> %s (%s)",
+                    candidate,
+                    next_model,
+                    _error_reason(exc),
+                )
+
         latency_ms = int((time.perf_counter() - started) * 1000)
         self._store.write_usage(
             surface=self._surface,
@@ -135,19 +155,52 @@ class Engine:
         )
 
 
+def _should_try_next_model(exc: BaseException) -> bool:
+    """Return True when the attempt chain should continue to the next candidate."""
+    if _is_retryable_llm_error(exc):
+        return True
+    if isinstance(exc, litellm.NotFoundError):
+        return True
+    if isinstance(exc, litellm.BadRequestError):
+        message = str(exc)
+        return "Provider NOT provided" in message or "model" in message.lower()
+    return False
+
+
+def _is_retryable_llm_error(exc: BaseException) -> bool:
+    """Return True for rate limits and server errors that should fall through."""
+    if isinstance(
+        exc,
+        (
+            litellm.RateLimitError,
+            litellm.ServiceUnavailableError,
+            litellm.BadGatewayError,
+            litellm.InternalServerError,
+        ),
+    ):
+        return True
+    status_code = getattr(exc, "status_code", None)
+    return status_code in _RETRYABLE_STATUS_CODES
+
+
+def _error_reason(exc: BaseException) -> str:
+    status_code = getattr(exc, "status_code", None)
+    if status_code is not None:
+        return f"HTTP {status_code}"
+    return type(exc).__name__
+
+
 def _call_litellm(
     model: str,
     messages: list[Message],
     *,
-    fallback_model: str,
     api_key: str | None = None,
     response_format: dict[str, str] | None = None,
 ) -> tuple[str, str, int, float]:
-    """Call LiteLLM with caching and fallback; return content and usage metadata."""
+    """Call LiteLLM with caching; return content and usage metadata."""
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,
-        "fallbacks": [fallback_model],
         "caching": True,
     }
     if api_key is not None:

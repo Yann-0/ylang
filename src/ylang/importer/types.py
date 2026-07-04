@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ylang.library.types import TemplateParam
+
 
 @dataclass(frozen=True, slots=True)
 class ImportResult:
@@ -11,9 +13,6 @@ class ImportResult:
 
     imported: int
     skipped: int
-
-
-from ylang.library.types import TemplateParam
 
 
 @dataclass(frozen=True, slots=True)

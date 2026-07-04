@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal, Self
 
+from ylang.core.db import open_connection
+
 FactScope = Literal["private", "shareable"]
 
 _SCHEMA_SQL = """
@@ -86,8 +88,11 @@ class MemoryStore:
     @classmethod
     def open(cls, db_path: Path) -> Self:
         """Open (or create) the memory database file."""
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        connection = sqlite3.connect(db_path)
+        return cls.from_connection(open_connection(db_path))
+
+    @classmethod
+    def from_connection(cls, connection: sqlite3.Connection) -> Self:
+        """Attach a memory store to an existing SQLite connection."""
         store = cls(connection)
         store._ensure_schema()
         return store

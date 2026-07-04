@@ -5,7 +5,7 @@ alwaysApply: true
 Ylang is a personal AI efficiency layer: an MCP server (first), later a desktop gateway, over ONE shared core engine. Phase 1 only.
 - ONE core engine; faces are thin adapters; never duplicate logic.
 - Keep the surface small enough for one person to understand every file.
-- Improver is PROPOSE-ONLY: returns {original, improved, changes}; never silently overrides; auto-apply defaults OFF for precision tools.
+- Improver is PROPOSE-ONLY: returns {original, improved, changes}; expands to full specs with pertinent scope; auto-apply defaults OFF for precision tools.
 - Local-first by default; storage location is a parameter.
 - Write the usage store from day one even though nothing reads it yet.
 - No features beyond Phase 1 (no optimizer, provenance, GitHub/KB sources, hosted/team). If a change implies one, stop and flag it.

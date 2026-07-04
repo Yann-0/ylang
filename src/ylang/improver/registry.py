@@ -1,6 +1,13 @@
-"""Tool registry for precision handling and auto-apply defaults."""
+"""Tool registry, Cursor mode resolution, and auto-apply defaults."""
 
 from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Literal
+
+CursorMode = Literal["agent", "plan", "debug", "ask", "multitask"]
+ModeSource = Literal["explicit", "tool", "prompt", "default"]
 
 PRECISION_TOOLS: frozenset[str] = frozenset(
     {
@@ -10,13 +17,161 @@ PRECISION_TOOLS: frozenset[str] = frozenset(
     }
 )
 
+_CANONICAL_MODES: frozenset[str] = frozenset({"agent", "plan", "debug", "ask", "multitask"})
+
+_TOOL_ALIASES: dict[str, CursorMode] = {
+    "agent": "agent",
+    "cursor-agent": "agent",
+    "cursor": "agent",
+    "cursor_agent": "agent",
+    "implementation": "agent",
+    "plan": "plan",
+    "planning": "plan",
+    "plan-mode": "plan",
+    "plan_mode": "plan",
+    "debug": "debug",
+    "debug-mode": "debug",
+    "debug_mode": "debug",
+    "troubleshoot": "debug",
+    "ask": "ask",
+    "ask-mode": "ask",
+    "ask_mode": "ask",
+    "question": "ask",
+    "multitask": "multitask",
+    "multitask-mode": "multitask",
+    "multitask_mode": "multitask",
+    "multi-task": "multitask",
+}
+
+_MCP_TOOL_DEFAULT_MODE: dict[str, CursorMode] = {
+    "edit_file": "agent",
+    "run_command": "agent",
+    "execute_sql": "agent",
+    "grep": "agent",
+    "read_file": "ask",
+    "search": "ask",
+    "analyze": "plan",
+}
+
+_PROMPT_MODE_PATTERNS: tuple[tuple[re.Pattern[str], CursorMode, int], ...] = (
+    (re.compile(r"\b(debug|fix the bug|stack trace|reproduc|root cause|failing test)\b", re.I), "debug", 3),
+    (re.compile(r"\b(plan|roadmap|architecture|design approach|trade-?offs?)\b", re.I), "plan", 2),
+    (re.compile(r"\b(explain|what is|how does|why does|describe|clarify)\b", re.I), "ask", 2),
+    (re.compile(r"\b(parallel|multitask|workstreams?|sub-?agents?)\b", re.I), "multitask", 3),
+    (re.compile(r"\b(implement|refactor|add feature|build|write tests?|fix)\b", re.I), "agent", 2),
+)
+
+_MODE_GUIDANCE: dict[CursorMode, str] = {
+    "agent": (
+        "Cursor mode: agent — expand into an implementation-ready spec. "
+        "Use Goal / Deliverables / Constraints / Test plan / Definition of done when helpful. "
+        "Implementation, tests, and docs scope are allowed when implied."
+    ),
+    "plan": (
+        "Cursor mode: plan — planning only, no implementation. "
+        "Prefer Goal / Context / Options / Recommended approach / Risks / Open questions. "
+        "Do not add code edits, file changes, or run-test deliverables unless the user asked to plan them."
+    ),
+    "ask": (
+        "Cursor mode: ask — clarify and sharpen the question; optimize for a direct answer. "
+        "Prefer Question / Context / Answer format / Constraints. "
+        "Do not expand into implementation specs, deliverables, or definition-of-done checklists."
+    ),
+    "debug": (
+        "Cursor mode: debug — hypothesis-driven troubleshooting. "
+        "Prefer Symptom / Repro steps / Expected vs actual / Hypotheses / Investigation plan / Success criteria. "
+        "Keep scope tight; avoid unrelated feature work."
+    ),
+    "multitask": (
+        "Cursor mode: multitask — decompose into parallel workstreams. "
+        "Prefer Goal / Workstreams (with owners or ordering) / Dependencies / Integration / Done criteria. "
+        "Split unrelated work explicitly; keep each stream actionable."
+    ),
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCursorMode:
+    """A normalized Cursor interaction mode and how it was chosen."""
+
+    mode: CursorMode
+    source: ModeSource
+    tool: str
+
 
 def is_precision_tool(tool: str) -> bool:
     """Return True when the tool must never auto-apply improvements."""
-    return tool in PRECISION_TOOLS
+    return _normalize_key(tool) in PRECISION_TOOLS
 
 
-def default_auto_apply(tool: str) -> bool:
-    """Return the default auto-apply hint for a tool (Phase 1: always False)."""
-    _ = tool
-    return False
+def default_auto_apply(tool: str, mode: CursorMode) -> bool:
+    """Return the default auto-apply hint for a tool and Cursor mode."""
+    if is_precision_tool(tool) or mode in ("debug", "plan"):
+        return False
+    return True
+
+
+def mode_guidance(mode: CursorMode) -> str:
+    """Return LLM guidance for optimizing prompts in the given Cursor mode."""
+    return _MODE_GUIDANCE[mode]
+
+
+def resolve_cursor_mode(
+    tool: str,
+    text: str,
+    *,
+    explicit_mode: str | None = None,
+) -> ResolvedCursorMode:
+    """Resolve Cursor mode from explicit hint, tool name, or prompt content."""
+    if explicit_mode is not None:
+        normalized = _normalize_key(explicit_mode)
+        if normalized in _CANONICAL_MODES:
+            return ResolvedCursorMode(
+                mode=normalized,  # type: ignore[arg-type]
+                source="explicit",
+                tool=tool,
+            )
+        if normalized in _TOOL_ALIASES:
+            return ResolvedCursorMode(
+                mode=_TOOL_ALIASES[normalized],
+                source="explicit",
+                tool=tool,
+            )
+
+    tool_key = _normalize_key(tool)
+    if tool_key in _TOOL_ALIASES:
+        return ResolvedCursorMode(mode=_TOOL_ALIASES[tool_key], source="tool", tool=tool)
+    if tool_key in _MCP_TOOL_DEFAULT_MODE:
+        return ResolvedCursorMode(
+            mode=_MCP_TOOL_DEFAULT_MODE[tool_key],
+            source="tool",
+            tool=tool,
+        )
+
+    inferred = _infer_mode_from_prompt(text)
+    if inferred is not None:
+        return ResolvedCursorMode(mode=inferred, source="prompt", tool=tool)
+
+    return ResolvedCursorMode(mode="agent", source="default", tool=tool)
+
+
+def _normalize_key(value: str) -> str:
+    return value.strip().lower().replace(" ", "-")
+
+
+def _infer_mode_from_prompt(text: str) -> CursorMode | None:
+    """Score prompt keywords and return the best matching mode, if any."""
+    scores: dict[CursorMode, int] = {
+        "agent": 0,
+        "plan": 0,
+        "debug": 0,
+        "ask": 0,
+        "multitask": 0,
+    }
+    for pattern, mode, weight in _PROMPT_MODE_PATTERNS:
+        if pattern.search(text):
+            scores[mode] += weight
+    best_mode = max(scores, key=lambda key: scores[key])
+    if scores[best_mode] <= 0:
+        return None
+    return best_mode

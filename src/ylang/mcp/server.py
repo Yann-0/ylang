@@ -8,22 +8,27 @@ import anyio
 from mcp.server.fastmcp import FastMCP
 
 from ylang.core import Engine
-from ylang.core.memory import open_memory
+from ylang.core.stores import open_stores
 from ylang.improver import Improver
-from ylang.library import open_library
+from ylang.library.pattern_detector import UsagePatternDetector
+from ylang.library.patterns import register_pattern_detector
 from ylang.mcp.auth import BearerTokenMiddleware
 from ylang.mcp.deps import YlangDeps
 from ylang.mcp.tools import register_tools
 from ylang.settings import Settings
-from ylang.usage.store import open_store
 
 _TOOL_NAMES = (
     "improve_prompt",
     "save_template",
     "recall_template",
     "list_templates",
+    "import_public_prompts",
     "remember",
+    "recall_facts",
     "recall_usage",
+    "usage_summary",
+    "detect_patterns",
+    "save_learned_template",
 )
 
 
@@ -81,14 +86,20 @@ def run_server() -> None:
     """Wire dependencies and run the MCP server."""
     settings = Settings.load()
     path = settings.resolved_storage_path()
-    store = open_store(path)
-    library = open_library(path)
-    memory = open_memory(path)
-    engine = Engine(store, surface="mcp")
+    stores = open_stores(path)
+    register_pattern_detector(UsagePatternDetector(stores.store))
+    engine = Engine.from_settings(stores.store, surface="mcp", settings=settings)
     improver = Improver(engine)
-    deps = YlangDeps(improver=improver, library=library, store=store, memory=memory)
+    deps = YlangDeps(
+        improver=improver,
+        library=stores.library,
+        store=stores.store,
+        memory=stores.memory,
+        surface="mcp",
+    )
     server = create_server(deps, settings)
     _print_connection_details(settings)
+    settings.log_llm_config(router=engine.router)
     try:
         if settings.transport == "stdio":
             server.run(transport="stdio")
@@ -99,8 +110,20 @@ def run_server() -> None:
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            _run_http(server, settings)
+            try:
+                _run_http(server, settings)
+            except OSError as exc:
+                if exc.errno in (98, 10048):
+                    print(
+                        f"error: port {settings.port} already in use.\n"
+                        "  If ylang runs as a systemd service (production default):\n"
+                        "    sudo systemctl restart ylang\n"
+                        "  Do not start a second instance with python -m ylang while the service runs.\n"
+                        "  Manual stop (only if not using systemd, as the ylang user):\n"
+                        f"    fuser -k {settings.port}/tcp",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
+                raise
     finally:
-        library.close()
-        store.close()
-        memory.close()
+        stores.close()

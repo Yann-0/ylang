@@ -19,6 +19,7 @@ class SeedTemplateSpec:
     name: str
     body: str
     params: list[TemplateParam]
+    tags: tuple[str, ...] = ()
 
 
 SEED_TEMPLATES: list[SeedTemplateSpec] = [
@@ -30,6 +31,7 @@ SEED_TEMPLATES: list[SeedTemplateSpec] = [
             TemplateParam(name="text", description="Text to summarize"),
             TemplateParam(name="length", description="Target word count", default="100"),
         ],
+        tags=("summarize", "text", "summary"),
     ),
     SeedTemplateSpec(
         template_id="code-explain",
@@ -39,6 +41,7 @@ SEED_TEMPLATES: list[SeedTemplateSpec] = [
             TemplateParam(name="code", description="Source code to explain"),
             TemplateParam(name="language", description="Programming language", default="Python"),
         ],
+        tags=("code-explain", "code", "explain"),
     ),
     SeedTemplateSpec(
         template_id="structured-output",
@@ -51,6 +54,7 @@ SEED_TEMPLATES: list[SeedTemplateSpec] = [
             TemplateParam(name="task", description="Task to complete"),
             TemplateParam(name="format", description="Output format", default="JSON"),
         ],
+        tags=("structured-output", "format", "json"),
     ),
 ]
 
@@ -66,4 +70,5 @@ def ensure_seeds(library: Library) -> None:
             body=spec.body,
             params=spec.params,
             source="seed",
+            tags=list(spec.tags),
         )

@@ -8,6 +8,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Self
 
+from collections.abc import Callable
+
+from ylang.core.db import YlangDatabase, _is_readonly_error, open_connection
+
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS usage (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,10 +31,21 @@ CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage (timestamp);
 """
 
 def _open_connection(db_path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(db_path)
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA busy_timeout=5000")
-    return connection
+    return open_connection(db_path)
+
+
+def from_connection(connection: sqlite3.Connection) -> UsageStore:
+    """Attach a usage store to an existing SQLite connection."""
+    store = UsageStore(connection)
+    store._ensure_schema()
+    return store
+
+
+def from_database(database: YlangDatabase) -> UsageStore:
+    """Attach a usage store to a shared database handle."""
+    store = UsageStore(database.connection, database=database)
+    store._ensure_schema()
+    return store
 
 
 def _require_utc(value: datetime) -> None:
@@ -100,8 +115,19 @@ class UsageWindow:
 class UsageStore:
     """Thin wrapper around a SQLite connection for usage events."""
 
-    def __init__(self, connection: sqlite3.Connection) -> None:
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        database: YlangDatabase | None = None,
+    ) -> None:
+        self._database = database
         self._connection = connection
+        self._reconnect: Callable[[], None] | None = None
+
+    def bind_reconnect(self, callback: Callable[[], None]) -> None:
+        """Register a callback to refresh all stores after a read-only write failure."""
+        self._reconnect = callback
 
     @classmethod
     def open(cls, db_path: Path) -> Self:
@@ -136,6 +162,33 @@ class UsageStore:
     ) -> None:
         """Insert one per-request usage row. Commits immediately."""
         when = timestamp or datetime.now(timezone.utc)
+        params = (
+            _to_iso(when),
+            surface,
+            activity,
+            model_used,
+            prompt_tokens,
+            cost,
+            int(improver_fired),
+            int(improver_accepted),
+            latency_ms,
+            int(success),
+        )
+        try:
+            self._execute_write(params)
+        except sqlite3.OperationalError as exc:
+            if not _is_readonly_error(exc):
+                raise
+            if self._reconnect is not None:
+                self._reconnect()
+            elif self._database is not None:
+                self._database.reconnect()
+                self._connection = self._database.connection
+            else:
+                raise
+            self._execute_write(params)
+
+    def _execute_write(self, params: tuple[object, ...]) -> None:
         self._connection.execute(
             """
             INSERT INTO usage (
@@ -143,18 +196,7 @@ class UsageStore:
                 improver_fired, improver_accepted, latency_ms, success
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                _to_iso(when),
-                surface,
-                activity,
-                model_used,
-                prompt_tokens,
-                cost,
-                int(improver_fired),
-                int(improver_accepted),
-                latency_ms,
-                int(success),
-            ),
+            params,
         )
         self._connection.commit()
 

@@ -28,16 +28,52 @@ _LITELLM_PREFIX_ALIASES: dict[str, ProviderName] = {
     "mistralai": "mistral",
 }
 
-DEFAULT_ACTIVITY_MODELS: dict[Activity, str] = {
-    "code": "anthropic/claude-3-5-sonnet-latest",
-    "search": "perplexity/sonar",
-    "reason": "openai/o3-mini",
-    "other": "mistral/mistral-small-latest",
+DEFAULT_ACTIVITY_MODEL_LISTS: dict[Activity, list[str]] = {
+    "code": [
+        "anthropic/claude-3-5-sonnet-latest",
+        "openai/o3-mini",
+        "openai/gpt-4o",
+        "mistral/mistral-large-latest",
+    ],
+    "search": [
+        "perplexity/sonar",
+        "openai/gpt-4o",
+        "anthropic/claude-3-5-sonnet-latest",
+    ],
+    "reason": [
+        "openai/o3-mini",
+        "anthropic/claude-3-5-sonnet-latest",
+        "openai/gpt-4o",
+    ],
+    "improve": [
+        "anthropic/claude-3-5-sonnet-latest",
+        "openai/gpt-4o",
+        "mistral/mistral-small-latest",
+    ],
+    "other": [
+        "mistral/mistral-small-latest",
+        "openai/gpt-4o-mini",
+        "anthropic/claude-3-5-sonnet-latest",
+    ],
 }
 
-DEFAULT_FALLBACK_MODEL: str = "ollama/qwen2.5"
+DEFAULT_ACTIVITY_MODELS: dict[Activity, str] = {
+    activity: models[0] for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
+}
 
-_ACTIVITY_MODEL_ENV_VARS: dict[Activity, str] = {
+DEFAULT_QUALITY_BAND: int = 0
+DEFAULT_FALLBACK_MODEL: str = "ollama/qwen2.5"
+DEFAULT_PROVIDER_COOLDOWN_SECONDS: int = 60
+
+_ACTIVITY_MODEL_LIST_ENV_VARS: dict[Activity, str] = {
+    "code": "YLANG_MODELS_CODE",
+    "search": "YLANG_MODELS_SEARCH",
+    "reason": "YLANG_MODELS_REASON",
+    "improve": "YLANG_MODELS_IMPROVE",
+    "other": "YLANG_MODELS_OTHER",
+}
+
+_LEGACY_ACTIVITY_MODEL_ENV_VARS: dict[Activity, str] = {
     "code": "YLANG_MODEL_CODE",
     "search": "YLANG_MODEL_SEARCH",
     "reason": "YLANG_MODEL_REASON",
@@ -108,52 +144,6 @@ def api_key_for_model(model: str, provider_keys: ProviderKeys) -> str | None:
     return provider_keys.key_for_provider(provider)
 
 
-def resolve_available_model(
-    requested: str,
-    activity_models: dict[Activity, str],
-    provider_keys: ProviderKeys,
-    fallback_model: str,
-) -> str:
-    """Pick a model whose provider key is configured, or fall back safely."""
-    if provider_has_key(requested, provider_keys):
-        return requested
-
-    provider = provider_from_litellm_model(requested)
-    env_var = _PROVIDER_ENV_VARS.get(provider, "Provider key") if provider else "Provider key"
-    logger.warning("%s is not configured; skipping model %s", env_var, requested)
-    if provider is not None:
-        logger.warning("Set %s to enable %s models", _PROVIDER_ENV_VARS[provider], provider)
-
-    for candidate in activity_models.values():
-        if provider_has_key(candidate, provider_keys):
-            if candidate != requested:
-                logger.warning("Falling back from %s to %s", requested, candidate)
-            return candidate
-
-    if provider_has_key(fallback_model, provider_keys):
-        logger.warning("Falling back from %s to %s", requested, fallback_model)
-        return fallback_model
-
-    return fallback_model
-
-
-def effective_activity_models(
-    activity_models: dict[Activity, str],
-    provider_keys: ProviderKeys,
-    fallback_model: str,
-) -> dict[Activity, str]:
-    """Return the activity map after applying provider-key availability rules."""
-    return {
-        activity: resolve_available_model(
-            model,
-            activity_models,
-            provider_keys,
-            fallback_model,
-        )
-        for activity, model in activity_models.items()
-    }
-
-
 class Settings(BaseModel):
     """Application configuration loaded from environment variables."""
 
@@ -183,13 +173,30 @@ class Settings(BaseModel):
         default_factory=ProviderKeys,
         description="Optional LLM provider API keys.",
     )
-    activity_models: dict[Activity, str] = Field(
-        default_factory=lambda: dict(DEFAULT_ACTIVITY_MODELS),
-        description="Activity to LiteLLM model routing map.",
+    activity_model_lists: dict[Activity, list[str]] = Field(
+        default_factory=lambda: {
+            activity: list(models) for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
+        },
+        description="Activity to quality-ordered LiteLLM model candidate lists.",
+    )
+    quality_band: int = Field(
+        default=DEFAULT_QUALITY_BAND,
+        ge=0,
+        description="Rank offset within which cost tie-break may prefer a cheaper model.",
     )
     fallback_model: str = Field(
         default=DEFAULT_FALLBACK_MODEL,
-        description="LiteLLM fallback model when the primary route fails.",
+        description="Local LiteLLM floor model when cloud routes fail or are unavailable.",
+    )
+    provider_cooldown_seconds: int = Field(
+        default=DEFAULT_PROVIDER_COOLDOWN_SECONDS,
+        ge=0,
+        description="Seconds to skip a provider after a retryable LLM failure.",
+    )
+    daily_budget_usd: float | None = Field(
+        default=None,
+        ge=0,
+        description="Optional rolling 24h spend cap; models skipped when budget exceeded.",
     )
 
     @classmethod
@@ -215,9 +222,15 @@ class Settings(BaseModel):
 
         provider_keys = _load_provider_keys()
         kwargs["provider_keys"] = provider_keys
-        kwargs["activity_models"] = _load_activity_models()
+        kwargs["activity_model_lists"] = _load_activity_model_lists()
+        if raw_band := os.environ.get("YLANG_QUALITY_BAND"):
+            kwargs["quality_band"] = int(raw_band)
         if raw_fallback := os.environ.get("YLANG_FALLBACK_MODEL"):
             kwargs["fallback_model"] = raw_fallback
+        if raw_cooldown := os.environ.get("YLANG_PROVIDER_COOLDOWN_SECONDS"):
+            kwargs["provider_cooldown_seconds"] = int(raw_cooldown)
+        if raw_budget := os.environ.get("YLANG_DAILY_BUDGET_USD"):
+            kwargs["daily_budget_usd"] = float(raw_budget)
 
         settings = cls(**kwargs)
         _warn_missing_provider_keys(provider_keys)
@@ -227,19 +240,14 @@ class Settings(BaseModel):
         """Return the expanded, absolute storage path."""
         return self.storage_path.expanduser().resolve()
 
-    def effective_activity_models(self) -> dict[Activity, str]:
-        """Return the activity map that will be used given configured provider keys."""
-        return effective_activity_models(
-            self.activity_models,
-            self.provider_keys,
-            self.fallback_model,
-        )
+    def log_llm_config(self, router: object | None = None) -> None:
+        """Log configured LLM providers and active per-activity routing to stderr."""
+        from ylang.core.model_router import ModelRouter
 
-    def log_llm_config(self) -> None:
-        """Log configured LLM providers and the active activity model map to stderr."""
+        if router is None:
+            router = ModelRouter.from_settings(self)
         configured = self.provider_keys.configured_names()
         missing = self.provider_keys.missing_names()
-        effective = self.effective_activity_models()
 
         print("  llm providers configured:", file=sys.stderr)
         if configured:
@@ -251,9 +259,7 @@ class Settings(BaseModel):
             print("  llm providers not configured:", file=sys.stderr)
             print(f"    {', '.join(missing)}", file=sys.stderr)
 
-        print("  activity models:", file=sys.stderr)
-        for activity in ("code", "search", "reason", "other"):
-            print(f"    {activity}: {effective[activity]}", file=sys.stderr)
+        print(getattr(router, "format_routing_report")(), file=sys.stderr)
 
 
 def _read_optional_env(name: str) -> str | None:
@@ -261,6 +267,14 @@ def _read_optional_env(name: str) -> str | None:
     if raw is None or not raw.strip():
         return None
     return raw.strip()
+
+
+def _parse_model_list(raw: str) -> list[str]:
+    models = [part.strip() for part in raw.split(",") if part.strip()]
+    if not models:
+        msg = "model list env var must contain at least one model"
+        raise ValueError(msg)
+    return models
 
 
 def _load_provider_keys() -> ProviderKeys:
@@ -272,12 +286,26 @@ def _load_provider_keys() -> ProviderKeys:
     )
 
 
-def _load_activity_models() -> dict[Activity, str]:
-    models = dict(DEFAULT_ACTIVITY_MODELS)
-    for activity, env_var in _ACTIVITY_MODEL_ENV_VARS.items():
+def _load_activity_model_lists() -> dict[Activity, list[str]]:
+    from ylang.core.model_router import normalize_model_list
+
+    lists = {
+        activity: list(models) for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
+    }
+    for activity, env_var in _ACTIVITY_MODEL_LIST_ENV_VARS.items():
         if override := _read_optional_env(env_var):
-            models[activity] = override
-    return models
+            lists[activity] = _parse_model_list(override)
+    for activity, env_var in _LEGACY_ACTIVITY_MODEL_ENV_VARS.items():
+        if _read_optional_env(_ACTIVITY_MODEL_LIST_ENV_VARS[activity]):
+            continue
+        if override := _read_optional_env(env_var):
+            logger.warning(
+                "%s is deprecated; use %s with a comma-separated list",
+                env_var,
+                _ACTIVITY_MODEL_LIST_ENV_VARS[activity],
+            )
+            lists[activity] = [override]
+    return {activity: normalize_model_list(models) for activity, models in lists.items()}
 
 
 def _warn_missing_provider_keys(provider_keys: ProviderKeys) -> None:
