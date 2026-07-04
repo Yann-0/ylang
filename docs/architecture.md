@@ -176,6 +176,7 @@ HTTP uses FastMCP's streamable HTTP app wrapped with `BearerTokenMiddleware`.
 
 ## Related docs
 
+- [Configuration](configuration.md) — env vars, model prioritization, routing tuning
 - [MCP tools reference](mcp-tools.md)
 - [Database schema](database-schema.md)
 - [Dead code audit](dead-code.md)

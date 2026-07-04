@@ -7,7 +7,7 @@ Ylang is a **local-first personal AI efficiency layer**. Phase 1 ships an [MCP](
 | Document | Description |
 |----------|-------------|
 | [Installation](installation.md) | Virtualenv, editable install, first run |
-| [Configuration](configuration.md) | Environment variables, model routing, API keys |
+| [Configuration](configuration.md) | Environment variables, **model prioritization**, routing, API keys |
 | [Architecture](architecture.md) | Module layout, data flow, design principles |
 | [MCP tools reference](mcp-tools.md) | Every tool: parameters, responses, examples |
 | [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement |

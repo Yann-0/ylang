@@ -92,6 +92,6 @@ Only one process can bind to `YLANG_PORT` (default 8787). Stop the existing inst
 
 ## Next steps
 
-- [Configuration](configuration.md) — API keys, model routing, storage path
+- [Configuration](configuration.md) — API keys, model prioritization, routing, storage path
 - [Cursor integration](cursor-integration.md) — hooks and auto prompt improvement
 - [MCP tools reference](mcp-tools.md) — tool API

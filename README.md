@@ -48,7 +48,7 @@ Full instructions: **[docs/installation.md](docs/installation.md)**
 |-------|-------------|
 | [docs/README.md](docs/README.md) | Documentation index |
 | [Installation](docs/installation.md) | Setup on Linux, macOS, Windows |
-| [Configuration](docs/configuration.md) | Environment variables, model routing |
+| [Configuration](docs/configuration.md) | Environment variables, model prioritization, routing |
 | [Architecture](docs/architecture.md) | Design, modules, data flow |
 | [MCP tools](docs/mcp-tools.md) | Full API reference (11 tools) |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
@@ -93,7 +93,7 @@ src/ylang/
 - Python 3.12+
 - At least one LLM provider API key, or a local Ollama instance for fallback
 
-Copy [.env.example](.env.example) for all configuration options.
+Copy [.env.example](.env.example) for all configuration options. See **[docs/configuration.md](docs/configuration.md)** for model prioritization, routing, budget caps, and recipes.
 
 ## Development
 

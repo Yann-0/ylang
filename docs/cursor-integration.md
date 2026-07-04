@@ -143,5 +143,5 @@ Mode changes the structure and scope of improved prompts (e.g. plan mode avoids 
 ## Related docs
 
 - [MCP tools reference](mcp-tools.md) — `improve_prompt` parameters
-- [Configuration](configuration.md) — API keys and hook env vars
+- [Configuration](configuration.md) — API keys, model prioritization, `ylang.env` layout
 - [Installation](installation.md) — first-time setup

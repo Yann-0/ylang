@@ -30,7 +30,7 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Never commit this file. Restrict permissions: `chmod 600 ylang.env`.
+Never commit this file. Restrict permissions: `chmod 600 ylang.env`. See [configuration.md](configuration.md) for every variable and [configuration recipes](configuration.md#configuration-recipes).
 
 ### Data directory
 
@@ -148,6 +148,6 @@ Stop the service or use SQLite online backup for consistency under load.
 
 ## Related docs
 
-- [Configuration](configuration.md) — all environment variables
+- [Configuration](configuration.md) — all environment variables, model prioritization, routing recipes
 - [Cursor integration](cursor-integration.md) — hooks using HTTP MCP
 - [Installation](installation.md) — venv and editable install

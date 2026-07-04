@@ -355,6 +355,33 @@ def test_validate_accepts_short_prompt_spec_expansion() -> None:
     assert result.improved.startswith("## Goal")
 
 
+def test_improver_salvages_plain_markdown_model_output(improver: Improver) -> None:
+    original = (
+        "ok ensure it's fully documented for priorisation and other confguration "
+        "(not specificaly linked to mistral)"
+    )
+    plain = (
+        "## Goal\n"
+        "Ensure prioritisation and general Ylang configuration are fully documented.\n\n"
+        "## Deliverables\n"
+        "- Expand docs/configuration.md\n\n"
+        "## Definition of done\n"
+        "- All YLANG_MODELS_* vars documented"
+    )
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=MagicMock(content=plain))]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = improver.improve(original, "Cursor", model="test-model")
+
+    assert result.validated is True
+    assert result.improved.startswith("## Goal")
+    assert result.rejection_reason is None
+
+
 def test_improver_llm_failure_returns_safe_result(improver: Improver) -> None:
     with patch("ylang.core.engine.litellm.completion", side_effect=RuntimeError("down")):
         result = improver.improve("hello", "edit_file", model="openai/gpt-4o")

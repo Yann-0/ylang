@@ -8,9 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Full public documentation set under `docs/`
-- MIT `LICENSE`, `CONTRIBUTING.md`, `.env.example`
-- Documentation index, architecture, MCP tools reference, Cursor integration, deployment, database schema guides
+- Expanded [configuration.md](docs/configuration.md): full env reference, model prioritization, routing flow, quality band, budget cap, usage-based reorder, configuration recipes
+- Updated `.env.example` with all routing variables and comments
+
+### Changed
+
+- Cross-links from README, deployment, cursor-integration, architecture docs to configuration guide
+- Improver: salvage plain-markdown model output and recover improved-only JSON when `changes[]` is missing (fixes `parse error: could not locate changes array`)
 
 ## [0.1.0] - 2026
 

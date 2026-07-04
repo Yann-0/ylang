@@ -141,6 +141,19 @@ class Improver:
                     )
             return result
         except Exception as exc:
+            salvaged = _try_salvage_parse_failure(
+                text,
+                completion.content,
+                apply_default,
+                resolved=resolved,
+            )
+            if salvaged is not None:
+                logger.info(
+                    "improve_prompt salvaged unparseable model output (model=%s; was: %s)",
+                    completion.model_used,
+                    exc,
+                )
+                return salvaged
             logger.warning(
                 "improve_prompt failed to parse model output (model=%s): %s",
                 completion.model_used,
@@ -233,34 +246,99 @@ def _loads_improver_payload(payload: str) -> dict[str, object]:
     return data
 
 
-def _extract_improver_fields(payload: str) -> dict[str, object]:
-    """Recover improved/changes when json.loads fails on multiline strings."""
-    changes_match = re.search(r'"changes"\s*:\s*(\[[\s\S]*\])\s*\}?\s*$', payload)
-    if changes_match is None:
-        msg = "could not locate changes array in model output"
-        raise ValueError(msg)
-    changes = json.loads(changes_match.group(1))
-    head = payload[: changes_match.start()]
+def _decode_improved_json_string(raw: str) -> str:
+    """Unescape a JSON string value recovered from broken model output."""
+    return raw.replace("\\n", "\n").replace('\\"', '"')
+
+
+def _extract_changes_array(payload: str) -> tuple[list[object], int | None]:
+    """Return (changes, match_start) from broken JSON; empty list when absent."""
+    for pattern in (
+        r'"changes"\s*:\s*(\[[\s\S]*?\])\s*,\s*"improved"\s*:',
+        r'"changes"\s*:\s*(\[[\s\S]*?\])\s*\}',
+        r'"changes"\s*:\s*(\[[\s\S]*\])\s*\}?\s*$',
+    ):
+        match = re.search(pattern, payload)
+        if match is not None:
+            return json.loads(match.group(1)), match.start()
+    return [], None
+
+
+def _extract_improved_from_payload(payload: str, *, before: str | None = None) -> str | None:
+    """Extract the improved string from a (possibly broken) JSON payload."""
+    head = before if before is not None else payload
     improved_match = re.search(
         r'"improved"\s*:\s*"(.*?)"\s*,\s*"changes"\s*:',
         head,
         re.DOTALL,
     )
-    if improved_match is None:
-        loose = re.search(r'"improved"\s*:\s*"([\s\S]*)', head)
-        if loose is None:
-            msg = "could not locate improved field in model output"
-            raise ValueError(msg)
-        improved_raw = loose.group(1)
-        for sentinel in ('",\n  "changes"', '", "changes"', '",\n"changes"', '",'):
-            if sentinel in improved_raw:
-                improved_raw = improved_raw.split(sentinel, 1)[0]
-                break
-        improved_raw = improved_raw.rstrip('"')
-    else:
-        improved_raw = improved_match.group(1)
-    improved = improved_raw.replace("\\n", "\n").replace('\\"', '"')
+    if improved_match is not None:
+        return _decode_improved_json_string(improved_match.group(1))
+    improved_match = re.search(
+        r'"changes"\s*:\s*\[[\s\S]*?\]\s*,\s*"improved"\s*:\s*"(.*?)"\s*\}?\s*$',
+        payload,
+        re.DOTALL,
+    )
+    if improved_match is not None:
+        return _decode_improved_json_string(improved_match.group(1))
+    loose = re.search(r'"improved"\s*:\s*"([\s\S]*)', head)
+    if loose is None:
+        return None
+    improved_raw = loose.group(1)
+    for sentinel in ('",\n  "changes"', '", "changes"', '",\n"changes"', '",'):
+        if sentinel in improved_raw:
+            improved_raw = improved_raw.split(sentinel, 1)[0]
+            break
+    improved_raw = improved_raw.rstrip('"')
+    if not improved_raw:
+        return None
+    return _decode_improved_json_string(improved_raw)
+
+
+def _extract_improver_fields(payload: str) -> dict[str, object]:
+    """Recover improved/changes when json.loads fails on multiline strings."""
+    changes, changes_start = _extract_changes_array(payload)
+    head = payload[:changes_start] if changes_start is not None else payload
+    improved = _extract_improved_from_payload(payload, before=head)
+    if improved is None:
+        msg = "could not locate improved field in model output"
+        raise ValueError(msg)
     return {"improved": improved, "changes": changes}
+
+
+def _try_parse_plain_spec(raw: str) -> str | None:
+    """Return markdown spec text when the model skipped JSON entirely."""
+    text = _extract_json_payload(raw).strip()
+    if text.startswith("{") or text.startswith("["):
+        return None
+    if text.startswith("## ") or "\n## " in text:
+        if _has_structured_expansion(text):
+            return text
+    return None
+
+
+def _try_salvage_parse_failure(
+    original: str,
+    raw: str,
+    auto_apply_default: bool,
+    *,
+    resolved: ResolvedCursorMode,
+) -> ImprovementResult | None:
+    """Salvage structured output when JSON parsing fails."""
+    plain = _try_parse_plain_spec(raw)
+    if plain is None:
+        return None
+    if not _numbers_preserved(original, plain) or not _quoted_spans_preserved(original, plain):
+        return None
+    if _is_restructured_spec(original, plain):
+        return _salvage_result(
+            original,
+            plain,
+            auto_apply_default,
+            resolved=resolved,
+            description="Salvaged markdown spec from non-JSON model output",
+        )
+    return _try_salvage(original, plain, auto_apply_default, resolved=resolved)
 
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
