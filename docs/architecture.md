@@ -202,6 +202,10 @@ On HTTP startup, `run_server()` creates **two** `Engine` instances sharing one u
 
 Usage rows distinguish faces via the `surface` column.
 
+### Async SQLite access
+
+The usage store uses synchronous `sqlite3` with `check_same_thread=False` so worker threads can safely run queries. HTTP gateway handlers run blocking store and engine calls via `anyio.to_thread.run_sync` (`usage/async_ops.py`) so concurrent requests do not block the event loop.
+
 See [gateway.md](gateway.md) for virtual models and Cursor setup.
 
 ## Extension points (future)

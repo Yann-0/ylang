@@ -94,6 +94,7 @@ class Improver:
         model: str,
         context: ImproveContext | None = None,
         mode: str | None = None,
+        accepted: bool = False,
     ) -> ImprovementResult:
         """Propose prompt improvements; log usage; never mutate caller state."""
         resolved = resolve_cursor_mode(tool, text, explicit_mode=mode)
@@ -110,6 +111,8 @@ class Improver:
             model=model,
             response_format={"type": "json_object"},
             improver_fired=True,
+            improver_accepted=accepted,
+            improver_input_sample=text,
         )
         if not completion.success:
             logger.warning(
@@ -127,6 +130,9 @@ class Improver:
                 apply_default,
                 resolved=resolved,
             )
+            changed = result.improved.strip() != text.strip()
+            if validated and changed and not accepted:
+                self._engine.store.update_last_improver_accepted(True)
             if not validated:
                 salvaged = _try_salvage(text, parsed_improved, apply_default, resolved=resolved)
                 if salvaged is not None:

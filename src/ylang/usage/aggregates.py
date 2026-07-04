@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from ylang.usage.store import UsageStore, UsageWindow
+from ylang.usage.store import UsageRecord, UsageStore, UsageWindow
+
+# Short TTL avoids full-table scans on every model-router decision.
+_DEFAULT_CACHE_TTL_SECONDS = 45.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,14 +26,55 @@ class UsageSummary:
     model_success_counts: dict[str, int]
 
 
+@dataclass
+class _WindowCacheEntry:
+    """In-memory cache entry for usage rows in a time window."""
+
+    expires_at: float
+    rows: list[UsageRecord]
+
+
+_window_cache: dict[tuple[int, str, str], _WindowCacheEntry] = {}
+
+
+def clear_aggregate_cache() -> None:
+    """Clear the in-memory usage aggregate cache (primarily for tests)."""
+    _window_cache.clear()
+
+
+def _cache_key(store: UsageStore, window: UsageWindow) -> tuple[int, str, str]:
+    return (id(store), window.since.isoformat(), window.until.isoformat())
+
+
+def _cached_recall_usage(
+    store: UsageStore,
+    window: UsageWindow,
+    *,
+    ttl_seconds: float = _DEFAULT_CACHE_TTL_SECONDS,
+) -> list[UsageRecord]:
+    """Return usage rows for a window, reusing a short-TTL in-memory cache."""
+    key = _cache_key(store, window)
+    now = time.monotonic()
+    entry = _window_cache.get(key)
+    if entry is not None and entry.expires_at > now:
+        return entry.rows
+
+    rows = store.recall_usage(window)
+    _window_cache[key] = _WindowCacheEntry(
+        expires_at=now + ttl_seconds,
+        rows=rows,
+    )
+    return rows
+
+
 def rolling_cost(store: UsageStore, window: UsageWindow) -> float:
     """Sum cost for all usage rows in the given window."""
-    return sum(row.cost for row in store.recall_usage(window))
+    return sum(row.cost for row in _cached_recall_usage(store, window))
 
 
 def summarize_usage(store: UsageStore, window: UsageWindow) -> UsageSummary:
     """Build aggregated usage statistics for a time window."""
-    rows = store.recall_usage(window)
+    rows = _cached_recall_usage(store, window)
     by_activity: dict[str, int] = {}
     by_model: dict[str, int] = {}
     model_costs: dict[str, float] = {}

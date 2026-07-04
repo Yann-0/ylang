@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Iterator
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response, StreamingResponse
+from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from ylang.core.engine import Engine
 from ylang.core.types import StreamChunk, StreamCompletionError
@@ -23,6 +24,10 @@ from ylang.gateway.openai import (
     sse_chunk_payload,
     sse_done,
 )
+from ylang.usage.aggregates import summarize_usage
+from ylang.usage.async_ops import run_store_sync
+from ylang.usage.dashboard import render_usage_dashboard_html
+from ylang.usage.store import UsageWindow
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +43,7 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
             return openai_error_response("Invalid JSON body")
 
         try:
-            messages, request_model, stream = parse_chat_request(body)
+            messages, request_model, stream, tools, tool_choice = parse_chat_request(body)
         except GatewayRequestError as exc:
             return openai_error_response(
                 exc.message,
@@ -48,11 +53,8 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
 
         route = resolve_gateway_model(request_model)
 
-        # Opt-in improver pass (disabled: gateway traffic is real completions, not improve requests):
-        # improved = improver.improve(...)
-
         if stream:
-            return _stream_response(
+            return await _stream_response(
                 engine,
                 messages=messages,
                 route_activity=route.activity,
@@ -60,33 +62,48 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
                 request_model=route.request_model,
             )
 
-        return _complete_response(
+        return await _complete_response(
             engine,
             messages=messages,
             route_activity=route.activity,
             explicit_model=route.explicit_model,
             request_model=route.request_model,
+            tools=tools,
+            tool_choice=tool_choice,
         )
 
     @server.custom_route("/v1/models", methods=["GET"])
     async def list_models(_request: Request) -> Response:
         return JSONResponse(models_list_payload())
 
+    @server.custom_route("/usage", methods=["GET"])
+    async def usage_dashboard(_request: Request) -> Response:
+        """Minimal HTML dashboard for the last 7 days of usage."""
+        window = UsageWindow.last_days(7)
+        summary = await run_store_sync(summarize_usage, engine.store, window)
+        html = render_usage_dashboard_html(summary, title="Ylang Usage Dashboard")
+        return HTMLResponse(html)
 
-def _complete_response(
+
+async def _complete_response(
     engine: Engine,
     *,
     messages: list,
     route_activity: str,
     explicit_model: str | None,
     request_model: str,
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
 ) -> Response:
     try:
-        result = engine.complete(
+        result = await run_store_sync(
+            engine.complete,
             messages,
             route_activity,
             model=explicit_model,
             improver_fired=False,
+            tools=tools,
+            tool_choice=tool_choice,
         )
     except Exception as exc:
         logger.exception("Gateway completion failed")
@@ -144,7 +161,7 @@ def _start_stream(
     return remaining(), None
 
 
-def _stream_response(
+async def _stream_response(
     engine: Engine,
     *,
     messages: list,
@@ -153,7 +170,8 @@ def _stream_response(
     request_model: str,
 ) -> Response:
     completion_id = new_completion_id()
-    chunks, stream_error = _start_stream(
+    chunks, stream_error = await run_store_sync(
+        _start_stream,
         engine,
         messages=messages,
         route_activity=route_activity,

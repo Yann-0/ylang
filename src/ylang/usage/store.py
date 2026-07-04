@@ -12,6 +12,7 @@ from collections.abc import Callable
 
 from ylang.core.db import YlangDatabase, _is_readonly_error, open_connection
 from ylang.usage.activity import normalize_usage_activity
+from ylang.usage.sample import truncate_improver_input_sample
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS usage (
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS usage (
     cost                REAL    NOT NULL CHECK (cost >= 0),
     improver_fired      INTEGER NOT NULL CHECK (improver_fired IN (0, 1)),
     improver_accepted   INTEGER NOT NULL CHECK (improver_accepted IN (0, 1)),
+    improver_input_sample TEXT,
     latency_ms          INTEGER NOT NULL CHECK (latency_ms >= 0),
     success             INTEGER NOT NULL CHECK (success IN (0, 1))
 );
@@ -82,6 +84,7 @@ class UsageRecord:
     cost: float
     improver_fired: bool
     improver_accepted: bool
+    improver_input_sample: str | None
     latency_ms: int
     success: bool
 
@@ -145,6 +148,14 @@ class UsageStore:
 
     def _ensure_schema(self) -> None:
         self._connection.executescript(_SCHEMA_SQL)
+        columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(usage)").fetchall()
+        }
+        if "improver_input_sample" not in columns:
+            self._connection.execute(
+                "ALTER TABLE usage ADD COLUMN improver_input_sample TEXT"
+            )
         self._connection.commit()
 
     def write_usage(
@@ -160,9 +171,11 @@ class UsageStore:
         latency_ms: int,
         success: bool,
         timestamp: datetime | None = None,
+        improver_input_sample: str | None = None,
     ) -> None:
         """Insert one per-request usage row. Commits immediately."""
         when = timestamp or datetime.now(timezone.utc)
+        sample = truncate_improver_input_sample(improver_input_sample)
         params = (
             _to_iso(when),
             surface,
@@ -172,6 +185,7 @@ class UsageStore:
             cost,
             int(improver_fired),
             int(improver_accepted),
+            sample,
             latency_ms,
             int(success),
         )
@@ -194,10 +208,23 @@ class UsageStore:
             """
             INSERT INTO usage (
                 timestamp, surface, activity, model_used, prompt_tokens, cost,
-                improver_fired, improver_accepted, latency_ms, success
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                improver_fired, improver_accepted, improver_input_sample,
+                latency_ms, success
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             params,
+        )
+        self._connection.commit()
+
+    def update_last_improver_accepted(self, accepted: bool) -> None:
+        """Set improver_accepted on the most recently inserted usage row."""
+        self._connection.execute(
+            """
+            UPDATE usage
+            SET improver_accepted = ?
+            WHERE id = (SELECT id FROM usage ORDER BY id DESC LIMIT 1)
+            """,
+            (int(accepted),),
         )
         self._connection.commit()
 
@@ -207,7 +234,8 @@ class UsageStore:
             """
             SELECT
                 id, timestamp, surface, activity, model_used, prompt_tokens, cost,
-                improver_fired, improver_accepted, latency_ms, success
+                improver_fired, improver_accepted, improver_input_sample,
+                latency_ms, success
             FROM usage
             WHERE timestamp >= ? AND timestamp < ?
             ORDER BY timestamp DESC, id DESC
@@ -228,8 +256,9 @@ def _row_to_record(row: tuple[object, ...]) -> UsageRecord:
         cost=float(row[6]),
         improver_fired=bool(row[7]),
         improver_accepted=bool(row[8]),
-        latency_ms=int(row[9]),
-        success=bool(row[10]),
+        improver_input_sample=str(row[9]) if row[9] is not None else None,
+        latency_ms=int(row[10]),
+        success=bool(row[11]),
     )
 
 

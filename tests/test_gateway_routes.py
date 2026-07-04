@@ -60,6 +60,7 @@ def test_chat_completion_non_stream(gateway_client: TestClient) -> None:
         content="hello",
         model_used="openai/gpt-4o",
         prompt_tokens=12,
+        completion_tokens=8,
         cost=0.01,
         latency_ms=5,
         success=True,
@@ -78,6 +79,8 @@ def test_chat_completion_non_stream(gateway_client: TestClient) -> None:
     assert body["object"] == "chat.completion"
     assert body["choices"][0]["message"]["content"] == "hello"
     assert body["model"] == "route-code"
+    assert body["usage"]["completion_tokens"] == 8
+    assert body["usage"]["total_tokens"] == 20
 
 
 def test_chat_completion_stream_sse(gateway_client: TestClient) -> None:

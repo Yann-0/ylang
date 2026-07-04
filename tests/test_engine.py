@@ -34,7 +34,7 @@ def _mock_response(content: str = "ok", *, model: str = "openai/gpt-4o") -> Magi
     response = MagicMock()
     response.choices = [MagicMock(message=MagicMock(content=content))]
     response.model = model
-    response.usage = MagicMock(prompt_tokens=10)
+    response.usage = MagicMock(prompt_tokens=10, completion_tokens=25)
     response._hidden_params = {"response_cost": 0.01}
     return response
 
@@ -45,6 +45,7 @@ def test_complete_success(engine: Engine) -> None:
     assert result.success is True
     assert result.content == "hello"
     assert result.prompt_tokens == 10
+    assert result.completion_tokens == 25
 
 
 def test_complete_fallback_on_rate_limit(engine: Engine) -> None:

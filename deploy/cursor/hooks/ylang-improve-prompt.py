@@ -202,6 +202,8 @@ async def _call_improve_prompt(
     mode: str,
     conversation: list[dict[str, str]],
     model: str,
+    accepted: bool = False,
+    record_acceptance_only: bool = False,
 ) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {auth_token}"}
     args: dict[str, Any] = {
@@ -210,9 +212,13 @@ async def _call_improve_prompt(
         "model": model,
         "use_context": True,
         "mode": mode,
+        "accepted": accepted,
+        "record_acceptance_only": record_acceptance_only,
     }
     if conversation:
         args["conversation"] = conversation
+    if record_acceptance_only:
+        args["use_context"] = False
 
     async with streamablehttp_client(mcp_url, headers=headers) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -318,6 +324,25 @@ def main() -> None:
         f"improved mode={cursor_mode} validated={validated} "
         f"changed={changed}{reason_suffix}"
     )
+
+    if changed and validated:
+        try:
+            asyncio.run(
+                _call_improve_prompt(
+                    mcp_url=mcp_url,
+                    auth_token=auth_token,
+                    text=original,
+                    tool=tool,
+                    mode=mode,
+                    conversation=[],
+                    model=model,
+                    accepted=True,
+                    record_acceptance_only=True,
+                )
+            )
+            _log("recorded improver_accepted=true")
+        except Exception as exc:  # noqa: BLE001 - hook must fail open
+            _log(f"record improver_accepted failed: {exc}")
 
     # Cursor currently documents only `continue`/`user_message` for this hook.
     # We also emit `updated_input` for forward compatibility if Cursor adds support.

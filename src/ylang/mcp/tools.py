@@ -40,8 +40,13 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
         use_context: bool = True,
         conversation: list[dict[str, str]] | None = None,
         mode: str | None = None,
+        accepted: bool = False,
+        record_acceptance_only: bool = False,
     ) -> dict[str, Any]:
         """Expand rough prompts into full specs; mode-aware for Cursor agent/plan/debug/ask/multitask."""
+        if record_acceptance_only:
+            deps.store.update_last_improver_accepted(accepted)
+            return {"ok": True, "recorded": accepted}
         context: ImproveContext | None = None
         if use_context:
             context = build_improve_context(
@@ -58,6 +63,7 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
             model=model,
             context=context,
             mode=mode,
+            accepted=accepted,
         )
         payload = _serialize_improvement(result)
         if use_context and context is not None:
@@ -322,6 +328,7 @@ def _serialize_usage(record: UsageRecord) -> dict[str, Any]:
         "cost": record.cost,
         "improver_fired": record.improver_fired,
         "improver_accepted": record.improver_accepted,
+        "improver_input_sample": record.improver_input_sample,
         "latency_ms": record.latency_ms,
         "success": record.success,
     }

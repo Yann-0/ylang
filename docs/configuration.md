@@ -316,6 +316,8 @@ When total logged `cost` in the last 24 hours ≥ cap:
 
 Unset = no budget limit. Spending is computed from the local `usage` table.
 
+On startup, when `YLANG_DAILY_BUDGET_USD` is set and rolling 24h spend is **≥ 80%** of the cap, Ylang logs a warning to stderr so you can adjust usage before cloud models are dropped.
+
 ```bash
 YLANG_DAILY_BUDGET_USD=5.00
 ```

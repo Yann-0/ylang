@@ -62,8 +62,48 @@ async def test_improve_prompt_mocked_litellm(mcp_server: Any) -> None:
     assert len(usage["rows"]) == 1
     assert usage["rows"][0]["activity"] == "improve:agent"
     assert usage["rows"][0]["improver_fired"] is True
+    assert usage["rows"][0]["improver_accepted"] is True
     assert usage["rows"][0]["success"] is True
     assert usage["rows"][0]["prompt_tokens"] == 42
+
+
+async def test_improve_prompt_record_acceptance_only(mcp_server: Any) -> None:
+    """record_acceptance_only patches the latest usage row without calling the LLM."""
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps({"improved": "hello", "changes": []})))
+    ]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        await call_mcp_tool(
+            mcp_server,
+            "improve_prompt",
+            {"text": "hello", "tool": "edit_file", "model": "test-model"},
+        )
+
+    usage_before = await call_mcp_tool(mcp_server, "recall_usage", {"last_hours": 1})
+    assert usage_before["rows"][0]["improver_accepted"] is False
+
+    recorded = await call_mcp_tool(
+        mcp_server,
+        "improve_prompt",
+        {
+            "text": "ignored",
+            "tool": "edit_file",
+            "model": "test-model",
+            "accepted": True,
+            "record_acceptance_only": True,
+        },
+    )
+    assert recorded["ok"] is True
+    assert recorded["recorded"] is True
+
+    usage_after = await call_mcp_tool(mcp_server, "recall_usage", {"last_hours": 1})
+    assert len(usage_after["rows"]) == 1
+    assert usage_after["rows"][0]["improver_accepted"] is True
 
 
 async def test_improve_prompt_explicit_mode(mcp_server: Any) -> None:
@@ -658,12 +698,13 @@ async def test_save_learned_template(mcp_server: Any) -> None:
 
 
 async def test_detect_patterns_with_usage(mcp_server: Any, ylang_deps: Any) -> None:
-    """detect_patterns finds repeated improver tool usage."""
+    """detect_patterns finds repeated similar improver prompt texts."""
     now = datetime.now(timezone.utc)
-    for _ in range(3):
+    prompt = "Refactor the authentication module with tests"
+    for index in range(3):
         ylang_deps.store.write_usage(
             surface="mcp",
-            activity="improve:edit_file",
+            activity="improve:agent",
             model_used="m",
             prompt_tokens=1,
             cost=0.0,
@@ -672,6 +713,7 @@ async def test_detect_patterns_with_usage(mcp_server: Any, ylang_deps: Any) -> N
             latency_ms=1,
             success=True,
             timestamp=now - timedelta(days=1),
+            improver_input_sample=prompt if index == 0 else f"{prompt} please",
         )
     result = await call_mcp_tool(mcp_server, "detect_patterns", {"window_days": 30})
     assert result["ok"] is True

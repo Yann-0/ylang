@@ -48,7 +48,7 @@ def open_connection(db_path: Path) -> sqlite3.Connection:
     """Open a SQLite connection with WAL mode and busy timeout."""
     verify_storage_writable(db_path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(db_path)
+    connection = sqlite3.connect(db_path, check_same_thread=False)
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=5000")
     _verify_connection_writable(connection, db_path)

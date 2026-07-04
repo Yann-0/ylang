@@ -93,8 +93,8 @@ On success (**200**), the body matches OpenAI `chat.completion` shape:
   ],
   "usage": {
     "prompt_tokens": 12,
-    "completion_tokens": 0,
-    "total_tokens": 12
+    "completion_tokens": 34,
+    "total_tokens": 46
   }
 }
 ```
@@ -242,16 +242,27 @@ curl -N http://127.0.0.1:8787/v1/chat/completions \
 
 After a successful request, `usage_summary` should show a row with `surface=gateway` and the matching activity (e.g. `code` for `route-code`).
 
+### Usage dashboard
+
+When `YLANG_TRANSPORT=http`, open `GET /usage` (same bearer auth as gateway routes) for a minimal HTML dashboard of the last 7 days: total cost, requests, and bar charts by activity and model.
+
+Alternatively, generate a standalone file:
+
+```bash
+ylang usage dashboard --output /tmp/ylang-usage.html --last-days 7
+```
+
 ## OpenAI parity limits
 
 The gateway implements enough of the OpenAI chat API for Cursor routing. Known gaps:
 
 | Field | Behavior |
 |-------|----------|
-| `usage.completion_tokens` | Always `0` (non-streaming) |
-| `usage.total_tokens` | Equals `prompt_tokens` only |
+| `usage.completion_tokens` | From LiteLLM usage metadata (non-streaming) |
+| `usage.total_tokens` | `prompt_tokens + completion_tokens` (non-streaming) |
 | Streaming token counts | Not emitted per chunk |
-| Tools / function calling | Not supported |
+| `tools` / `tool_choice` | Forwarded to LiteLLM on non-streaming requests; `tool_calls` returned when the provider responds with them |
+| Streaming tool calls | Not supported |
 | `/v1/models` catalog | Lists virtual `route-*` models only; passthrough slugs are accepted but not advertised |
 
 ## Related docs

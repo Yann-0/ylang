@@ -33,8 +33,8 @@ def new_completion_id() -> str:
     return f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
 
-def parse_chat_request(body: Any) -> tuple[list[Message], str, bool]:
-    """Parse POST /v1/chat/completions JSON into messages, model, and stream flag."""
+def parse_chat_request(body: Any) -> tuple[list[Message], str, bool, list[dict[str, Any]] | None, Any]:
+    """Parse POST /v1/chat/completions JSON into messages, model, stream, tools, tool_choice."""
     if not isinstance(body, dict):
         msg = "Request body must be a JSON object"
         raise GatewayRequestError(msg)
@@ -65,7 +65,12 @@ def parse_chat_request(body: Any) -> tuple[list[Message], str, bool]:
         messages.append({"role": role, "content": content})
 
     stream = bool(body.get("stream", False))
-    return messages, model.strip(), stream
+    tools = body.get("tools")
+    if tools is not None and not isinstance(tools, list):
+        msg = "tools must be an array"
+        raise GatewayRequestError(msg, param="tools")
+    tool_choice = body.get("tool_choice")
+    return messages, model.strip(), stream, tools, tool_choice
 
 
 def _message_content(value: Any) -> str | None:
@@ -131,6 +136,14 @@ def chat_completion_payload(
     request_model: str,
 ) -> dict[str, Any]:
     """Shape a non-streaming Engine result as OpenAI chat.completion JSON."""
+    message: dict[str, Any] = {
+        "role": "assistant",
+        "content": result.content,
+    }
+    finish_reason = "stop"
+    if result.tool_calls:
+        message["tool_calls"] = result.tool_calls
+        finish_reason = "tool_calls"
     return {
         "id": completion_id,
         "object": "chat.completion",
@@ -139,17 +152,14 @@ def chat_completion_payload(
         "choices": [
             {
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": result.content,
-                },
-                "finish_reason": "stop",
+                "message": message,
+                "finish_reason": finish_reason,
             }
         ],
         "usage": {
             "prompt_tokens": result.prompt_tokens,
-            "completion_tokens": 0,
-            "total_tokens": result.prompt_tokens,
+            "completion_tokens": result.completion_tokens,
+            "total_tokens": result.prompt_tokens + result.completion_tokens,
         },
     }
 

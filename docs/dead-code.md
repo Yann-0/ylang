@@ -66,7 +66,7 @@ These symbols are exported via `core/__init__.py` but have **no imports outside 
 
 | Item | Status |
 |------|--------|
-| `improver_accepted=True` | Never assigned `True`; improver always passes `False`. |
+| `improver_accepted=True` | Set when validation passes and text changed, via MCP `accepted` / `record_acceptance_only`, or the Cursor hook. |
 | `CompletionResult.error` | Set in engine; improver reads only `.success` and `.content`. |
 
 ---

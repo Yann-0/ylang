@@ -83,6 +83,11 @@ class Engine:
         """Model router used for selection, chaining, and cooldown tracking."""
         return self._router
 
+    @property
+    def store(self) -> UsageStore:
+        """Usage store shared with the model router for budget and preferences."""
+        return self._store
+
     @classmethod
     def from_settings(
         cls,
@@ -107,6 +112,9 @@ class Engine:
         response_format: dict[str, str] | None = None,
         improver_fired: bool = False,
         improver_accepted: bool = False,
+        improver_input_sample: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
     ) -> CompletionResult:
         """Resolve model from activity, complete via LiteLLM, write usage."""
         attempt_chain = self._router.build_attempt_chain(
@@ -116,8 +124,10 @@ class Engine:
 
         started = time.perf_counter()
         content = ""
+        tool_calls: list[dict[str, Any]] = []
         model_used = attempt_chain[0] if attempt_chain else self._router.fallback_model
         prompt_tokens = 0
+        completion_tokens = 0
         cost = 0.0
         error: str | None = None
         success = False
@@ -125,11 +135,20 @@ class Engine:
         for index, candidate in enumerate(attempt_chain):
             api_key = api_key_for_model(candidate, self._router.provider_keys)
             try:
-                content, model_used, prompt_tokens, cost = _call_litellm(
+                (
+                    content,
+                    model_used,
+                    prompt_tokens,
+                    completion_tokens,
+                    cost,
+                    tool_calls,
+                ) = _call_litellm(
                     candidate,
                     messages,
                     api_key=api_key,
                     response_format=response_format,
+                    tools=tools,
+                    tool_choice=tool_choice,
                 )
                 success = True
                 break
@@ -156,6 +175,7 @@ class Engine:
             cost=cost,
             improver_fired=improver_fired,
             improver_accepted=improver_accepted,
+            improver_input_sample=improver_input_sample,
             latency_ms=latency_ms,
             success=success,
         )
@@ -163,10 +183,12 @@ class Engine:
             content=content,
             model_used=model_used,
             prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
             cost=cost,
             latency_ms=latency_ms,
             success=success,
             error=error,
+            tool_calls=tool_calls,
         )
 
     def complete_stream(
@@ -292,8 +314,10 @@ def _call_litellm(
     *,
     api_key: str | None = None,
     response_format: dict[str, str] | None = None,
-) -> tuple[str, str, int, float]:
-    """Call LiteLLM with caching; return content and usage metadata."""
+    tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
+) -> tuple[str, str, int, int, float, list[dict[str, Any]]]:
+    """Call LiteLLM with caching; return content, usage metadata, and tool_calls."""
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,
@@ -303,6 +327,10 @@ def _call_litellm(
         kwargs["api_key"] = api_key
     if response_format is not None:
         kwargs["response_format"] = response_format
+    if tools is not None:
+        kwargs["tools"] = tools
+    if tool_choice is not None:
+        kwargs["tool_choice"] = tool_choice
     response = litellm.completion(**kwargs)
     return _parse_response(response, default_model=model)
 
@@ -352,11 +380,37 @@ def _parse_response(
     response: Any,
     *,
     default_model: str,
-) -> tuple[str, str, int, float]:
-    content = response.choices[0].message.content or ""
+) -> tuple[str, str, int, int, float, list[dict[str, Any]]]:
+    message = response.choices[0].message
+    content = message.content or ""
+    tool_calls = _serialize_tool_calls(getattr(message, "tool_calls", None))
     model_used = getattr(response, "model", None) or default_model
     usage = getattr(response, "usage", None)
     prompt_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
+    completion_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
     hidden = getattr(response, "_hidden_params", {}) or {}
     cost = float(hidden.get("response_cost", 0.0) or 0.0)
-    return content, str(model_used), prompt_tokens, cost
+    return content, str(model_used), prompt_tokens, completion_tokens, cost, tool_calls
+
+
+def _serialize_tool_calls(raw: Any) -> list[dict[str, Any]]:
+    """Convert LiteLLM tool_calls objects into OpenAI-compatible dicts."""
+    if not raw:
+        return []
+    result: list[dict[str, Any]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            result.append(item)
+            continue
+        function = getattr(item, "function", None)
+        result.append(
+            {
+                "id": getattr(item, "id", ""),
+                "type": getattr(item, "type", "function"),
+                "function": {
+                    "name": getattr(function, "name", "") if function else "",
+                    "arguments": getattr(function, "arguments", "") if function else "",
+                },
+            }
+        )
+    return result

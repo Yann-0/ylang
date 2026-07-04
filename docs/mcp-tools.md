@@ -20,6 +20,8 @@ Expand a rough user prompt into a structured, actionable specification. **Propos
 | `use_context` | boolean | no | `true` | Include conversation, facts, and reference prompts |
 | `conversation` | array | no | `null` | `[{role, content}, ...]` prior turns |
 | `mode` | string | no | `null` | Explicit Cursor mode: `agent`, `plan`, `debug`, `ask`, `multitask` |
+| `accepted` | boolean | no | `false` | When `true`, logs `improver_accepted` on the LLM usage row |
+| `record_acceptance_only` | boolean | no | `false` | Patch the latest usage row’s `improver_accepted` without calling the LLM |
 
 ### Response
 
@@ -316,7 +318,7 @@ Default: last 7 days.
 
 ## detect_patterns
 
-Detect repeated improver usage by **Cursor mode** (from normalized `improve:*` activity suffixes in usage rows) and propose learned templates.
+Detect repeated improver **prompt text** (from `improver_input_sample` on usage rows where `improver_fired=1`) and propose learned templates. Similar prompts are clustered via normalized text and difflib ratio (≥ 85%); patterns require at least 3 occurrences.
 
 ### Parameters
 
@@ -331,15 +333,15 @@ Detect repeated improver usage by **Cursor mode** (from normalized `improve:*` a
   "ok": true,
   "patterns": [
     {
-      "pattern_id": "agent",
-      "sample_text": "agent",
-      "occurrence_count": 12
+      "pattern_id": "refactor-the-gateway-routes-for-async-sqlite",
+      "sample_text": "Refactor the gateway routes for async sqlite",
+      "occurrence_count": 5
     }
   ],
   "proposals": [
     {
-      "suggested_template_id": "learned-agent",
-      "name": "Learned: Agent",
+      "suggested_template_id": "learned-refactor-the-gateway-routes-for-async-sqlite",
+      "name": "Learned: Refactor The Gateway Routes For Async Sqlite",
       "body": "Reuse the prompt pattern detected from your improver history:\n\n{sample}",
       "params": [{"name": "sample", "description": "Example text from detected pattern", "default": "agent"}],
       "rationale": "Detected 12 improver calls for tool 'agent' in the last 30 days."

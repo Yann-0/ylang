@@ -6,6 +6,7 @@ SQLite pragmas on open:
 
 - `journal_mode=WAL`
 - `busy_timeout=5000` (5 seconds)
+- Connections use `check_same_thread=False` so async HTTP handlers can run queries in worker threads
 
 ## Entity relationship
 
@@ -40,6 +41,7 @@ erDiagram
         INTEGER improver_accepted
         INTEGER latency_ms
         INTEGER success
+        TEXT improver_input_sample
     }
     facts {
         INTEGER id PK
@@ -63,7 +65,8 @@ Written on **every** `Engine.complete()` or `Engine.complete_stream()` call.
 | `prompt_tokens` | INTEGER | Prompt token count |
 | `cost` | REAL | Estimated USD cost from LiteLLM |
 | `improver_fired` | INTEGER | 1 if improver initiated the call |
-| `improver_accepted` | INTEGER | Reserved for future accept tracking |
+| `improver_accepted` | INTEGER | 1 when improver suggestion was accepted |
+| `improver_input_sample` | TEXT | Truncated original prompt when improver fired (~200 chars) |
 | `latency_ms` | INTEGER | Wall-clock latency |
 | `success` | INTEGER | 1 if completion succeeded |
 

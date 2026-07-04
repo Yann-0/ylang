@@ -503,3 +503,53 @@ def test_auto_apply_true_for_non_precision_tools(improver: Improver) -> None:
     with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
         result = improver.improve("ok", "cursor-agent", model="test-model")
     assert result.auto_apply_default is True
+
+
+def test_improver_records_accepted_when_validated_and_changed(improver: Improver) -> None:
+    original = "fix teh bug"
+    payload = {
+        "improved": "fix the bug",
+        "changes": [
+            {
+                "kind": "clarity",
+                "description": "spelling",
+                "before": "teh",
+                "after": "the",
+            }
+        ],
+    }
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps(payload)))
+    ]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = improver.improve(original, "edit_file", model="test-model")
+
+    assert result.validated is True
+    from ylang.usage.store import UsageWindow
+
+    rows = improver._engine.store.recall_usage(UsageWindow.last_hours(1))
+    assert len(rows) == 1
+    assert rows[0].improver_accepted is True
+
+
+def test_improver_accepted_param_logged_on_complete(improver: Improver) -> None:
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps({"improved": "hello", "changes": []})))
+    ]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        improver.improve("hello", "edit_file", model="test-model", accepted=True)
+
+    from ylang.usage.store import UsageWindow
+
+    rows = improver._engine.store.recall_usage(UsageWindow.last_hours(1))
+    assert rows[0].improver_accepted is True

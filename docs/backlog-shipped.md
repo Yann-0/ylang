@@ -1,7 +1,7 @@
 # Ylang — Backlog shipped
 
 **Date:** 2026-06-30 (updated 2026-07-04)  
-**Status:** 135 tests passing; 11 MCP tools live; OpenAI gateway on HTTP transport
+**Status:** All Phase 2 + 3 backlog items shipped
 
 See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (historical). This addendum records what was shipped.
 
@@ -19,7 +19,7 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (histo
 - [x] HTTP bearer auth tests
 - [x] Consolidated SQLite connection via `core/stores.py`
 
-### Phase 2
+### Phase 2 (original)
 
 - [x] Pattern detection MVP (`UsagePatternDetector` + `detect_patterns` tool)
 - [x] Learned template source (`save_learned_template` MCP tool)
@@ -31,8 +31,26 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (histo
 - [x] OpenAI-compatible gateway — `POST /v1/chat/completions`, `GET /v1/models`, streaming SSE
 - [x] Usage activity normalization at write time (`improve:Cursor` → `improve:agent`)
 
+### Phase 1 (2026-07-04)
+
+- [x] Usage aggregate cache — 45s TTL on `summarize_usage` / `rolling_cost` row recall
+- [x] Gateway completion token parity — non-streaming `usage.completion_tokens` + `total_tokens`
+- [x] `improver_accepted` wiring — MCP `accepted` / `record_acceptance_only`; Cursor hook records acceptance
+
+### Phase 2 (2026-07-04)
+
+- [x] Pattern detection v2 — `improver_input_sample` column; cluster by normalized prompt text similarity
+- [x] CLI usage report — `ylang usage summary --last-days 7` / `--last-hours N`
+- [x] Budget meter hardening — edge-case integration tests; 80% startup stderr warning
+
+### Phase 3 (2026-07-04)
+
+- [x] Local usage dashboard — `GET /usage` on HTTP transport + `ylang usage dashboard`
+- [x] Gateway tool calling passthrough — `tools` / `tool_choice` forwarded; `tool_calls` in response
+- [x] Async SQLite — sync store ops run via `anyio.to_thread.run_sync` in gateway handlers
+
 ## Remaining (future)
 
-- Rich usage analytics UI (L)
-- Text-based pattern clustering from improver input (today: clusters on `improve:*` activity suffix counts)
-- Wire `improver_accepted` tracking from client acceptance events
+- Rich usage analytics UI with live charts (beyond static HTML)
+- Streaming tool-call passthrough
+- Full aiosqlite migration (only if profiling shows thread offload insufficient)

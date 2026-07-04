@@ -17,6 +17,7 @@ from ylang.mcp.auth import BearerTokenMiddleware
 from ylang.mcp.deps import YlangDeps
 from ylang.mcp.tools import register_tools
 from ylang.settings import Settings
+from ylang.usage.budget import warn_budget_threshold
 
 _TOOL_NAMES = (
     "improve_prompt",
@@ -68,7 +69,7 @@ def _print_connection_details(settings: Settings) -> None:
         print(f"  listen: {settings.host}:{settings.port}/mcp", file=sys.stderr)
         print("  auth: Bearer token required", file=sys.stderr)
         print("  gateway: enabled", file=sys.stderr)
-        print("  gateway routes: POST /v1/chat/completions, GET /v1/models", file=sys.stderr)
+        print("  gateway routes: POST /v1/chat/completions, GET /v1/models, GET /usage", file=sys.stderr)
         print(
             f"  virtual models: {', '.join(VIRTUAL_MODEL_NAMES)}",
             file=sys.stderr,
@@ -118,6 +119,7 @@ def run_server() -> None:
     )
     server = create_server(deps, settings, gateway_engine=gateway_engine)
     _print_connection_details(settings)
+    warn_budget_threshold(settings, stores.store)
     settings.log_llm_config(router=engine.router)
     try:
         if settings.transport == "stdio":
