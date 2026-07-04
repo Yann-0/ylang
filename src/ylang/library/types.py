@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-TemplateSource = Literal["seed", "user", "learned"]
-TemplateVisibility = Literal["public", "private"]
+TemplateSource = Literal["seed", "user", "learned"]  # Origin of a template version
+TemplateVisibility = Literal["public", "private"]  # Library list filter and recall scope
 
 
 @dataclass(frozen=True, slots=True)

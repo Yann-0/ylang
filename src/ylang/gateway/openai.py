@@ -22,6 +22,7 @@ class GatewayRequestError(Exception):
         param: str | None = None,
         code: str | None = None,
     ) -> None:
+        """Capture a client-facing error message and optional OpenAI error fields."""
         super().__init__(message)
         self.message = message
         self.param = param
@@ -108,7 +109,10 @@ def openai_error_response(
 
 
 def models_list_payload() -> dict[str, Any]:
-    """Return the virtual model catalog for GET /v1/models."""
+    """Return the virtual ``route-*`` catalog for GET /v1/models.
+
+    Passthrough provider slugs are accepted on chat completions but not listed here.
+    """
     created = int(time.time())
     return {
         "object": "list",

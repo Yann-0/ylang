@@ -1,4 +1,8 @@
-"""Local prompt template library (Phase 1)."""
+"""Versioned prompt template library with retrieval and pattern learning.
+
+Re-exports store types, pattern detection registry symbols, and ``open_library``.
+``Library.list_templates`` caches summaries in memory until the next ``save()``.
+"""
 
 from ylang.library.patterns import (
     DetectedPattern,

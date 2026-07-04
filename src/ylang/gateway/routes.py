@@ -80,7 +80,7 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
 
     @server.custom_route("/usage", methods=["GET"])
     async def usage_dashboard(_request: Request) -> Response:
-        """Minimal HTML dashboard for the last 7 days of usage."""
+        """Chart.js dashboard for the last 7 days; auto-refreshes every 30 seconds."""
         window = UsageWindow.last_days(7)
         summary = await run_store_sync(summarize_usage, engine.store, window)
         buckets = await run_store_sync(daily_usage_buckets, engine.store, window)

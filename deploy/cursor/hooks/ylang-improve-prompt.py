@@ -1,5 +1,14 @@
 #!/srv/ylang/app/.venv/bin/python3
-"""Cursor beforeSubmitPrompt hook: call Ylang improve_prompt on every user message."""
+"""Cursor ``beforeSubmitPrompt`` hook: call Ylang ``improve_prompt`` on user messages.
+
+Reads ``YLANG_MCP_URL`` / ``YLANG_AUTH_TOKEN`` (from ``sessionStart`` hook env or
+``~/.cursor/mcp.json``). Skips ``/loop``, ``/YOLO``, ``/ylang-skip``, meta prompts,
+and reference-only ``@file`` lines. Fail-open: errors log to
+``~/.cursor/hooks/ylang-improve-prompt.log`` and return ``continue: true``.
+
+Writes the latest result to ``.cursor/ylang-improved-prompt.md`` in the workspace.
+The shebang path is deployment-specific; point hooks at your venv Python.
+"""
 
 from __future__ import annotations
 
@@ -235,6 +244,7 @@ def _fail_open() -> None:
 
 
 def main() -> None:
+    """Parse stdin hook payload, call ``improve_prompt``, and emit Cursor JSON."""
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}

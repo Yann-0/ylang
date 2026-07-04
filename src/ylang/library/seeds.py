@@ -22,6 +22,7 @@ class SeedTemplateSpec:
     tags: tuple[str, ...] = ()
 
 
+# Bundled templates inserted on first library open (idempotent by template_id).
 SEED_TEMPLATES: list[SeedTemplateSpec] = [
     SeedTemplateSpec(
         template_id="summarize",

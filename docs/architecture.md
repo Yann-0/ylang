@@ -9,7 +9,7 @@ flowchart TB
     subgraph faces["Faces (adapters)"]
         MCP["MCP server<br/>stdio / HTTP"]
         GW["OpenAI gateway<br/>/v1/chat/completions"]
-        CLI["Importer CLI<br/>python -m ylang.importer"]
+        CLI["CLI<br/>ylang usage / patterns"]
     end
 
     subgraph domain["Domain packages"]
@@ -49,16 +49,19 @@ flowchart TB
 2. **Propose-only improver** — `improve_prompt` returns suggestions; it does not auto-apply edits to files or commands.
 3. **Local-first** — SQLite at a configurable path; no Ylang cloud storage.
 4. **Usage from day one** — Every completion writes a row to the `usage` table.
-5. **Small surface** — Phase 1 scope is intentionally limited. See project guardrails in `.cursor/rules/00-project.mdc`.
+5. **Thin adapters** — MCP, gateway, and CLI subcommands serialize I/O; they do not embed routing or provider logic.
 
 ## Package layout
 
 ```
 src/ylang/
-├── __main__.py          # Entry: python -m ylang → MCP server
+├── __main__.py          # Entry: MCP server, ylang usage, ylang patterns
 ├── settings.py          # Typed config from environment
+├── cli/
+│   ├── usage.py         # Aggregates and standalone HTML dashboard export
+│   └── patterns.py      # ylang patterns suggest (learned templates)
 ├── core/
-│   ├── engine.py        # LiteLLM completion + usage logging
+│   ├── engine.py        # LiteLLM completion + usage logging (stream + tools)
 │   ├── model_router.py  # Activity-based model selection, fallback chain
 │   ├── db.py            # Shared SQLite connection (WAL, busy timeout)
 │   ├── stores.py        # open_stores() — one connection, three stores
@@ -71,7 +74,7 @@ src/ylang/
 │   ├── registry.py      # Cursor mode resolution, auto-apply defaults
 │   └── types.py         # ImprovementResult, Change
 ├── library/
-│   ├── store.py         # Versioned template CRUD
+│   ├── store.py         # Versioned template CRUD (in-memory list cache)
 │   ├── retrieval.py     # Score/select reference prompts
 │   ├── pattern_detector.py  # Usage-based pattern detection
 │   ├── patterns.py      # Pattern detector registry
@@ -80,18 +83,19 @@ src/ylang/
 ├── usage/
 │   ├── store.py         # Usage row writes and time-window reads
 │   ├── activity.py      # Canonical activity labels at write time
-│   └── aggregates.py    # Summaries by activity, model, cost
+│   ├── aggregates.py    # Summaries by activity, model, cost (TTL cache)
+│   ├── dashboard.py     # Chart.js HTML for GET /usage and CLI export
+│   └── async_ops.py     # run_store_sync for non-blocking HTTP handlers
 ├── gateway/
-│   ├── routes.py        # /v1/chat/completions, /v1/models handlers
+│   ├── routes.py        # /v1/chat/completions, /v1/models, GET /usage
 │   ├── mapping.py       # Virtual route-* model resolution
 │   └── openai.py        # Request parsing and response shaping
 ├── importer/            # CSV public-prompt import (CLI + MCP tool)
-├── mcp/
-│   ├── server.py        # FastMCP wiring and transport
-│   ├── tools.py         # MCP tool handlers (thin serializers)
-│   ├── deps.py          # YlangDeps dependency bundle
-│   └── auth.py          # Bearer token middleware (HTTP only)
-└── gateway/             # OpenAI-compatible HTTP face (chat completions, models)
+└── mcp/
+    ├── server.py        # FastMCP wiring and transport
+    ├── tools.py         # MCP tool handlers (thin serializers)
+    ├── deps.py          # YlangDeps dependency bundle
+    └── auth.py          # Bearer token middleware (HTTP only)
 ```
 
 ## Request flow: gateway chat completion
@@ -208,14 +212,28 @@ The usage store uses synchronous `sqlite3` with `check_same_thread=False` so wor
 
 See [gateway.md](gateway.md) for virtual models and Cursor setup.
 
-## Extension points (future)
+## v0.2.0 faces (HTTP transport)
+
+| Face | Path / command | Notes |
+|------|----------------|-------|
+| MCP | `/mcp` or stdio | 11 tools including `improve_prompt` |
+| Gateway | `POST /v1/chat/completions`, `GET /v1/models` | Streaming tool-call passthrough; token counts in final SSE chunk |
+| Usage dashboard | `GET /usage` | Chart.js, 30s auto-refresh |
+| CLI | `ylang usage`, `ylang patterns suggest` | Standalone HTML export via `ylang usage dashboard` |
+
+`Library.list_templates()` caches summaries in memory until the next `save()`.
+
+Optional Ollama smoke tests use `@pytest.mark.llm_e2e`.
+
+## Extension points
 
 | Seam | Location | Status |
 |------|----------|--------|
 | OpenAI gateway | `gateway/` | **Live** on HTTP transport |
-| Pattern detector | `library/patterns.py` | Wired (`UsagePatternDetector`) |
+| Usage dashboard | `usage/dashboard.py`, `GET /usage` | **Live** on HTTP transport |
+| Pattern detector | `library/patterns.py` | **Live** (`UsagePatternDetector`) |
 | Personal preference routing | `model_router.apply_preference_order` | Implemented, uses usage aggregates |
-| Learned templates | `library/store.py` `source="learned"` | MCP tools wired |
+| Learned templates | `library/store.py` `source="learned"` | MCP tools + `ylang patterns suggest` |
 
 ## Related docs
 

@@ -1,4 +1,4 @@
-"""Optional smoke tests against a live Ollama instance."""
+"""Optional smoke tests against a live Ollama instance (``@pytest.mark.llm_e2e``)."""
 
 from __future__ import annotations
 

@@ -318,13 +318,13 @@ Default: last 7 days.
 
 ## detect_patterns
 
-Detect repeated improver **prompt text** (from `improver_input_sample` on usage rows where `improver_fired=1`) and propose learned templates. Similar prompts are clustered via normalized text and difflib ratio (≥ 85%); patterns require at least 3 occurrences.
+Detect repeated improver **prompt text** (from `improver_input_sample` on usage rows where `improver_fired=1`) and propose learned templates. Similar prompts are clustered via normalized text and difflib ratio (≥ 85%); patterns require at least 3 occurrences in the lookback window.
 
 ### Parameters
 
 | Name | Type | Default | Description |
 |------|------|---------|-------------|
-| `window_days` | integer | `30` | Lookback period |
+| `window_days` | integer | `30` | Rolling lookback period |
 
 ### Response
 
@@ -343,14 +343,16 @@ Detect repeated improver **prompt text** (from `improver_input_sample` on usage 
       "suggested_template_id": "learned-refactor-the-gateway-routes-for-async-sqlite",
       "name": "Learned: Refactor The Gateway Routes For Async Sqlite",
       "body": "Reuse the prompt pattern detected from your improver history:\n\n{sample}",
-      "params": [{"name": "sample", "description": "Example text from detected pattern", "default": "agent"}],
-      "rationale": "Detected 12 improver calls for tool 'agent' in the last 30 days."
+      "params": [{"name": "sample", "description": "Example text from detected pattern", "default": "..."}],
+      "rationale": "Detected 5 similar improver prompts (e.g. \"Refactor the gateway routes for async sqlite\") in the last 30 days."
     }
   ]
 }
 ```
 
-Patterns require at least **3 occurrences** of the same normalized `improve:*` suffix (e.g. `improve:agent` → pattern id `agent`). Prompt text is **not** clustered today — only activity suffix counts from usage history.
+CLI equivalent: `ylang patterns suggest --window-days 30`.
+
+Only rows with `activity` starting with `improve:` and a non-empty `improver_input_sample` are considered.
 
 ---
 

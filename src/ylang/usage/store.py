@@ -105,12 +105,14 @@ class UsageWindow:
 
     @classmethod
     def last_days(cls, days: int, *, now: datetime | None = None) -> UsageWindow:
+        """Rolling window ending at ``now`` (UTC), spanning ``days`` calendar days."""
         anchor = now or datetime.now(timezone.utc)
         _require_utc(anchor)
         return cls(since=anchor - timedelta(days=days), until=anchor)
 
     @classmethod
     def last_hours(cls, hours: int, *, now: datetime | None = None) -> UsageWindow:
+        """Rolling window ending at ``now`` (UTC), spanning ``hours`` hours."""
         anchor = now or datetime.now(timezone.utc)
         _require_utc(anchor)
         return cls(since=anchor - timedelta(hours=hours), until=anchor)

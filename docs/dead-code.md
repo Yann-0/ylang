@@ -20,7 +20,7 @@ See [gateway.md](gateway.md).
 
 ---
 
-## Pattern detection (wired in Phase 1)
+## Pattern detection (wired in v0.2.0)
 
 `UsagePatternDetector` is registered at MCP startup (`mcp/server.py`). MCP tools `detect_patterns` and `save_learned_template` are live.
 

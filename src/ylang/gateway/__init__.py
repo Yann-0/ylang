@@ -1,4 +1,8 @@
-"""OpenAI-compatible gateway face over the shared core engine."""
+"""OpenAI-compatible gateway face over the shared core engine.
+
+Re-exports ``register_gateway_routes`` and virtual model name constants used at
+HTTP startup.
+"""
 
 from __future__ import annotations
 

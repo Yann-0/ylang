@@ -19,6 +19,7 @@ class BearerTokenMiddleware:
     """Reject HTTP requests whose Authorization header is not ``Bearer <token>``."""
 
     def __init__(self, app: ASGIApp, token: str) -> None:
+        """Wrap ``app`` and require ``Authorization: Bearer <token>`` on HTTP requests."""
         self.app = app
         self._expected = f"Bearer {token}"
 

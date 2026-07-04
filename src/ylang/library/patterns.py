@@ -1,4 +1,9 @@
-"""Future detected-pattern → propose template hook."""
+"""Pattern detection registry and propose-only learned-template types.
+
+``UsagePatternDetector`` (see ``library/pattern_detector.py``) is registered at
+MCP startup. MCP ``detect_patterns`` and ``ylang patterns suggest`` call
+``detect_patterns()`` here.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +36,7 @@ class PatternDetector:
     """Interface for a pattern-detection backend."""
 
     def detect(self, *, window_days: int = 30) -> list[DetectedPattern]:
+        """Return detected patterns within the rolling lookback window."""
         raise NotImplementedError("Register a PatternDetector via register_pattern_detector().")
 
 

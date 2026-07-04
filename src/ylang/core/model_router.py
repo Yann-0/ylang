@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 _ACTIVITIES: tuple[Activity, ...] = ("code", "search", "reason", "improve", "other")
 
-CandidateStatus = str  # "available" | "skipped:no_key" | "skipped:cooldown"
+CandidateStatus = str  # ``available`` | ``skipped:no_key`` | ``skipped:cooldown``
 
 # Cursor IDE model slugs → LiteLLM provider/model strings (best-effort).
 _CURSOR_SLUG_ALIASES: dict[str, str] = {
@@ -85,7 +85,7 @@ def estimated_unit_cost(model: str) -> float:
     return input_cost + output_cost
 
 
-# --- Seam 2C: personal preference ---
+# Personal preference: reorder candidates by historical success counts (Seam 2C).
 def apply_preference_order(
     candidates: list[str],
     activity: Activity | str,
@@ -108,7 +108,7 @@ def apply_preference_order(
     return ranked
 
 
-# --- Seam 2B: budget meter ---
+# Budget meter: drop cloud models when rolling 24h spend exceeds cap (Seam 2B).
 def apply_budget_filter(
     candidates: list[str],
     activity: Activity | str,

@@ -18,6 +18,7 @@ from ylang.settings import Settings
 
 
 def main() -> int:
+    """Run a live ``improve_prompt`` smoke test against a real LLM provider."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--db",

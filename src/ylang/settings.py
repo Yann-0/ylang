@@ -1,4 +1,9 @@
-"""Single typed settings object for ylang."""
+"""Single typed settings object for ylang.
+
+Loads environment variables and legacy aliases into a ``Settings`` instance.
+Default activity model lists, fallback model, HTTP transport, and budget caps
+are defined here; see ``docs/configuration.md`` for the full env-var reference.
+"""
 
 from __future__ import annotations
 

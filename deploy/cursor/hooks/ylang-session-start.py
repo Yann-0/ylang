@@ -1,5 +1,10 @@
 #!/srv/ylang/app/.venv/bin/python3
-"""Cursor sessionStart hook: export Ylang MCP settings for other hooks."""
+"""Cursor ``sessionStart`` hook: export Ylang MCP URL and auth for other hooks.
+
+Prints JSON with ``env.YLANG_MCP_URL``, ``YLANG_AUTH_TOKEN``, and a default
+``YLANG_HOOK_MODEL``. On failure, emits ``YLANG_HOOK_ERROR`` so the session still
+starts. MCP config loading mirrors ``ylang-improve-prompt.py``.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,7 @@ from pathlib import Path
 
 
 def _load_ylang_mcp() -> tuple[str, str]:
+    """Read ylang URL and bearer token from ``~/.cursor/mcp.json``."""
     config_path = Path.home() / ".cursor" / "mcp.json"
     payload = json.loads(config_path.read_text(encoding="utf-8"))
     ylang = (payload.get("mcpServers") or {}).get("ylang") or {}
@@ -21,6 +27,7 @@ def _load_ylang_mcp() -> tuple[str, str]:
 
 
 def main() -> None:
+    """Load MCP settings from ``~/.cursor/mcp.json`` and print hook env JSON."""
     try:
         mcp_url, auth_token = _load_ylang_mcp()
         output = {

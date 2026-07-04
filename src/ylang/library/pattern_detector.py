@@ -90,7 +90,12 @@ def cluster_prompt_texts(texts: list[str]) -> list[list[str]]:
 
 
 def propose_template_from_pattern(pattern: DetectedPattern) -> TemplateProposal | None:
-    """Convert a detected pattern into a propose-only learned template."""
+    """Convert a detected pattern into a propose-only learned template.
+
+    Returns ``None`` when ``occurrence_count`` is below the minimum threshold.
+    The proposal ``rationale`` string currently references a 30-day window regardless
+    of the ``window_days`` passed to ``detect()`` (see issue backlog if parameterized).
+    """
     if pattern.occurrence_count < _MIN_OCCURRENCES:
         return None
     template_id = f"learned-{pattern.pattern_id}"

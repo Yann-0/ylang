@@ -1,4 +1,9 @@
-"""Entry point for `python -m ylang`."""
+"""Entry point for ``python -m ylang``.
+
+With no subcommand, starts the MCP server (stdio or HTTP per ``Settings``).
+Subcommands: ``usage`` (aggregates and HTML dashboard export) and ``patterns``
+(learned-template proposals from improver usage history).
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,7 @@ from ylang.mcp.server import run_server
 
 
 def main() -> None:
-    """Start the ylang MCP server or run CLI subcommands."""
+    """Dispatch ``ylang usage``, ``ylang patterns``, or the MCP server."""
     if len(sys.argv) > 1 and sys.argv[1] == "usage":
         from ylang.cli.usage import run_usage_cli
 

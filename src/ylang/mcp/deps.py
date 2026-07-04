@@ -18,4 +18,4 @@ class YlangDeps:
     library: Library
     store: UsageStore
     memory: MemoryStore
-    surface: str = "mcp"
+    surface: str = "mcp"  # Persisted on usage rows written by MCP tools

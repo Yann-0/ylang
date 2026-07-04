@@ -8,7 +8,7 @@ from typing import Literal
 from ylang.improver.registry import CursorMode, ModeSource
 
 
-ChangeKind = Literal["clarity", "format", "constraint", "example", "scope"]
+ChangeKind = Literal["clarity", "format", "constraint", "example", "scope"]  # Change taxonomy
 
 
 @dataclass(frozen=True, slots=True)

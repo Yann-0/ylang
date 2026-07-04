@@ -120,6 +120,7 @@ class Library:
     """Local versioned prompt template store."""
 
     def __init__(self, connection: sqlite3.Connection) -> None:
+        """Attach to an open SQLite connection; ``list_templates`` results are cached."""
         self._connection = connection
         self._list_cache: dict[tuple[TemplateSource | None, TemplateVisibility | None], list[TemplateSummary]] = {}
 

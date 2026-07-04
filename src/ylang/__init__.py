@@ -1,8 +1,11 @@
 """Ylang — personal AI efficiency layer.
 
-Phase 1 exposes an MCP server for prompt improvement, a local template library,
-usage tracking, and scoped user memory. See the repository README and ``docs/``
-for installation and architecture.
+v0.2.0 ships one shared core engine with multiple thin faces: MCP (stdio/HTTP),
+an OpenAI-compatible gateway on HTTP transport, and CLI helpers for usage
+reporting and pattern-based template suggestions. Domain packages cover
+propose-only prompt improvement, a versioned template library, usage tracking,
+and scoped user memory. See ``docs/`` for installation, gateway setup, and
+architecture.
 """
 
 __version__ = "0.2.0"

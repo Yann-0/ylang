@@ -62,6 +62,18 @@ class Engine:
         quality_band: int | None = None,
         provider_cooldown_seconds: int | None = None,
     ) -> None:
+        """Wire a usage store and routing surface label for completion logging.
+
+        Args:
+            store: Shared usage store for writes and router budget/preference reads.
+            surface: Logical face label persisted on usage rows (e.g. ``mcp``, ``gateway``).
+            router: Pre-built router; when omitted, built from the remaining kwargs.
+            activity_model_lists: Per-activity model priority lists.
+            provider_keys: Cloud API keys for availability checks.
+            fallback_model: Local floor model appended to every attempt chain.
+            quality_band: Max rank offset for cost tie-break among available models.
+            provider_cooldown_seconds: Cooldown after retryable provider failures.
+        """
         self._store = store
         self._surface = surface
         if router is not None:

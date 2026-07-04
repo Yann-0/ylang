@@ -1,4 +1,8 @@
-"""Shared core engine."""
+"""Shared core engine and routing primitives.
+
+Re-exports ``Engine``, ``ModelRouter``, chat types, and default activity model
+lists from ``settings``.
+"""
 
 from ylang.core.engine import FALLBACK_MODEL, Engine
 from ylang.core.model_router import ModelRouter

@@ -40,7 +40,12 @@ def create_server(
     *,
     gateway_engine: Engine | None = None,
 ) -> FastMCP:
-    """Create and configure the MCP server instance."""
+    """Create and configure the MCP server instance.
+
+    When ``settings.transport`` is ``http``, binds host/port and registers MCP on
+    ``/mcp``. Pass ``gateway_engine`` to also mount OpenAI gateway routes and
+    ``GET /usage`` on the same app (stdio transport ignores ``gateway_engine``).
+    """
     if settings is not None and settings.transport == "http":
         server = FastMCP(
             "ylang",

@@ -62,7 +62,7 @@ def import_into_library(
     csv_path: Path | None = None,
     csv_text: str | None = None,
 ) -> ImportResult:
-    """Import external prompts as seed templates; skip existing template_ids."""
+    """Open ``db_path``, import seed templates, then close the library connection."""
     library = open_library(db_path)
     try:
         return import_prompts(

@@ -1,4 +1,8 @@
-"""CLI: python -m ylang.importer"""
+"""CLI entry: ``python -m ylang.importer``.
+
+Defaults to a local ``.ylang/library.db`` path; production deployments typically
+pass ``--db`` pointing at the shared Ylang storage file.
+"""
 
 from __future__ import annotations
 
