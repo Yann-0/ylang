@@ -47,6 +47,48 @@ python -m ylang    # starts MCP server on stdio — press Ctrl+C to stop
 
 There is no `--help` flag; `python -m ylang` always starts the server. The process prints connection details to **stderr** and waits for MCP traffic on stdin/stdout (stdio transport).
 
+## CLI (`ylang` command)
+
+`pip install -e .` installs a **`ylang`** console script into the active venv (`app/.venv/bin/ylang`). It is **not** on your shell `PATH` until you activate the venv or use a wrapper.
+
+### From `app/` (development)
+
+```bash
+cd app
+source .venv/bin/activate
+ylang usage digest --last-days 7
+ylang patterns apply --help
+```
+
+Same without activation:
+
+```bash
+app/.venv/bin/ylang usage digest --last-days 7
+```
+
+### Workspace layout (`/srv/ylang`)
+
+This server keeps the git tree in **`app/`** and often a second venv at **`/srv/ylang/.venv`** for systemd (`python -m ylang`). The CLI wrapper prefers `app/.venv`, then falls back to the root venv:
+
+```bash
+# One-time: put `ylang` on PATH (pick one)
+ln -sf /srv/ylang/app/deploy/ylang-cli ~/.local/bin/ylang
+# or
+mkdir -p /srv/ylang/bin && ln -sf ../app/deploy/ylang-cli /srv/ylang/bin/ylang
+export PATH="/srv/ylang/bin:$PATH"   # add to ~/.bashrc / ~/.zshrc to persist
+
+ylang patterns apply --help
+```
+
+For CLI commands that read the **same SQLite file as the HTTP service**, load the service env first:
+
+```bash
+set -a && source /srv/ylang/ylang.env && set +a
+ylang usage digest --last-days 7
+```
+
+The `ylang` system user owns `/srv/ylang/data/`. Run **`sudo deploy/setup-cli-access.sh`** once as root, then use a new login session. See [deployment.md](deployment.md#shared-cli-access).
+
 ## First run
 
 1. **Set at least one LLM provider key** (or configure a local Ollama fallback). See [configuration.md](configuration.md).

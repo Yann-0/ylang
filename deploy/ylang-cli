@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Run the ylang console script from this workspace's virtualenv.
+set -euo pipefail
+
+SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
+APP_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
+WS_ROOT="$(cd "$APP_ROOT/.." && pwd)"
+
+for candidate in \
+  "$APP_ROOT/.venv/bin/ylang" \
+  "$WS_ROOT/.venv/bin/ylang"; do
+  if [[ -x "$candidate" ]]; then
+    exec "$candidate" "$@"
+  fi
+done
+
+echo "ylang: no virtualenv CLI found. From app/: python3 -m venv .venv && source .venv/bin/activate && pip install -e ." >&2
+echo "  (see docs/installation.md)" >&2
+exit 127
