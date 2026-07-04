@@ -2,16 +2,122 @@
 
 Ylang exposes an **OpenAI-compatible HTTP gateway** on the same host, port, and bearer auth as the MCP HTTP transport. Point Cursor (or any OpenAI-compatible client) at it to route real coding traffic through Ylang's activity-based model selection.
 
+The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr logs the route paths and virtual model names.
+
 ## Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/v1/chat/completions` | Chat completions (streaming and non-streaming) |
-| `GET` | `/v1/models` | Virtual route models and passthrough catalog |
+| `GET` | `/v1/models` | Virtual route model catalog |
 
-Auth: `Authorization: Bearer <YLANG_AUTH_TOKEN>` — same token as MCP HTTP. Requests without a valid token receive **401**.
+Both routes share the same HTTP server as MCP (`/mcp`). There is no separate gateway port or process.
 
-The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr logs the route and virtual model names.
+## Authorization
+
+HTTP transport requires a bearer token on **every** HTTP request (MCP and gateway):
+
+| Item | Value |
+|------|-------|
+| Header | `Authorization: Bearer <YLANG_AUTH_TOKEN>` |
+| Env var | `YLANG_AUTH_TOKEN` (required when `YLANG_TRANSPORT=http`) |
+| Missing / wrong token | **401 Unauthorized** (plain text body) |
+| stdio transport | No auth — Cursor spawns a local subprocess |
+
+The middleware compares the full `Authorization` header value with constant-time `secrets.compare_digest`. Send exactly `Bearer <token>` with no extra whitespace.
+
+## GET /v1/models
+
+Returns the four virtual route models. Passthrough provider slugs are **not** listed here — clients may still send them in `POST /v1/chat/completions`.
+
+**Sample response:**
+
+```json
+{
+  "object": "list",
+  "data": [
+    {"id": "route-code", "object": "model", "created": 1710000000, "owned_by": "ylang"},
+    {"id": "route-search", "object": "model", "created": 1710000000, "owned_by": "ylang"},
+    {"id": "route-reason", "object": "model", "created": 1710000000, "owned_by": "ylang"},
+    {"id": "route-other", "object": "model", "created": 1710000000, "owned_by": "ylang"}
+  ]
+}
+```
+
+## POST /v1/chat/completions
+
+### Request
+
+Required JSON fields:
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `model` | string | Virtual `route-*` id or passthrough model slug |
+| `messages` | array | At least one message; each has `role` (`system`, `user`, or `assistant`) and `content` |
+| `stream` | boolean | Optional; default `false`. Set `true` for SSE streaming |
+
+`content` may be a string or an array of `{type: "text", text: "..."}` parts (text parts are joined with newlines).
+
+**Sample non-streaming request:**
+
+```json
+{
+  "model": "route-code",
+  "messages": [{"role": "user", "content": "write hello world in python"}]
+}
+```
+
+### Non-streaming response
+
+On success (**200**), the body matches OpenAI `chat.completion` shape:
+
+```json
+{
+  "id": "chatcmpl-abc123...",
+  "object": "chat.completion",
+  "created": 1710000000,
+  "model": "route-code",
+  "choices": [
+    {
+      "index": 0,
+      "message": {"role": "assistant", "content": "..."},
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 12,
+    "completion_tokens": 0,
+    "total_tokens": 12
+  }
+}
+```
+
+The `model` field echoes the **client request model** (e.g. `route-code`), not the LiteLLM model that actually served the call.
+
+Errors use OpenAI-style `{ "error": { "message", "type", "param?", "code?" } }` JSON. Common cases:
+
+| Status | When |
+|--------|------|
+| 400 | Invalid JSON, missing `model`/`messages`, bad message shape |
+| 401 | Missing or wrong bearer token |
+| 404 | All models in the attempt chain failed (`code: model_not_found`) |
+| 500 | Unexpected server error |
+
+### Streaming
+
+Set `"stream": true`. The response is `text/event-stream` with OpenAI-style SSE chunks:
+
+```text
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+data: [DONE]
+```
+
+If the model chain fails before any content is emitted, the handler returns **404** JSON instead of an SSE stream. Partial stream failures after content has started terminate with a final chunk and `[DONE]`.
 
 ## Virtual route models
 
@@ -22,13 +128,30 @@ The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr
 | `route-reason` | `reason` | Reasoning / planning models |
 | `route-other` | `other` | General fallback bucket |
 
-Any other `model` string is treated as an **explicit passthrough** to LiteLLM via the Engine (e.g. `ollama/qwen2.5`, `gpt-4o`, `claude-sonnet-4-6`, `mistral/mistral-large`). Provider translation stays in core — the gateway has no provider-specific code.
+Each virtual model triggers **activity routing**: the Engine picks the best available model from the configured list for that activity (see [configuration.md](configuration.md)), then walks the fallback chain on failure.
+
+Gateway traffic does **not** run the improver (`improver_fired=False`).
+
+## Passthrough model names
+
+Any `model` string that is **not** a virtual `route-*` id is treated as an explicit passthrough:
+
+1. The gateway maps it to `activity=other` and passes the raw string to the Engine as `explicit_model`.
+2. `ModelRouter.resolve_explicit_model()` translates it to LiteLLM form when possible:
+   - Already LiteLLM-routable: `provider/model` (e.g. `openai/gpt-4o`, `anthropic/claude-3-5-sonnet-latest`, `mistral/mistral-large-latest`, `ollama/qwen2.5`)
+   - Cursor slug aliases (e.g. `gpt-4o`, `claude-sonnet-4-6`, `composer-2.5-fast`) → mapped provider/model
+   - Prefix rules: `claude-sonnet-4-*` → `anthropic/claude-sonnet-4-6`, `claude-opus-4-*` → `anthropic/claude-opus-4-6`
+   - Unrecognized slugs: warning logged; activity routing proceeds without the explicit model
+3. The attempt chain tries the resolved explicit model first, then the activity-selected model, then remaining candidates, then the fallback floor (`ollama/qwen2.5` by default).
+
+Provider translation lives in core — the gateway has no provider-specific code.
 
 ## Request flow
 
 ```mermaid
 sequenceDiagram
     participant Client as Cursor / OpenAI client
+    participant Auth as BearerTokenMiddleware
     participant GW as gateway/routes.py
     participant Map as gateway/mapping.py
     participant Eng as core/engine.py
@@ -36,7 +159,8 @@ sequenceDiagram
     participant LLM as LiteLLM
     participant DB as usage store
 
-    Client->>GW: POST /v1/chat/completions
+    Client->>Auth: Authorization: Bearer token
+    Auth->>GW: POST /v1/chat/completions
     GW->>Map: resolve_gateway_model(model)
     alt route-code / route-search / ...
         Map-->>GW: activity + no explicit model
@@ -50,8 +174,6 @@ sequenceDiagram
     GW-->>Client: OpenAI JSON or SSE chunks + [DONE]
 ```
 
-Gateway traffic does **not** run the improver (`improver_fired=False`).
-
 ## Cursor setup
 
 1. Deploy Ylang on HTTP transport ([deployment.md](deployment.md)).
@@ -62,9 +184,11 @@ Gateway traffic does **not** run the improver (`improver_fired=False`).
 
 **Notes:**
 
-- Cursor may verify custom endpoints server-side; a LAN hostname can fail verification even when the endpoint works. Try the host IP if needed.
+- **Endpoint verification:** Cursor may verify custom endpoints **server-side**. A LAN hostname can fail verification even when the endpoint works from your machine. Try the host IP address if verification fails.
 - Tab/autocomplete typically stays on Cursor's built-in models; the gateway captures chat/agent requests you explicitly route.
 - MCP (`/mcp`) and the gateway (`/v1/*`) share auth and the same process.
+
+See also [cursor-integration.md](cursor-integration.md) for MCP and hook setup (complementary to gateway routing).
 
 ## Examples
 
@@ -73,6 +197,13 @@ Gateway traffic does **not** run the improver (`improver_fired=False`).
 ```bash
 curl -s -o /dev/null -w "%{http_code}\n" \
   -X POST http://127.0.0.1:8787/v1/chat/completions -d '{}'
+```
+
+### Virtual model list
+
+```bash
+curl -s http://127.0.0.1:8787/v1/models \
+  -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
 ### Routed completion
@@ -84,6 +215,15 @@ curl -s http://127.0.0.1:8787/v1/chat/completions \
   -d '{"model":"route-code","messages":[{"role":"user","content":"write hello world in python"}]}'
 ```
 
+### Passthrough completion
+
+```bash
+curl -s http://127.0.0.1:8787/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"ollama/qwen2.5","messages":[{"role":"user","content":"hi"}]}'
+```
+
 ### Streaming
 
 ```bash
@@ -93,18 +233,11 @@ curl -N http://127.0.0.1:8787/v1/chat/completions \
   -d '{"model":"route-code","stream":true,"messages":[{"role":"user","content":"hi"}]}'
 ```
 
-### Virtual model list
-
-```bash
-curl -s http://127.0.0.1:8787/v1/models \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
-
-After a successful request, `usage_summary` should show a row with `surface=gateway` and `activity=code` (for `route-code`).
+After a successful request, `usage_summary` should show a row with `surface=gateway` and the matching activity (e.g. `code` for `route-code`).
 
 ## Related docs
 
 - [Architecture](architecture.md) — one core, multiple faces
 - [Configuration](configuration.md) — model lists per activity
 - [Deployment](deployment.md) — HTTP transport and systemd
-- [Cursor integration](cursor-integration.md) — MCP and hooks (complementary to gateway routing)
+- [Cursor integration](cursor-integration.md) — MCP and hooks

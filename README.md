@@ -8,6 +8,7 @@
 ## What it does
 
 - **Improves prompts** — Expands rough requests into structured specs; aware of Cursor modes (`agent`, `plan`, `debug`, `ask`, `multitask`)
+- **OpenAI-compatible gateway** — Routes real chat traffic through Ylang's quality-first activity routing (`route-code`, `route-search`, etc.) on HTTP transport
 - **Template library** — Versioned local prompts with public import from awesome-chatgpt-prompts lineage
 - **Remembers facts** — Scoped user facts injected into improvement context
 - **Tracks usage** — Every LLM call logged to SQLite with cost and latency
@@ -111,14 +112,16 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 [MIT](LICENSE) — Copyright (c) 2026 Yann
 
-## Status and roadmap
+## Status
 
-| Area | Status |
-|------|--------|
-| MCP improver + hooks | **Live** — primary daily-use surface |
-| OpenAI gateway (`/v1/chat/completions`) | **Live** on HTTP transport — route real Cursor traffic via `route-code` |
-| Activity-based routing | **Validated** for improver; gateway routing awaits production traffic |
-| Pattern detection (2C) | Wired; needs diverse usage data before trusting suggestions |
-| Budget meter / peer sharing | Implemented; low urgency at solo volume |
+### Shipped
 
-Phase 1 ships: improver (propose-only), MCP server, gateway, local library, usage logging, facts, pattern detection. Not in scope: optimizer, provenance, GitHub/KB sources, hosted team features.
+- MCP tools (improver, templates, facts, usage, patterns)
+- Provider routing (activity-based model selection, fallback chain, cooldown)
+- HTTP transport + bearer auth (`YLANG_TRANSPORT=http`, `YLANG_AUTH_TOKEN`)
+- OpenAI-compatible gateway (`POST /v1/chat/completions`, `GET /v1/models`)
+
+### Next
+
+- Budget meter maturity (`YLANG_DAILY_BUDGET_USD` is wired but needs production tuning)
+- Pattern-learning maturity (detection runs; suggestions need diverse usage data)

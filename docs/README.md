@@ -25,16 +25,19 @@ Ylang is a **local-first personal AI efficiency layer**. Phase 1 ships an [MCP](
 | [Audit and roadmap](audit-and-roadmap.md) | Phase planning notes |
 | [Backlog shipped](backlog-shipped.md) | Completed backlog items |
 
-## Phase 1 scope
+## Status
 
-Ylang Phase 1 includes:
+### Shipped
 
-- MCP server (stdio and HTTP transports)
+- MCP tools (stdio and HTTP transports)
+- Provider routing and fallback chain
+- HTTP transport + bearer auth
 - OpenAI-compatible gateway (`/v1/chat/completions`, virtual `route-*` models)
-- Propose-only prompt improver with Cursor mode awareness
-- Local versioned template library with public prompt import
-- Usage logging and aggregation
-- Scoped user facts (remember / recall)
-- Pattern detection for learned templates
+- Propose-only prompt improver, template library, usage logging, facts, pattern detection
 
-Not in Phase 1: optimizer, provenance, GitHub/KB sources, hosted team features.
+### Next
+
+- Budget meter maturity (`YLANG_DAILY_BUDGET_USD`)
+- Pattern-learning maturity (suggestions from repeated usage)
+
+Not in scope: optimizer, provenance, GitHub/KB sources, hosted team features.
