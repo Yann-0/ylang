@@ -36,6 +36,13 @@ _SEQ_RE = re.compile(r"\b(first|then|before|after|finally)\b", re.I)
 _PLACEHOLDER_RE = re.compile(r"<[^>]+>|\be\.g\.\b|example", re.I)
 _WORD_RE = re.compile(r"[a-z0-9']{4,}", re.I)
 _SALVAGE_MODES: frozenset[str] = frozenset({"agent", "multitask", "debug"})
+_SHORT_PROMPT_MAX_LEN = 50
+_FALLBACK_REJECTION_REASONS: frozenset[str] = frozenset({"length ratio out of bounds"})
+_VAGUE_SHORT_PROMPT_RES: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^(let'?s\s+)?(do|finish|complete|fix|ship)\s+(all|everything|it|this|them)\.?$", re.I),
+    re.compile(r"^(what\s+(should|shall)\s+we\s+do|what\s+next|next\s+steps?)\??$", re.I),
+    re.compile(r"^(go|continue|proceed)\.?$", re.I),
+)
 
 _SYSTEM_PROMPT = """\
 You turn rough user prompts into clear, actionable full specs for AI coding agents.
@@ -142,12 +149,39 @@ class Improver:
                         result.rejection_reason,
                     )
                     return salvaged
+                if result.rejection_reason in _FALLBACK_REJECTION_REASONS:
+                    fallback = _fallback_short_prompt_expansion(
+                        text,
+                        apply_default,
+                        resolved=resolved,
+                        require_vague=False,
+                    )
+                    if fallback is not None:
+                        logger.info(
+                            "improve_prompt applied short-prompt fallback (model=%s; was: %s)",
+                            completion.model_used,
+                            result.rejection_reason,
+                        )
+                        return fallback
                 if result.rejection_reason:
                     logger.warning(
                         "improve_prompt validation rejected model output (model=%s): %s",
                         completion.model_used,
                         result.rejection_reason,
                     )
+            elif not changed and _is_vague_short_prompt(text):
+                fallback = _fallback_short_prompt_expansion(
+                    text,
+                    apply_default,
+                    resolved=resolved,
+                    require_vague=True,
+                )
+                if fallback is not None:
+                    logger.info(
+                        "improve_prompt expanded unchanged short prompt (model=%s)",
+                        completion.model_used,
+                    )
+                    return fallback
             return result
         except Exception as exc:
             salvaged = _try_salvage_parse_failure(
@@ -486,16 +520,90 @@ def _try_salvage(
         return None
     if _is_restructured_spec(original, improved):
         return _salvage_result(original, improved, auto_apply_default, resolved=resolved)
-    if resolved.mode in _SALVAGE_MODES and len(original) >= 200:
+    if resolved.mode in _SALVAGE_MODES:
         if len(improved) >= len(original) * 1.05 and _has_structured_expansion(improved):
-            return _salvage_result(
-                original,
-                improved,
-                auto_apply_default,
-                resolved=resolved,
-                description="Salvaged structured expansion for long agent prompt",
-            )
+            if len(original) >= 200:
+                return _salvage_result(
+                    original,
+                    improved,
+                    auto_apply_default,
+                    resolved=resolved,
+                    description="Salvaged structured expansion for long agent prompt",
+                )
+            if len(original) < 80:
+                return _salvage_result(
+                    original,
+                    improved,
+                    auto_apply_default,
+                    resolved=resolved,
+                    description="Salvaged structured expansion for short vague prompt",
+                )
     return None
+
+
+def _is_vague_short_prompt(text: str) -> bool:
+    """Return True for underspecified short asks that need a spec skeleton."""
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return any(pattern.search(stripped) for pattern in _VAGUE_SHORT_PROMPT_RES)
+
+
+def _fallback_short_prompt_expansion(
+    original: str,
+    auto_apply_default: bool,
+    *,
+    resolved: ResolvedCursorMode,
+    require_vague: bool = False,
+) -> ImprovementResult | None:
+    """Build a deterministic spec skeleton for very short prompts."""
+    stripped = original.strip()
+    if not stripped or len(stripped) > _SHORT_PROMPT_MAX_LEN:
+        return None
+    if require_vague and not _is_vague_short_prompt(stripped):
+        return None
+    if resolved.mode in ("ask", "plan"):
+        improved = (
+            f"## Question\n{original.strip()}\n\n"
+            "## Context\n- Expand only what the user asked; do not invent scope.\n\n"
+            "## Answer format\n- Direct, concise response"
+        )
+    elif resolved.mode == "debug":
+        improved = (
+            f"## Symptom\n{original.strip()}\n\n"
+            "## Investigation plan\n"
+            "- Reproduce and isolate the failure\n"
+            "- Confirm root cause before fixing\n\n"
+            "## Success criteria\n- Issue resolved with evidence"
+        )
+    elif resolved.mode == "multitask":
+        improved = (
+            f"## Goal\n{original.strip()}\n\n"
+            "## Workstreams\n"
+            "1. Inventory all work implied by the request\n"
+            "2. Execute remaining items in parallel where safe\n\n"
+            "## Dependencies\n"
+            "- Resolve ambiguous items before parallel execution\n\n"
+            "## Definition of done\n"
+            "- All implied work complete"
+        )
+    else:
+        improved = (
+            f"## Goal\n{original.strip()}\n\n"
+            "## Deliverables\n"
+            "- Complete all work implied by the request\n\n"
+            "## Test plan\n"
+            "- Run relevant tests and lint/typecheck when code changes\n\n"
+            "## Definition of done\n"
+            "- Request fully satisfied with evidence"
+        )
+    return _salvage_result(
+        original,
+        improved,
+        auto_apply_default,
+        resolved=resolved,
+        description="Deterministic expansion for short vague prompt",
+    )
 
 
 def _validate(
@@ -640,7 +748,9 @@ def _length_ok(original: str, improved: str, changes: list[Change]) -> bool:
         min_ratio = 0.25 if len(original) < 80 else 0.4
         return min_ratio <= ratio <= max_ratio
     if len(original) < 80:
-        return 0.5 <= ratio <= 3.0
+        # Minor clarity edits can shorten informal prompts (e.g. "let's do all" → "do all").
+        min_ratio = 0.25 if changes else 0.5
+        return min_ratio <= ratio <= 3.0
     return 0.8 <= ratio <= 1.5
 
 

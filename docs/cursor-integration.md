@@ -171,6 +171,7 @@ Mode changes the structure and scope of improved prompts (e.g. plan mode avoids 
 | `validated=False`, `numbers changed` on a file/terminal `@` reference | Redeploy hook from `deploy/cursor/hooks/`; bare references now pass through without LLM improvement |
 | `Unauthorized` from HTTP MCP | Set matching `YLANG_AUTH_TOKEN` in service env and mcp.json headers |
 | Improvement always skipped | Remove `/ylang-skip` prefix; check `YLANG_HOOK_DISABLED` |
+| `validated=False`, `rejection_reason: length ratio out of bounds` on a very short prompt (e.g. `let's do all`) | Upgrade Ylang; short prompts now use relaxed length bounds and a deterministic multitask/agent fallback when the model under-expands |
 | Wrong Python in hook | Fix shebang in `ylang-improve-prompt.py` |
 
 ## Related docs

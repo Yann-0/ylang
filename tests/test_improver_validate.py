@@ -355,6 +355,44 @@ def test_validate_rejects_excessive_length_change() -> None:
     assert result.rejection_reason == "length ratio out of bounds"
 
 
+def test_validate_accepts_short_clarity_condensation() -> None:
+    """Informal prefix removal on short prompts must not fail length ratio."""
+    original = "let's do all"
+    improved = "do all"
+    changes = [
+        Change(
+            kind="clarity",
+            description="Remove informal prefix",
+            before="let's ",
+            after="",
+        ),
+    ]
+    result, ok = _validate(original, improved, changes, True, resolved=_AGENT)
+    assert ok is True
+    assert result.validated is True
+    assert result.improved == improved
+
+
+def test_fallback_short_prompt_expansion_multitask() -> None:
+    from ylang.improver.improver import _fallback_short_prompt_expansion, _is_vague_short_prompt
+
+    original = "let's do all"
+    assert _is_vague_short_prompt(original) is True
+    resolved = resolve_cursor_mode("cursor-multitask", original, explicit_mode="multitask")
+    result = _fallback_short_prompt_expansion(original, True, resolved=resolved, require_vague=True)
+    assert result is not None
+    assert result.validated is True
+    assert result.improved.startswith("## Goal")
+    assert "let's do all" in result.improved
+    assert "## Workstreams" in result.improved
+    assert _fallback_short_prompt_expansion(
+        "process 42 items",
+        True,
+        resolved=resolved,
+        require_vague=True,
+    ) is None
+
+
 def test_validate_accepts_short_prompt_spec_expansion() -> None:
     original = "fix optional tasks detected"
     improved = (
@@ -433,6 +471,66 @@ def test_improver_salvages_plain_markdown_model_output(improver: Improver) -> No
     assert result.validated is True
     assert result.improved.startswith("## Goal")
     assert result.rejection_reason is None
+
+
+def test_improver_expands_unchanged_short_prompt(improver: Improver) -> None:
+    original = "let's do all"
+    payload = {"improved": original, "changes": []}
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps(payload)))
+    ]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = improver.improve(
+            original,
+            "cursor-multitask",
+            model="test-model",
+            mode="multitask",
+        )
+
+    assert result.validated is True
+    assert result.improved.startswith("## Goal")
+    assert "## Workstreams" in result.improved
+    assert original in result.improved
+
+
+def test_improver_fallback_after_validation_rejection(improver: Improver) -> None:
+    original = "let's do all"
+    payload = {
+        "improved": "x" * 5000,
+        "changes": [
+            {
+                "kind": "scope",
+                "description": "Over-expanded",
+                "before": original,
+                "after": "x" * 5000,
+            }
+        ],
+    }
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps(payload)))
+    ]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = improver.improve(
+            original,
+            "cursor-multitask",
+            model="test-model",
+            mode="multitask",
+        )
+
+    assert result.validated is True
+    assert result.rejection_reason is None
+    assert result.improved.startswith("## Goal")
+    assert len(result.improved) < 500
 
 
 def test_improver_llm_failure_returns_safe_result(improver: Improver) -> None:
