@@ -11,6 +11,7 @@ from typing import Self
 from collections.abc import Callable
 
 from ylang.core.db import YlangDatabase, _is_readonly_error, open_connection
+from ylang.usage.activity import normalize_usage_activity
 
 _SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS usage (
@@ -165,7 +166,7 @@ class UsageStore:
         params = (
             _to_iso(when),
             surface,
-            activity,
+            normalize_usage_activity(activity),
             model_used,
             prompt_tokens,
             cost,

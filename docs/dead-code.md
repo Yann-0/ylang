@@ -2,17 +2,21 @@
 
 Audit of `src/ylang/` for unused exports, stub seams, and wiring gaps. **Nothing listed here should be deleted without an explicit decision** — this document flags items only.
 
-Last updated: 2026-07-04 (post pattern-detector wiring).
+Last updated: 2026-07-04 (post gateway face).
 
 Method: read modules under `src/ylang/`, grep for imports and call sites across the repo.
 
 ---
 
-## Fully stubbed: desktop gateway
+## OpenAI gateway (live)
 
 | Symbol | File | Status |
 |--------|------|--------|
-| `run_gateway` | `gateway/__init__.py` | Raises `NotImplementedError`. Future face over `Engine`. |
+| `register_gateway_routes` | `gateway/routes.py` | Wired on HTTP transport in `mcp/server.py` |
+| `resolve_gateway_model` | `gateway/mapping.py` | Maps `route-*` and passthrough models |
+| `Engine.complete_stream` | `core/engine.py` | Used for SSE streaming |
+
+See [gateway.md](gateway.md).
 
 ---
 
@@ -96,7 +100,7 @@ These symbols are exported via `core/__init__.py` but have **no imports outside 
 
 ## Summary
 
-- **1 stub face** (`gateway/`) — intentional Phase 2+ seam.
+- **0 stub faces** — gateway is live on HTTP transport.
 - **Several exported symbols** never called (`is_precision_tool`, `PRECISION_TOOLS`, some core re-exports).
 - **1 deps field** never read (`YlangDeps.surface`).
 - **2 usage-schema fields** reserved for improver-acceptance / error surfacing.

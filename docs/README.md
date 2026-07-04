@@ -11,6 +11,7 @@ Ylang is a **local-first personal AI efficiency layer**. Phase 1 ships an [MCP](
 | [Architecture](architecture.md) | Module layout, data flow, design principles |
 | [MCP tools reference](mcp-tools.md) | Every tool: parameters, responses, examples |
 | [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement |
+| [Gateway](gateway.md) | OpenAI-compatible `/v1/chat/completions` for Cursor model routing |
 | [Deployment](deployment.md) | HTTP transport, systemd, production setup |
 | [Development](development.md) | Tests, linting, scripts, project layout |
 | [Database schema](database-schema.md) | SQLite tables and relationships |
@@ -29,10 +30,11 @@ Ylang is a **local-first personal AI efficiency layer**. Phase 1 ships an [MCP](
 Ylang Phase 1 includes:
 
 - MCP server (stdio and HTTP transports)
+- OpenAI-compatible gateway (`/v1/chat/completions`, virtual `route-*` models)
 - Propose-only prompt improver with Cursor mode awareness
 - Local versioned template library with public prompt import
 - Usage logging and aggregation
 - Scoped user facts (remember / recall)
 - Pattern detection for learned templates
 
-Not in Phase 1: optimizer, provenance, GitHub/KB sources, hosted team features, desktop gateway (stub only).
+Not in Phase 1: optimizer, provenance, GitHub/KB sources, hosted team features.

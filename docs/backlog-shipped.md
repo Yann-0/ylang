@@ -27,11 +27,10 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit. This 
 - [x] Preference ordering (2C) — success-based model boost from usage
 - [x] Precision-tool auto-apply policy — non-precision tools get `auto_apply_default=True` hint
 - [x] Usage analytics — `usage_summary` MCP tool
-- [x] Desktop gateway seam — `ylang/gateway/` stub with documented entry point
+- [x] OpenAI-compatible gateway — `POST /v1/chat/completions`, `GET /v1/models`, streaming SSE
 
 ## Remaining (future)
 
-- Desktop gateway full implementation (XL)
 - Rich usage analytics UI (L)
 - Store improver input text for text-based pattern clustering
 - Wire `improver_accepted` tracking from client acceptance events

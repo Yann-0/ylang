@@ -1,6 +1,6 @@
 # Architecture
 
-Ylang follows a **single core engine, multiple thin faces** design. Business logic lives in `src/ylang/core` and domain packages; adapters (MCP today, desktop gateway later) only translate I/O.
+Ylang follows a **single core engine, multiple thin faces** design. Business logic lives in `src/ylang/core` and domain packages; adapters (MCP and OpenAI gateway) only translate I/O.
 
 ## High-level diagram
 
@@ -8,7 +8,7 @@ Ylang follows a **single core engine, multiple thin faces** design. Business log
 flowchart TB
     subgraph faces["Faces (adapters)"]
         MCP["MCP server<br/>stdio / HTTP"]
-        GW["Desktop gateway<br/>(stub)"]
+        GW["OpenAI gateway<br/>/v1/chat/completions"]
         CLI["Importer CLI<br/>python -m ylang.importer"]
     end
 
@@ -33,7 +33,7 @@ flowchart TB
     MCP --> LIB
     MCP --> USG
     MCP --> MEM
-    GW -.-> ENG
+    GW --> ENG
     IMP --> ENG
     ENG --> RTR
     ENG --> USG
@@ -85,7 +85,29 @@ src/ylang/
 │   ├── tools.py         # MCP tool handlers (thin serializers)
 │   ├── deps.py          # YlangDeps dependency bundle
 │   └── auth.py          # Bearer token middleware (HTTP only)
-└── gateway/             # Future desktop face (NotImplementedError)
+└── gateway/             # OpenAI-compatible HTTP face (chat completions, models)
+```
+
+## Request flow: gateway chat completion
+
+```mermaid
+sequenceDiagram
+    participant Client as OpenAI client
+    participant GW as gateway/routes.py
+    participant Eng as core/engine
+    participant Rtr as model_router
+    participant LLM as LiteLLM
+    participant DB as usage store
+
+    Client->>GW: POST /v1/chat/completions (model=route-code)
+    GW->>GW: resolve_gateway_model → activity=code
+    GW->>Eng: complete() or complete_stream()
+    Eng->>Rtr: build_attempt_chain
+    loop fallback chain
+        Eng->>LLM: completion
+    end
+    Eng->>DB: write_usage (surface=gateway)
+    GW->>Client: OpenAI JSON or SSE stream
 ```
 
 ## Request flow: improve_prompt
@@ -161,15 +183,17 @@ Mode affects improver guidance (e.g. plan mode avoids implementation deliverable
 | Transport | Use case | Auth |
 |-----------|----------|------|
 | `stdio` | Cursor subprocess MCP | None |
-| `http` | Shared remote instance, Cursor hooks | Bearer `YLANG_AUTH_TOKEN` |
+| `http` | Shared remote instance, MCP + gateway, Cursor hooks | Bearer `YLANG_AUTH_TOKEN` |
 
-HTTP uses FastMCP's streamable HTTP app wrapped with `BearerTokenMiddleware`.
+HTTP uses FastMCP's streamable HTTP app with gateway routes registered on the same app, wrapped with `BearerTokenMiddleware`.
+
+See [gateway.md](gateway.md) for virtual models and Cursor setup.
 
 ## Extension points (future)
 
 | Seam | Location | Status |
 |------|----------|--------|
-| Desktop gateway | `gateway/` | Stub |
+| OpenAI gateway | `gateway/` | **Live** on HTTP transport |
 | Pattern detector | `library/patterns.py` | Wired (`UsagePatternDetector`) |
 | Personal preference routing | `model_router.apply_preference_order` | Implemented, uses usage aggregates |
 | Learned templates | `library/store.py` `source="learned"` | MCP tools wired |
@@ -177,6 +201,7 @@ HTTP uses FastMCP's streamable HTTP app wrapped with `BearerTokenMiddleware`.
 ## Related docs
 
 - [Configuration](configuration.md) — env vars, model prioritization, routing tuning
+- [Gateway](gateway.md) — OpenAI-compatible routing for Cursor
 - [MCP tools reference](mcp-tools.md)
 - [Database schema](database-schema.md)
 - [Dead code audit](dead-code.md)

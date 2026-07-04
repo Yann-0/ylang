@@ -110,6 +110,21 @@ Point Cursor (or any MCP HTTP client) at the service:
 
 For remote access, put a reverse proxy (nginx, Caddy) with TLS in front and restrict by network policy.
 
+### OpenAI gateway (Cursor model routing)
+
+The same HTTP service also serves OpenAI-compatible routes:
+
+- `POST /v1/chat/completions` — chat with `route-code`, `route-search`, etc.
+- `GET /v1/models` — virtual model catalog
+
+Use the same `YLANG_AUTH_TOKEN` as the API key. Full setup: [gateway.md](gateway.md).
+
+```bash
+# Gateway auth (expect 401 without token)
+curl -s -o /dev/null -w "%{http_code}\n" \
+  -X POST http://127.0.0.1:8787/v1/chat/completions -d '{}'
+```
+
 ## Health checks
 
 Ylang does not expose a separate health endpoint. Verify the service:
@@ -121,7 +136,7 @@ curl -s -o /dev/null -w "%{http_code}" \
   http://127.0.0.1:8787/mcp
 ```
 
-Startup stderr (journalctl) shows transport, storage path, tools, and LLM routing:
+Startup stderr (journalctl) shows transport, storage path, tools, gateway routes, and LLM routing:
 
 ```bash
 sudo journalctl -u ylang -n 50 --no-pager

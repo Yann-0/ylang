@@ -52,6 +52,20 @@ When Ylang runs as a systemd service on HTTP transport:
 
 See [deployment.md](deployment.md) for service setup.
 
+## OpenAI gateway (route real coding traffic)
+
+To send Cursor **chat/agent** requests through Ylang's activity router (not just the improver MCP tool), add a custom OpenAI-compatible provider:
+
+| Setting | Value |
+|---------|-------|
+| Base URL | `http://<host>:8787/v1` |
+| API key | Your `YLANG_AUTH_TOKEN` |
+| Model | `route-code` (or `route-search`, `route-reason`, `route-other`) |
+
+Passthrough models (e.g. `ollama/qwen2.5`, `gpt-4o`) are also accepted. See [gateway.md](gateway.md) for curl examples and streaming notes.
+
+MCP improver hooks and gateway routing are complementary: hooks improve prompts; the gateway routes model completions.
+
 ## Auto prompt improvement (global hooks)
 
 This workflow calls `improve_prompt` on **every user message** and writes the result to `.cursor/ylang-improved-prompt.md` in the workspace. A global Cursor rule tells the agent to treat that file as the canonical task.

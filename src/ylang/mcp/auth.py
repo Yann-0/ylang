@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import secrets
+
 from starlette.responses import Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
@@ -29,7 +31,8 @@ class BearerTokenMiddleware:
             await self.app(scope, receive, send)
             return
 
-        if _authorization_header(scope) != self._expected:
+        auth = _authorization_header(scope)
+        if auth is None or not secrets.compare_digest(auth, self._expected):
             response = Response("Unauthorized", status_code=401)
             await response(scope, receive, send)
             return

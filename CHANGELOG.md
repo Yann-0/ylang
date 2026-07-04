@@ -8,12 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- OpenAI-compatible gateway: `POST /v1/chat/completions`, `GET /v1/models`, SSE streaming, virtual `route-*` models ([gateway.md](docs/gateway.md))
+- Usage activity normalization at write time (`improve:Cursor` → `improve:agent`, etc.)
 - Expanded [configuration.md](docs/configuration.md): full env reference, model prioritization, routing flow, quality band, budget cap, usage-based reorder, configuration recipes
 - Updated `.env.example` with all routing variables and comments
 
 ### Changed
 
-- Cross-links from README, deployment, cursor-integration, architecture docs to configuration guide
+- README and docs updated for live gateway (replaces "stubbed for later" wording)
+- HTTP bearer auth uses `secrets.compare_digest` for timing-safe comparison
 - Improver: salvage plain-markdown model output and recover improved-only JSON when `changes[]` is missing (fixes `parse error: could not locate changes array`)
 - Improver: accept restructured markdown specs when the model omits `changes[]` after successful parse
 - Improver: pass through original prompt when the model replies in clarifying prose instead of JSON

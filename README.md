@@ -52,6 +52,7 @@ Full instructions: **[docs/installation.md](docs/installation.md)**
 | [Architecture](docs/architecture.md) | Design, modules, data flow |
 | [MCP tools](docs/mcp-tools.md) | Full API reference (11 tools) |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
+| [Gateway](docs/gateway.md) | OpenAI-compatible `/v1/chat/completions` for Cursor routing |
 | [Deployment](docs/deployment.md) | HTTP transport, systemd |
 | [Development](docs/development.md) | Tests, linting, contributing |
 
@@ -70,7 +71,7 @@ Details: [docs/mcp-tools.md](docs/mcp-tools.md)
 
 ## Architecture (one paragraph)
 
-One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs thin **faces**. Phase 1 ships the MCP adapter; a desktop gateway is stubbed for later. Business logic never lives in MCP tool handlers — they only serialize inputs and outputs.
+One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs thin **faces**: MCP (stdio/HTTP) and an **OpenAI-compatible gateway** (`POST /v1/chat/completions`, `GET /v1/models`) on the same HTTP server. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` trigger activity routing; any other model string passthroughs to a named provider. Business logic never lives in face handlers — they only parse, map, and serialize.
 
 ```
 src/ylang/
@@ -78,6 +79,7 @@ src/ylang/
 ├── improver/   # Propose-only prompt improvement
 ├── library/    # Versioned templates + pattern detection
 ├── usage/      # Usage store and aggregates
+├── gateway/    # OpenAI-compatible HTTP face
 ├── mcp/        # MCP server (stdio / HTTP)
 └── settings.py # Typed configuration
 ```
@@ -109,6 +111,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 [MIT](LICENSE) — Copyright (c) 2026 Yann
 
-## Phase 1 scope
+## Status and roadmap
 
-Improver (propose-only), MCP server, local library, usage logging, facts, pattern detection. No optimizer, provenance, GitHub/KB sources, or hosted team features in this phase.
+| Area | Status |
+|------|--------|
+| MCP improver + hooks | **Live** — primary daily-use surface |
+| OpenAI gateway (`/v1/chat/completions`) | **Live** on HTTP transport — route real Cursor traffic via `route-code` |
+| Activity-based routing | **Validated** for improver; gateway routing awaits production traffic |
+| Pattern detection (2C) | Wired; needs diverse usage data before trusting suggestions |
+| Budget meter / peer sharing | Implemented; low urgency at solo volume |
+
+Phase 1 ships: improver (propose-only), MCP server, gateway, local library, usage logging, facts, pattern detection. Not in scope: optimizer, provenance, GitHub/KB sources, hosted team features.
