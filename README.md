@@ -114,14 +114,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 ## Status
 
+**v0.2.0** shipped; **Phase 5** on main adds `ylang patterns apply`, `ylang usage digest`, learned-template improver context, preference routing via `improver_accepted`, nightly Ollama e2e CI, and gateway load profiling.
+
 ### Shipped
 
 - MCP tools (improver, templates, facts, usage, patterns)
-- Provider routing (activity-based model selection, fallback chain, cooldown)
+- Provider routing (activity-based model selection, fallback chain, cooldown, preference boost)
 - HTTP transport + bearer auth (`YLANG_TRANSPORT=http`, `YLANG_AUTH_TOKEN`)
-- OpenAI-compatible gateway (`POST /v1/chat/completions`, `GET /v1/models`)
-
-### Next
-
-- Budget meter maturity (`YLANG_DAILY_BUDGET_USD` is wired but needs production tuning)
-- Pattern-learning maturity (detection runs; suggestions need diverse usage data)
+- OpenAI-compatible gateway with streaming tool-call passthrough
+- CLI learning loop (`ylang patterns suggest` / `apply`, `ylang usage digest` / `dashboard`)

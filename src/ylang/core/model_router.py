@@ -85,6 +85,24 @@ def estimated_unit_cost(model: str) -> float:
     return input_cost + output_cost
 
 
+# Buckets that route improver traffic — prefer improver_accepted over raw success.
+_IMPROVER_ROUTING_BUCKETS: frozenset[str] = frozenset({"improve", "code", "reason"})
+
+
+def _preference_counts(
+    summary: object,
+    activity: Activity | str,
+) -> dict[str, int]:
+    """Return per-model counts used to reorder candidates for an activity bucket."""
+    from ylang.usage.aggregates import UsageSummary
+
+    assert isinstance(summary, UsageSummary)
+    bucket = str(activity)
+    if bucket in _IMPROVER_ROUTING_BUCKETS and summary.model_improver_accepted_counts:
+        return summary.model_improver_accepted_counts
+    return summary.model_success_counts
+
+
 # Personal preference: reorder candidates by historical success counts (Seam 2C).
 def apply_preference_order(
     candidates: list[str],
@@ -92,17 +110,23 @@ def apply_preference_order(
     *,
     store: UsageStore | None = None,
 ) -> list[str]:
-    """Reorder candidates from usage feedback — boost models with high success counts."""
+    """Reorder candidates from usage feedback — boost models with high success counts.
+
+    For improver-routing buckets (``improve``, ``code``, ``reason``), uses
+    ``improver_accepted`` counts when any exist; otherwise falls back to LLM
+    ``success`` counts.
+    """
     if store is None or not candidates:
         return candidates
     from ylang.usage.aggregates import default_daily_window, summarize_usage
 
     summary = summarize_usage(store, default_daily_window())
-    if not summary.model_success_counts:
+    counts = _preference_counts(summary, activity)
+    if not counts:
         return candidates
 
     def score(model: str) -> int:
-        return summary.model_success_counts.get(model, 0)
+        return counts.get(model, 0)
 
     ranked = sorted(candidates, key=score, reverse=True)
     return ranked

@@ -26,6 +26,7 @@ For production systemd deployments, use an environment file (e.g. `/srv/ylang/yl
 | `YLANG_QUALITY_BAND` | `0` | [Quality band and cost tie-break](#quality-band-and-cost-tie-break) |
 | `YLANG_PROVIDER_COOLDOWN_SECONDS` | `60` | [Fallback and resilience](#fallback-and-resilience) |
 | `YLANG_DAILY_BUDGET_USD` | *(none)* | [Daily budget cap](#daily-budget-cap) |
+| `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | [Improver context](#improver-context) |
 | `YLANG_HOOK_DISABLED` | *(unset)* | [Cursor hook overrides](#cursor-hook-overrides) |
 | `YLANG_HOOK_MODEL` | `claude-sonnet-4-5` | [Cursor hook overrides](#cursor-hook-overrides) |
 | `YLANG_MCP_URL` | from `~/.cursor/mcp.json` | [Cursor hook overrides](#cursor-hook-overrides) |
@@ -326,9 +327,26 @@ YLANG_DAILY_BUDGET_USD=5.00
 
 ## Usage-based reorder
 
-Ylang reads your local usage history (last 24h) and **boosts models with higher success counts** earlier in the candidate list — without changing your configured `YLANG_MODELS_*` order permanently.
+Ylang reads your local usage history (last 24h) and **boosts models with higher preference counts** earlier in the candidate list — without changing your configured `YLANG_MODELS_*` order permanently.
 
-This is automatic when a usage store is wired (always true for the MCP server). No env var to toggle. Effect is subtle: a model you use successfully often may jump ahead of a higher-ranked model that you rarely use.
+| Activity bucket | Count signal |
+|-----------------|--------------|
+| `improve`, `code`, `reason` | `improver_accepted` rows per model (when any exist) |
+| `search`, `other` | Successful LLM completions per model |
+
+Improver-routing buckets prefer acceptance signals because a successful LLM call does not mean the user kept the improved prompt. When no `improver_accepted` rows exist yet, improver buckets fall back to success counts.
+
+This is automatic when a usage store is wired (always true for the MCP server). No env var to toggle.
+
+---
+
+## Improver context
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | Max learned templates injected into `improve_prompt` reference context |
+
+Learned templates (source `learned`) are merged with keyword-matched reference prompts, most recently updated first. Set `0` to disable learned template injection.
 
 ---
 

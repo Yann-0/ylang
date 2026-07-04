@@ -24,6 +24,7 @@ class UsageSummary:
     by_model: dict[str, int]
     model_costs: dict[str, float]
     model_success_counts: dict[str, int]
+    model_improver_accepted_counts: dict[str, int]
 
 
 @dataclass
@@ -79,6 +80,7 @@ def summarize_usage(store: UsageStore, window: UsageWindow) -> UsageSummary:
     by_model: dict[str, int] = {}
     model_costs: dict[str, float] = {}
     model_success: dict[str, int] = {}
+    model_improver_accepted: dict[str, int] = {}
     total_cost = 0.0
     total_tokens = 0
     successes = 0
@@ -90,6 +92,10 @@ def summarize_usage(store: UsageStore, window: UsageWindow) -> UsageSummary:
         if row.success:
             successes += 1
             model_success[row.model_used] = model_success.get(row.model_used, 0) + 1
+        if row.improver_accepted:
+            model_improver_accepted[row.model_used] = (
+                model_improver_accepted.get(row.model_used, 0) + 1
+            )
         total_cost += row.cost
         total_tokens += row.prompt_tokens
 
@@ -104,6 +110,7 @@ def summarize_usage(store: UsageStore, window: UsageWindow) -> UsageSummary:
         by_model=by_model,
         model_costs=model_costs,
         model_success_counts=model_success,
+        model_improver_accepted_counts=model_improver_accepted,
     )
 
 

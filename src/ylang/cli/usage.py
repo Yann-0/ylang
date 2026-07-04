@@ -8,8 +8,9 @@ import webbrowser
 from pathlib import Path
 
 from ylang.core.stores import open_stores
+from ylang.library.pattern_detector import UsagePatternDetector, propose_template_from_pattern
 from ylang.settings import Settings
-from ylang.usage.aggregates import daily_usage_buckets, summarize_usage
+from ylang.usage.aggregates import daily_usage_buckets, rolling_cost, summarize_usage
 from ylang.usage.dashboard import render_usage_dashboard_html
 from ylang.usage.store import UsageWindow
 
@@ -23,6 +24,14 @@ def build_usage_parser() -> argparse.ArgumentParser:
     window = summary.add_mutually_exclusive_group()
     window.add_argument("--last-days", type=int, help="Rolling window in days")
     window.add_argument("--last-hours", type=int, help="Rolling window in hours")
+
+    digest = subparsers.add_parser(
+        "digest",
+        help="Pretty usage digest with top patterns and budget warning",
+    )
+    digest_window = digest.add_mutually_exclusive_group()
+    digest_window.add_argument("--last-days", type=int, help="Rolling window in days")
+    digest_window.add_argument("--last-hours", type=int, help="Rolling window in hours")
 
     dashboard = subparsers.add_parser("dashboard", help="Generate a static HTML usage dashboard")
     dashboard.add_argument(
@@ -47,7 +56,7 @@ def _resolve_window(args: argparse.Namespace) -> UsageWindow:
     return UsageWindow.last_days(7)
 
 
-def _open_stores_from_settings() -> tuple[object, object]:
+def _open_stores_from_settings() -> tuple[object, Settings]:
     settings = Settings.load()
     path = settings.resolved_storage_path()
     return open_stores(path), settings
@@ -73,11 +82,51 @@ def print_usage_summary(summary: object) -> None:
             print(f"  {model:40} {count:>6}  ${cost:.4f}")
 
 
+def print_usage_digest(
+    summary: object,
+    *,
+    settings: Settings,
+    store: object,
+    window: UsageWindow,
+) -> None:
+    """Pretty-print a weekly-style digest with patterns and budget warning."""
+    from ylang.usage.aggregates import UsageSummary
+
+    assert isinstance(summary, UsageSummary)
+    days = max(1, int((window.until - window.since).total_seconds() // 86400))
+    print(f"=== Ylang usage digest (last {days} day{'s' if days != 1 else ''}) ===\n")
+    print_usage_summary(summary)
+
+    if settings.daily_budget_usd is not None:
+        spent = rolling_cost(store, UsageWindow.last_hours(24))  # type: ignore[arg-type]
+        budget = settings.daily_budget_usd
+        pct = (spent / budget * 100) if budget else 0.0
+        print(f"\nRolling 24h spend: ${spent:.2f} / ${budget:.2f} ({pct:.0f}%)")
+        if spent >= budget:
+            print("⚠ Budget exceeded — cloud models are filtered from routing.")
+        elif spent >= budget * 0.8:
+            print("⚠ Approaching daily budget cap (≥80%).")
+
+    detector = UsagePatternDetector(store)  # type: ignore[arg-type]
+    patterns = detector.detect(window_days=days)
+    proposals = [
+        proposal
+        for pattern in patterns
+        if (proposal := propose_template_from_pattern(pattern)) is not None
+    ]
+    print("\nTop learned-template patterns:")
+    if not proposals:
+        print("  (none — need ≥3 similar improver prompts in the window)")
+    else:
+        for index, proposal in enumerate(proposals[:5], start=1):
+            print(f"  {index}. {proposal.suggested_template_id} — {proposal.rationale}")
+
+
 def run_usage_cli(argv: list[str] | None = None) -> int:
     """Entry point for ``ylang usage`` subcommands."""
     parser = build_usage_parser()
     args = parser.parse_args(argv)
-    stores, _settings = _open_stores_from_settings()
+    stores, settings = _open_stores_from_settings()
     try:
         window = _resolve_window(args)
         summary = summarize_usage(stores.store, window)  # type: ignore[attr-defined]
@@ -85,6 +134,15 @@ def run_usage_cli(argv: list[str] | None = None) -> int:
 
         if args.command == "summary":
             print_usage_summary(summary)
+            return 0
+
+        if args.command == "digest":
+            print_usage_digest(
+                summary,
+                settings=settings,
+                store=stores.store,  # type: ignore[attr-defined]
+                window=window,
+            )
             return 0
 
         if args.command == "dashboard":

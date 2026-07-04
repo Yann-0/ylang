@@ -124,3 +124,80 @@ def test_preference_order_boosts_successful_models(tmp_path: object) -> None:
     )
     ordered = router.ordered_candidates("code")
     assert ordered[0] == "anthropic/claude-3-5-sonnet-latest"
+
+
+def test_preference_order_uses_improver_accepted_for_improve_bucket(tmp_path: object) -> None:
+    store = open_store(tmp_path / "improve-pref.db")  # type: ignore[operator]
+    now = datetime.now(timezone.utc)
+    for _ in range(4):
+        store.write_usage(
+            surface="mcp",
+            activity="improve:agent",
+            model_used="openai/gpt-4o",
+            prompt_tokens=1,
+            cost=0.0,
+            improver_fired=True,
+            improver_accepted=True,
+            latency_ms=1,
+            success=True,
+            timestamp=now - timedelta(hours=1),
+        )
+    store.write_usage(
+        surface="mcp",
+        activity="improve:agent",
+        model_used="anthropic/claude-3-5-sonnet-latest",
+        prompt_tokens=1,
+        cost=0.0,
+        improver_fired=True,
+        improver_accepted=False,
+        latency_ms=1,
+        success=True,
+        timestamp=now - timedelta(hours=1),
+    )
+    router = ModelRouter(
+        activity_model_lists={
+            "code": ["anthropic/claude-3-5-sonnet-latest", "openai/gpt-4o"],
+            "search": ["openai/gpt-4o"],
+            "reason": ["openai/gpt-4o"],
+            "improve": ["anthropic/claude-3-5-sonnet-latest", "openai/gpt-4o"],
+            "other": ["openai/gpt-4o"],
+        },
+        provider_keys=ProviderKeys(openai="k", anthropic="k"),
+        fallback_model="ollama/qwen2.5",
+        usage_store=store,
+    )
+    ordered = router.ordered_candidates("improve")
+    assert ordered[0] == "openai/gpt-4o"
+
+
+def test_attempt_chain_boosts_improver_accepted_model(tmp_path: object) -> None:
+    store = open_store(tmp_path / "chain-pref.db")  # type: ignore[operator]
+    now = datetime.now(timezone.utc)
+    for _ in range(3):
+        store.write_usage(
+            surface="mcp",
+            activity="improve:agent",
+            model_used="openai/gpt-4o",
+            prompt_tokens=1,
+            cost=0.0,
+            improver_fired=True,
+            improver_accepted=True,
+            latency_ms=1,
+            success=True,
+            timestamp=now - timedelta(hours=1),
+        )
+    router = ModelRouter(
+        activity_model_lists={
+            "code": ["anthropic/claude-3-5-sonnet-latest", "openai/gpt-4o"],
+            "search": ["openai/gpt-4o"],
+            "reason": ["openai/gpt-4o"],
+            "improve": ["anthropic/claude-3-5-sonnet-latest", "openai/gpt-4o"],
+            "other": ["openai/gpt-4o"],
+        },
+        provider_keys=ProviderKeys(openai="k", anthropic="k"),
+        fallback_model="ollama/qwen2.5",
+        usage_store=store,
+    )
+    chain = router.build_attempt_chain("improve")
+    assert chain[0] == "openai/gpt-4o"
+    assert "anthropic/claude-3-5-sonnet-latest" in chain

@@ -1,7 +1,7 @@
 # Ylang — Backlog shipped
 
 **Date:** 2026-06-30 (updated 2026-07-04)  
-**Status:** All Phase 2 + 3 + 4 backlog items shipped (v0.2.0)
+**Status:** All Phase 2 + 3 + 4 + 5 backlog items shipped (v0.2.0 + Phase 5 on main)
 
 See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (historical). This addendum records what was shipped.
 
@@ -58,6 +58,17 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (histo
 - [x] Template list cache — in-memory cache with invalidation on save
 - [x] Optional LLM e2e smoke — `@pytest.mark.llm_e2e` against reachable Ollama
 - [x] Docs polish — gateway parity table, hooks vs gateway recipe, audit banner, dead-code refresh
+
+### Phase 5 (2026-07-04)
+
+- [x] GitHub Release v0.2.0 — release notes from CHANGELOG
+- [x] Operational tuning docs — hooks vs gateway, improver/budget recipes in configuration.md
+- [x] Nightly Ollama e2e CI — `.github/workflows/llm-e2e.yml` (`pytest -m llm_e2e`, scheduled)
+- [x] Preference routing validation — `improver_accepted` boost for improver buckets; integration tests
+- [x] Concurrent gateway profiling — `scripts/gateway_load_test.py`; architecture findings documented
+- [x] CLI `ylang patterns apply` — save proposals via `save_learned_template`
+- [x] Learned templates in improver context — top N by recency (`YLANG_LEARNED_TEMPLATE_LIMIT`)
+- [x] Weekly usage digest — `ylang usage digest --last-days 7`
 
 ## Remaining (future)
 

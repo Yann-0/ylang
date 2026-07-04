@@ -110,6 +110,37 @@ Point Cursor (or any MCP HTTP client) at the service:
 
 For remote access, put a reverse proxy (nginx, Caddy) with TLS in front and restrict by network policy.
 
+### Multi-client HTTP setup
+
+One HTTP Ylang instance can serve multiple Cursor workstations or agents concurrently:
+
+```
+┌─────────────┐     ┌─────────────┐
+│  Cursor A   │     │  Cursor B   │
+│  hooks+MCP  │     │  gateway    │
+└──────┬──────┘     └──────┬──────┘
+       │    Bearer token    │
+       └─────────┬──────────┘
+                 v
+        ┌────────────────┐
+        │ ylang :8787    │
+        │  /mcp  /v1/*   │
+        │  GET /usage    │
+        └────────┬───────┘
+                 v
+        /srv/ylang/data/ylang.db
+```
+
+Each client uses the same `YLANG_AUTH_TOKEN` in MCP headers and gateway `Authorization: Bearer`. Shared SQLite WAL handles concurrent reads; writes (usage rows, templates) serialize safely. For heavy multi-user load, run the [gateway load test](../scripts/gateway_load_test.py) and see [architecture.md](architecture.md#concurrent-gateway-profiling).
+
+| Client | Endpoint | Typical use |
+|--------|----------|-------------|
+| Cursor MCP | `http://host:8787/mcp` | `improve_prompt`, library tools |
+| Cursor gateway | `http://host:8787/v1/chat/completions` | Route agent chat via `route-code` |
+| Browser | `http://host:8787/usage` | Usage dashboard (same Bearer token) |
+
+Set `YLANG_HOOK_DISABLED=1` on gateway-only clients to avoid double LLM calls when hooks also run locally.
+
 ### OpenAI gateway (Cursor model routing)
 
 The same HTTP service also serves OpenAI-compatible routes:

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any
 
 from ylang.core.memory import MemoryStore
 from ylang.improver.registry import resolve_cursor_mode
-from ylang.library.retrieval import select_reference_prompts
+from ylang.library.retrieval import select_learned_templates, select_reference_prompts
 from ylang.library.store import Library
 
 _EMPTY_CONVERSATION = "(No prior conversation provided.)"
@@ -17,6 +18,7 @@ _FACT_LIMIT = 20
 _FACT_CHAR_LIMIT = 2000
 _REFERENCE_PROMPT_LIMIT = 3
 _REFERENCE_PROMPT_CHAR_LIMIT = 4000
+_DEFAULT_LEARNED_TEMPLATE_LIMIT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +35,17 @@ class ImproveContext:
         return bool(
             self.conversation_block or self.facts_block or self.reference_prompts_block
         )
+
+
+def _learned_template_limit() -> int:
+    """Return max learned templates to inject; override via ``YLANG_LEARNED_TEMPLATE_LIMIT``."""
+    raw = os.environ.get("YLANG_LEARNED_TEMPLATE_LIMIT")
+    if raw is None:
+        return _DEFAULT_LEARNED_TEMPLATE_LIMIT
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return _DEFAULT_LEARNED_TEMPLATE_LIMIT
 
 
 def build_improve_context(
@@ -103,6 +116,11 @@ def _build_reference_prompts_block(
     *,
     cursor_mode: str | None = None,
 ) -> str | None:
+    learned = select_learned_templates(
+        library,
+        limit=_learned_template_limit(),
+        max_chars=_REFERENCE_PROMPT_CHAR_LIMIT,
+    )
     summaries = select_reference_prompts(
         library,
         text,
@@ -111,11 +129,18 @@ def _build_reference_prompts_block(
         limit=_REFERENCE_PROMPT_LIMIT,
         max_chars=_REFERENCE_PROMPT_CHAR_LIMIT,
     )
-    if not summaries:
+    seen: set[str] = set()
+    ordered: list[object] = []
+    for summary in learned + summaries:
+        if summary.template_id in seen:
+            continue
+        seen.add(summary.template_id)
+        ordered.append(summary)
+    if not ordered:
         return None
     sections: list[str] = []
     used = 0
-    for summary in summaries:
+    for summary in ordered:
         template = library.recall(summary.template_id)
         if template is None:
             continue

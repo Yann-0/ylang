@@ -21,6 +21,7 @@ def test_print_usage_summary(capsys: pytest.CaptureFixture[str]) -> None:
         by_model={"openai/gpt-4o": 2},
         model_costs={"openai/gpt-4o": 0.15},
         model_success_counts={"openai/gpt-4o": 2},
+        model_improver_accepted_counts={},
     )
     print_usage_summary(summary)
     captured = capsys.readouterr()
@@ -82,3 +83,30 @@ def test_usage_dashboard_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch) 
     assert "Requests" in html
     assert "chart.js" in html.lower()
     assert "costChart" in html
+
+
+def test_usage_digest_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    db_path = tmp_path / "digest.db"  # type: ignore[operator]
+    store = open_store(db_path)
+    now = datetime.now(timezone.utc)
+    store.write_usage(
+        surface="mcp",
+        activity="code",
+        model_used="openai/gpt-4o",
+        prompt_tokens=50,
+        cost=0.01,
+        improver_fired=False,
+        improver_accepted=False,
+        latency_ms=5,
+        success=True,
+        timestamp=now - timedelta(days=1),
+    )
+    store.close()
+
+    monkeypatch.setenv("YLANG_STORAGE_PATH", str(db_path))
+    exit_code = run_usage_cli(["digest", "--last-days", "7"])
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Ylang usage digest" in captured.out
+    assert "Requests:" in captured.out
+    assert "Top learned-template patterns" in captured.out

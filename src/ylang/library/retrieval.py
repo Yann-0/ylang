@@ -41,6 +41,31 @@ def _score_template(
     return score, public_tiebreak
 
 
+def select_learned_templates(
+    library: Library,
+    *,
+    limit: int = 2,
+    max_chars: int = 4000,
+) -> list[TemplateSummary]:
+    """Return recently updated learned templates for improver context."""
+    summaries = library.list(source="learned")
+    ranked = sorted(summaries, key=lambda item: item.updated_at, reverse=True)
+    selected: list[TemplateSummary] = []
+    used_chars = 0
+    for summary in ranked:
+        if len(selected) >= limit:
+            break
+        template = library.recall(summary.template_id)
+        if template is None:
+            continue
+        entry_len = len(template.body) + len(summary.template_id) + len(summary.name) + 32
+        if used_chars + entry_len > max_chars and selected:
+            break
+        selected.append(summary)
+        used_chars += entry_len
+    return selected
+
+
 def select_reference_prompts(
     library: Library,
     text: str,

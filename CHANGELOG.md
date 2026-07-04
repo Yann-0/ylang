@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Release workflow notes for v0.2.0; nightly Ollama `@pytest.mark.llm_e2e` CI (`.github/workflows/llm-e2e.yml`)
+- CLI `ylang patterns apply` — interactive or `--index` / `--yes` to save learned templates
+- CLI `ylang usage digest --last-days 7` — text digest with top patterns and budget warning
+- Learned templates auto-surfaced in improver context (`YLANG_LEARNED_TEMPLATE_LIMIT`, default 2)
+- Preference routing uses `improver_accepted` counts for improver buckets (`improve`, `code`, `reason`)
+- Gateway load test script `scripts/gateway_load_test.py`
+
+### Changed
+
+- Operational tuning docs: hooks vs gateway, `YLANG_MODELS_IMPROVE`, `YLANG_DAILY_BUDGET_USD` recipes
+- Architecture notes on concurrent gateway profiling (thread offload sufficient at current scale)
+
 ## [0.2.0] - 2026-07-04
 
 ### Added

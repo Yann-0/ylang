@@ -16,6 +16,7 @@ def test_dashboard_includes_chart_sections() -> None:
         by_model={"openai/gpt-4o": 5},
         model_costs={"openai/gpt-4o": 0.25},
         model_success_counts={"openai/gpt-4o": 4},
+        model_improver_accepted_counts={},
     )
     buckets = [
         DailyUsageBucket(date="2026-07-01", requests=2, cost=0.10, successes=2),

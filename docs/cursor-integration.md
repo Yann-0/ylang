@@ -74,13 +74,22 @@ Close the learning loop from repeated improver prompts to saved templates:
 
 1. **Detect** — MCP `detect_patterns` or CLI `ylang patterns suggest --window-days 30`
 2. **Review** — inspect proposals (template id, rationale, sample text)
-3. **Save** — MCP `save_learned_template` with the approved body and params
+3. **Save** — CLI `ylang patterns apply --index 1 --yes`, or MCP `save_learned_template`
 
 Example:
 
 ```bash
 ylang patterns suggest
-# Review output, then via MCP or API save the template you want to keep
+ylang patterns apply --index 1 --yes
+# Or interactive: ylang patterns apply
+```
+
+Saved learned templates are automatically included in future `improve_prompt` context (top N by recency; `YLANG_LEARNED_TEMPLATE_LIMIT`, default 2).
+
+Weekly digest:
+
+```bash
+ylang usage digest --last-days 7
 ```
 
 ## Auto prompt improvement (global hooks)

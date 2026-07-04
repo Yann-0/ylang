@@ -93,6 +93,29 @@ def test_select_reference_prompts_respects_char_budget(library) -> None:
     assert "huge-template" not in ids
 
 
+def test_select_learned_templates_by_recency(library) -> None:
+    from ylang.library.retrieval import select_learned_templates
+    from ylang.library.store import save_learned_template
+
+    save_learned_template(
+        library,
+        "learned-older",
+        name="Older",
+        body="older pattern",
+        params=[],
+    )
+    save_learned_template(
+        library,
+        "learned-newer",
+        name="Newer",
+        body="newer pattern",
+        params=[],
+    )
+    results = select_learned_templates(library, limit=1)
+    assert len(results) == 1
+    assert results[0].template_id == "learned-newer"
+
+
 def test_library_list_cache_invalidates_on_save(library) -> None:
     library.save(
         "cache-test",

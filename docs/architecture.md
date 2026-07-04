@@ -210,6 +210,16 @@ Usage rows distinguish faces via the `surface` column.
 
 The usage store uses synchronous `sqlite3` with `check_same_thread=False` so worker threads can safely run queries. HTTP gateway handlers run blocking store and engine calls via `anyio.to_thread.run_sync` (`usage/async_ops.py`) so concurrent requests do not block the event loop.
 
+### Concurrent gateway profiling
+
+Lightweight load testing: `python scripts/gateway_load_test.py --concurrency 8 --requests 40` (mocked Engine) or `--live http://127.0.0.1:8787 TOKEN` for live `/v1/models` probes.
+
+Findings at current scale (single process, ~40 concurrent mocked completions):
+
+- Thread offload via `anyio.to_thread.run_sync` is **sufficient** — p95 latency stays low and error rate is 0 under mocked load.
+- SQLite WAL + short-lived connections per request avoid lock contention in tests.
+- Full **aiosqlite** migration is deferred unless profiling on a multi-client production instance shows thread-pool saturation or WAL busy timeouts.
+
 See [gateway.md](gateway.md) for virtual models and Cursor setup.
 
 ## v0.2.0 faces (HTTP transport)
@@ -219,7 +229,7 @@ See [gateway.md](gateway.md) for virtual models and Cursor setup.
 | MCP | `/mcp` or stdio | 11 tools including `improve_prompt` |
 | Gateway | `POST /v1/chat/completions`, `GET /v1/models` | Streaming tool-call passthrough; token counts in final SSE chunk |
 | Usage dashboard | `GET /usage` | Chart.js, 30s auto-refresh |
-| CLI | `ylang usage`, `ylang patterns suggest` | Standalone HTML export via `ylang usage dashboard` |
+| CLI | `ylang usage`, `ylang patterns suggest` / `apply` | Standalone HTML export via `ylang usage dashboard`; digest via `ylang usage digest` |
 
 `Library.list_templates()` caches summaries in memory until the next `save()`.
 
@@ -233,7 +243,7 @@ Optional Ollama smoke tests use `@pytest.mark.llm_e2e`.
 | Usage dashboard | `usage/dashboard.py`, `GET /usage` | **Live** on HTTP transport |
 | Pattern detector | `library/patterns.py` | **Live** (`UsagePatternDetector`) |
 | Personal preference routing | `model_router.apply_preference_order` | Implemented, uses usage aggregates |
-| Learned templates | `library/store.py` `source="learned"` | MCP tools + `ylang patterns suggest` |
+| Learned templates | `library/store.py` `source="learned"` | MCP tools + `ylang patterns suggest` / `apply`; auto-injected in improver context |
 
 ## Related docs
 

@@ -1,8 +1,8 @@
 """Entry point for ``python -m ylang``.
 
 With no subcommand, starts the MCP server (stdio or HTTP per ``Settings``).
-Subcommands: ``usage`` (aggregates and HTML dashboard export) and ``patterns``
-(learned-template proposals from improver usage history).
+Subcommands: ``usage`` (aggregates, digest, HTML dashboard export) and ``patterns``
+(``suggest`` / ``apply`` learned-template proposals from improver usage history).
 """
 
 from __future__ import annotations

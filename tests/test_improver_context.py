@@ -61,6 +61,28 @@ def test_build_improve_context_caps(backends) -> None:
     assert "code-explain" in context.reference_prompts_block.lower()
 
 
+def test_build_improve_context_includes_learned_templates(backends) -> None:
+    from ylang.library.store import save_learned_template
+    from ylang.library.types import TemplateParam
+
+    save_learned_template(
+        backends.library,
+        "learned-test-pattern",
+        name="Test Pattern",
+        body="Always include edge cases for {topic}.",
+        params=[TemplateParam(name="topic", description="Topic", default="tests")],
+    )
+    context = build_improve_context(
+        "add tests",
+        "edit_file",
+        None,
+        backends.library,
+        backends.memory,
+    )
+    assert context.reference_prompts_block is not None
+    assert "learned-test-pattern" in context.reference_prompts_block
+
+
 def test_build_user_message_always_includes_all_context_sections() -> None:
     """When context is provided, all three sections appear even if blocks are empty."""
     context = ImproveContext()

@@ -57,6 +57,10 @@ pytest -q -m "not llm_e2e"
 OLLAMA_HOST=http://localhost:11434 pytest -q -m llm_e2e
 ```
 
+### Nightly LLM e2e CI
+
+[`.github/workflows/llm-e2e.yml`](../.github/workflows/llm-e2e.yml) runs on a daily schedule (03:00 UTC) and via `workflow_dispatch`. It installs Ollama, pulls `qwen2.5`, and runs `pytest -m llm_e2e`. The job uses `continue-on-error: true` so a missing local Ollama setup does not block merges.
+
 ### Fixtures (`tests/conftest.py`)
 
 - `db_path` — temporary SQLite file
@@ -91,6 +95,7 @@ pytest --cov=ylang --cov-report=term-missing
 | Script | Purpose |
 |--------|---------|
 | `scripts/e2e_improve_prompt.py` | Manual improver e2e against live LLM |
+| `scripts/gateway_load_test.py` | Concurrent gateway load probe (mocked or `--live URL TOKEN`) |
 | `scripts/import-public-prompts.sh` | Shell wrapper for public prompt import |
 | `scripts/populate-public-prompts-via-mcp.py` | Import via MCP tool |
 
