@@ -223,6 +223,53 @@ def test_validate_rejects_improved_without_changes() -> None:
     assert result.rejection_reason == "improved text changed but changes[] is empty"
 
 
+def test_validate_salvages_restructured_spec_with_omitted_changes() -> None:
+    original = (
+        "we need to use AI to generate real possible answers (even false) and do not take "
+        "answers totaly out of the context of the question and taken from other questions. "
+        "it must be realistic.\n\n"
+        "each question can allow this type of answeres :\n"
+        "- a single option from 2 to 4 possible and relatisc values related to the question, "
+        "using radio button\n"
+        "- up to 2 to 4 answers (precise the number of valid answers expected) using checkbox"
+    )
+    improved = (
+        "## Goal\n"
+        "Use AI to generate realistic quiz answer options that stay in question context.\n\n"
+        "## Deliverables\n"
+        "- Single-choice questions: 2 to 4 radio options per question\n"
+        "- Multiple-choice questions: 2 to 4 checkbox options with explicit valid-answer count\n\n"
+        "## Constraints\n"
+        "- Distractors must be plausible but false; never reuse answers from other questions"
+    )
+    result, ok = _validate(original, improved, [], True, resolved=_AGENT)
+    assert ok is True
+    assert result.validated is True
+    assert result.improved == improved
+    assert len(result.changes) == 1
+    assert result.rejection_reason is None
+
+
+def test_validate_salvages_spec_with_duplicate_numbers_consolidated() -> None:
+    """Distinct numbers must remain; duplicate mentions in the original may be consolidated."""
+    original = "Pick 2 to 4 options. Multiple choice allows 2 to 4 valid answers."
+    improved = (
+        "## Goal\nPick 2 to 4 options per question.\n\n"
+        "## Constraints\n- Multiple choice: 2 to 4 valid answers with explicit count"
+    )
+    result, ok = _validate(original, improved, [], True, resolved=_AGENT)
+    assert ok is True
+    assert result.validated is True
+
+
+def test_is_restructured_spec_accepts_heading_structure_without_large_growth() -> None:
+    from ylang.improver.improver import _is_restructured_spec
+
+    original = "x" * 320
+    improved = f"## Goal\n{original}\n\n## Deliverables\n- Item one"
+    assert _is_restructured_spec(original, improved) is True
+
+
 def test_validate_salvage_accepts_long_agent_expansion_without_changes() -> None:
     from ylang.improver.improver import _try_salvage
 
@@ -601,6 +648,37 @@ def test_auto_apply_true_for_non_precision_tools(improver: Improver) -> None:
     with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
         result = improver.improve("ok", "cursor-agent", model="test-model")
     assert result.auto_apply_default is True
+
+
+def test_improver_salvages_structured_output_with_empty_changes(improver: Improver) -> None:
+    original = (
+        "we need to use AI to generate real possible answers (even false) and do not take "
+        "answers totaly out of the context of the question. each question can allow "
+        "single option from 2 to 4 possible values using radio button or 2 to 4 checkbox answers."
+    )
+    improved = (
+        "## Goal\n"
+        "Generate realistic AI quiz distractors that stay in question context.\n\n"
+        "## Deliverables\n"
+        "- Radio single-choice questions with 2 to 4 options\n"
+        "- Checkbox multiple-choice questions with 2 to 4 options and explicit valid count"
+    )
+    payload = {"improved": improved, "changes": []}
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content=json.dumps(payload)))
+    ]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = improver.improve(original, "cursor-agent", model="test-model", mode="agent")
+
+    assert result.validated is True
+    assert result.rejection_reason is None
+    assert result.improved == improved
+    assert len(result.changes) == 1
 
 
 def test_improver_records_accepted_when_validated_and_changed(improver: Improver) -> None:

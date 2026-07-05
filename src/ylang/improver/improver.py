@@ -464,14 +464,77 @@ def _is_restructured_spec(original: str, improved: str) -> bool:
     """Return True when improved looks like a markdown agent spec."""
     if improved == original:
         return False
+    if improved.count("##") >= 2:
+        return True
+    if improved.startswith("## ") or "\n## " in improved:
+        return True
     growth_threshold = 1.1 if len(original) >= 300 else 1.2
     if len(improved) <= len(original) * growth_threshold:
         return False
-    if improved.count("##") >= 2:
-        return True
     if len(original) >= 300 and _has_structured_expansion(improved):
         return True
-    return improved.startswith("## ") or "\n## " in improved
+    return False
+
+
+def _is_minor_clarity_edit(original: str, improved: str) -> bool:
+    """Return True for tiny typo/clarity fixes that must cite changes[]."""
+    if _has_structured_expansion(improved) and not _has_structured_expansion(original):
+        return False
+    if improved.count("##") > original.count("##"):
+        return False
+    ratio = len(improved) / max(len(original), 1)
+    if ratio > 1.2 or ratio < 0.8:
+        return False
+    orig_words = _significant_words(original)
+    imp_words = _significant_words(improved)
+    if len(orig_words.symmetric_difference(imp_words)) > 3:
+        return False
+    return True
+
+
+def _salvage_omitted_changes(
+    original: str,
+    improved: str,
+    auto_apply_default: bool,
+    *,
+    resolved: ResolvedCursorMode,
+) -> ImprovementResult | None:
+    """Accept safe model output when the model omitted changes[]."""
+    if improved.strip() == original.strip():
+        return None
+    if _is_minor_clarity_edit(original, improved):
+        return None
+    restructuring = _is_restructured_spec(original, improved) or _has_structured_expansion(
+        improved
+    )
+    if restructuring:
+        min_ratio = 0.25 if len(original) >= 200 else 0.35
+    elif len(original) >= 200:
+        min_ratio = 0.25
+    else:
+        min_ratio = 0.55
+    if not _intent_preserved(original, improved, min_ratio=min_ratio):
+        return None
+    if not _numbers_preserved(original, improved):
+        return None
+    if not _quoted_spans_preserved(original, improved):
+        return None
+    if not restructuring and not _modals_preserved(original, improved):
+        return None
+    if not _length_ok(original, improved, [], resolved=resolved):
+        return None
+    description = (
+        "Accepted restructured spec with omitted changes[]"
+        if restructuring
+        else "Accepted model output with omitted changes[]"
+    )
+    return _salvage_result(
+        original,
+        improved,
+        auto_apply_default,
+        resolved=resolved,
+        description=description,
+    )
 
 
 def _salvage_result(
@@ -512,7 +575,15 @@ def _try_salvage(
     """Accept a restructured spec when strict change validation is too brittle."""
     if improved == original:
         return None
-    min_ratio = 0.25 if len(original) >= 200 else 0.45
+    restructuring = _is_restructured_spec(original, improved) or _has_structured_expansion(
+        improved
+    )
+    if restructuring:
+        min_ratio = 0.25 if len(original) >= 200 else 0.35
+    elif len(original) >= 200:
+        min_ratio = 0.25
+    else:
+        min_ratio = 0.45
     if not _intent_preserved(original, improved, min_ratio=min_ratio):
         return None
     if not _numbers_preserved(original, improved):
@@ -619,21 +690,14 @@ def _validate(
     if original == improved and not changes:
         return _safe_result(original, auto_apply_default, resolved=resolved), True
     if improved != original and not changes:
-        if (
-            _is_restructured_spec(original, improved)
-            and _numbers_preserved(original, improved)
-            and _quoted_spans_preserved(original, improved)
-        ):
-            return (
-                _salvage_result(
-                    original,
-                    improved,
-                    auto_apply_default,
-                    resolved=resolved,
-                    description="Accepted restructured spec with omitted changes[]",
-                ),
-                True,
-            )
+        salvaged = _salvage_omitted_changes(
+            original,
+            improved,
+            auto_apply_default,
+            resolved=resolved,
+        )
+        if salvaged is not None:
+            return salvaged, True
         return _safe_result(
             original,
             auto_apply_default,
@@ -772,10 +836,12 @@ def _extract_numbers(text: str) -> list[str]:
 
 
 def _numbers_preserved(original: str, improved: str) -> bool:
-    """Ensure improved text does not drop or alter numeric literals from the original."""
-    orig = Counter(_extract_numbers(scrub_file_reference_numbers(original)))
-    imp = Counter(_extract_numbers(improved))
-    return all(imp.get(num, 0) >= count for num, count in orig.items())
+    """Ensure every distinct numeric literal from the original still appears in improved."""
+    orig_nums = set(_extract_numbers(scrub_file_reference_numbers(original)))
+    if not orig_nums:
+        return True
+    imp_nums = set(_extract_numbers(improved))
+    return orig_nums <= imp_nums
 
 
 def _extract_quoted_spans(text: str) -> list[str]:

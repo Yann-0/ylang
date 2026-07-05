@@ -61,7 +61,7 @@ Expand a rough user prompt into a structured, actionable specification. **Propos
 
 - **Reference-only pass-through** — Bare `@file` or `@terminal` references skip the LLM (`validated=True`, original returned). See `improver/reference.py`.
 - **Clarifying prose pass-through** — When the model replies with questions instead of JSON, the original prompt is returned unchanged.
-- **Salvage paths** — Non-JSON or partial JSON model output may be recovered as restructured markdown when structurally valid.
+- **Salvage paths** — Non-JSON or partial JSON model output may be recovered as restructured markdown when structurally valid. When the model returns a safe `improved` string but omits `changes[]`, validation synthesizes a single scope change instead of rejecting with `improved text changed but changes[] is empty` (minor typo-only edits still require explicit changes).
 - **JSON mode** — The improver requests `response_format={"type": "json_object"}` from LiteLLM.
 - **Usage logging** — Activity is logged as `improve:{cursor_mode}` (e.g. `improve:agent`), normalized at write time.
 
