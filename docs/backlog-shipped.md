@@ -70,7 +70,22 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (histo
 - [x] Learned templates in improver context — top N by recency (`YLANG_LEARNED_TEMPLATE_LIMIT`)
 - [x] Weekly usage digest — `ylang usage digest --last-days 7`
 
+### Phase 6 (2026-07-05) — v0.3.0
+
+- [x] GitHub Actions CI (pytest + ruff; pyright non-blocking)
+- [x] Schema migrations framework + FTS5 index
+- [x] `GET /health` endpoint
+- [x] Optional HTTP rate limiting (`YLANG_RATE_LIMIT_PER_MINUTE`)
+- [x] External Cursor model aliases (`deploy/ylang.models.json`)
+- [x] CLI `ylang backup`, `ylang export`, `ylang import`, `ylang doctor`
+- [x] MCP `search_templates` (FTS5)
+- [x] Workspace-scoped facts
+- [x] Improver analysis task detection + relaxed plan validation
+- [x] Usage digest pattern apply hints
+- [x] JSON logging (`YLANG_LOG_FORMAT=json`)
+- [x] Startup warning hooks + gateway double-LLM risk
+- [x] Template recall tracking on usage rows
+
 ## Remaining (future)
 
-- Full aiosqlite migration (only if profiling shows thread offload insufficient)
-- FTS5 keyword search for template retrieval (if library grows beyond in-memory cache)
+Open backlog items live in [backlog.md](./backlog.md).

@@ -120,6 +120,7 @@ def print_usage_digest(
     else:
         for index, proposal in enumerate(proposals[:5], start=1):
             print(f"  {index}. {proposal.suggested_template_id} — {proposal.rationale}")
+            print(f"     apply: ylang patterns apply --index {index} --yes")
 
 
 def run_usage_cli(argv: list[str] | None = None) -> int:

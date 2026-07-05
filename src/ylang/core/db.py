@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
+from ylang.core.migrations import run_migrations
+
 
 class StoragePermissionError(OSError):
     """Raised when the SQLite storage path is not writable by the current process."""
@@ -52,6 +54,7 @@ def open_connection(db_path: Path) -> sqlite3.Connection:
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA busy_timeout=5000")
     _verify_connection_writable(connection, db_path)
+    run_migrations(connection)
     return connection
 
 

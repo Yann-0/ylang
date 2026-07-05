@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import litellm
 
 from ylang.core.types import Activity
+from ylang.core.model_aliases import load_cursor_slug_aliases
 from ylang.settings import (
     DEFAULT_ACTIVITY_MODEL_LISTS,
     DEFAULT_FALLBACK_MODEL,
@@ -30,20 +31,7 @@ _ACTIVITIES: tuple[Activity, ...] = ("code", "search", "reason", "improve", "oth
 
 CandidateStatus = str  # ``available`` | ``skipped:no_key`` | ``skipped:cooldown``
 
-# Cursor IDE model slugs → LiteLLM provider/model strings (best-effort).
-_CURSOR_SLUG_ALIASES: dict[str, str] = {
-    "claude-4.6-sonnet-high-thinking": "anthropic/claude-sonnet-4-6",
-    "claude-4.6-opus-high-thinking": "anthropic/claude-opus-4-6",
-    "claude-4.6-sonnet-medium-thinking": "anthropic/claude-sonnet-4-6",
-    "claude-3.5-sonnet-high-thinking": "anthropic/claude-sonnet-4-6",
-    "claude-sonnet-4-5": "anthropic/claude-sonnet-4-6",
-    "claude-sonnet-4-6": "anthropic/claude-sonnet-4-6",
-    "composer": "anthropic/claude-sonnet-4-6",
-    "composer-2.5-fast": "anthropic/claude-sonnet-4-6",
-    "gpt-5.3-codex-high-fast": "openai/gpt-4o",
-    "gpt-5.5-medium": "openai/gpt-4o",
-    "gemini-3.1-pro": "openai/gpt-4o",
-}
+_CURSOR_SLUG_ALIASES: dict[str, str] = load_cursor_slug_aliases()
 
 
 @dataclass

@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-05
+
+### Added
+
+- GitHub Actions CI (pytest + ruff; pyright non-blocking)
+- Schema migrations (`schema_migrations`, facts workspace, usage context templates, FTS5)
+- `GET /health` (unauthenticated; bearer-exempt)
+- Optional HTTP rate limiting via `YLANG_RATE_LIMIT_PER_MINUTE`
+- Configurable Cursor model aliases (`deploy/ylang.models.json`, `YLANG_MODEL_ALIASES_PATH`)
+- CLI: `ylang backup`, `ylang export`, `ylang import`, `ylang doctor`
+- MCP `search_templates` (FTS5)
+- Workspace-scoped facts (`remember` / `recall_facts` `workspace` param)
+- Improver analysis task detection; relaxed validation for plan/analysis prompts
+- Usage digest includes `ylang patterns apply` hints
+- JSON logging via `YLANG_LOG_FORMAT=json`
+- Startup warning when HTTP gateway + hooks may double LLM calls
+- Template recall tracking on usage rows (`improver_context_templates`)
+
+### Changed
+
+- Version 0.3.0; MCP tool count 12
+
+## [Unreleased previous]
+
 ### Added
 
 - GitHub Release workflow notes for v0.2.0; nightly Ollama `@pytest.mark.llm_e2e` CI (`.github/workflows/llm-e2e.yml`)

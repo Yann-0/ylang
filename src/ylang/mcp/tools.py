@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any
 
@@ -65,6 +66,10 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
             mode=mode,
             accepted=accepted,
         )
+        if use_context and context is not None and context.reference_template_ids:
+            deps.store.update_last_improver_context_templates(
+                list(context.reference_template_ids)
+            )
         payload = _serialize_improvement(result)
         if use_context and context is not None:
             payload["context_used"] = _serialize_context_used(context, conversation)
@@ -154,10 +159,10 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
         }
 
     @server.tool()
-    def remember(fact: str, scope: str) -> dict[str, Any]:
+    def remember(fact: str, scope: str, workspace: str = "") -> dict[str, Any]:
         """Persist a user fact under a named scope via core memory."""
         try:
-            result = deps.memory.remember(fact, scope)
+            result = deps.memory.remember(fact, scope, workspace=workspace)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
         return _serialize_remember(result)
@@ -166,10 +171,11 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
     def recall_facts(
         scope: str | None = None,
         limit: int = 100,
+        workspace: str | None = None,
     ) -> dict[str, Any]:
         """Return persisted facts, newest first, optionally filtered by scope."""
         try:
-            facts = deps.memory.recall(scope=scope, limit=limit)
+            facts = deps.memory.recall(scope=scope, limit=limit, workspace=workspace)
         except ValueError as exc:
             return {"ok": False, "error": str(exc), "facts": []}
         return {
@@ -256,6 +262,19 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
         payload = _serialize_template(template)
         payload["ok"] = True
         return payload
+
+    @server.tool()
+    def search_templates(query: str, limit: int = 20) -> dict[str, Any]:
+        """Search templates by keyword using the local FTS index."""
+        try:
+            results = deps.library.search(query, limit=limit)
+        except sqlite3.OperationalError as exc:
+            return {"ok": False, "error": str(exc), "templates": []}
+        return {
+            "ok": True,
+            "query": query,
+            "templates": [_serialize_summary(item) for item in results],
+        }
 
 
 def _serialize_improvement(result: ImprovementResult) -> dict[str, Any]:
@@ -434,6 +453,7 @@ def _serialize_fact(fact: Fact) -> dict[str, Any]:
         "id": fact.id,
         "fact": fact.fact,
         "scope": fact.scope,
+        "workspace": fact.workspace,
         "created_at": fact.created_at.isoformat(),
     }
 

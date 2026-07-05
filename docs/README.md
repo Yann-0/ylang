@@ -23,6 +23,7 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 | [CHANGELOG](../CHANGELOG.md) | Version history |
 | [Dead code audit](dead-code.md) | Unused exports and stub seams (audit only) |
 | [Audit and roadmap](audit-and-roadmap.md) | **Historical** snapshot (2026-06-30) — superseded by current code |
+| [Open backlog](backlog.md) | Active backlog items (not yet shipped) |
 | [Backlog shipped](backlog-shipped.md) | Completed backlog items |
 
 ## Status

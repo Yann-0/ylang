@@ -8,6 +8,7 @@ from typing import Literal
 
 CursorMode = Literal["agent", "plan", "debug", "ask", "multitask"]
 ModeSource = Literal["explicit", "tool", "prompt", "default"]
+TaskClass = Literal["structural", "analysis", "implementation"]
 
 PRECISION_TOOLS: frozenset[str] = frozenset(
     {
@@ -54,6 +55,7 @@ _MCP_TOOL_DEFAULT_MODE: dict[str, CursorMode] = {
 }
 
 _PROMPT_MODE_PATTERNS: tuple[tuple[re.Pattern[str], CursorMode, int], ...] = (
+    (re.compile(r"\b(deep dive|backlog|roadmap|architecture|gap analysis|adr|product owner)\b", re.I), "plan", 4),
     (re.compile(r"\b(debug|fix the bug|stack trace|reproduc|root cause|failing test)\b", re.I), "debug", 3),
     (re.compile(r"\b(plan|roadmap|architecture|design approach|trade-?offs?)\b", re.I), "plan", 2),
     (re.compile(r"\b(explain|what is|how does|why does|describe|clarify)\b", re.I), "ask", 2),
@@ -70,6 +72,7 @@ _MODE_GUIDANCE: dict[CursorMode, str] = {
     "plan": (
         "Cursor mode: plan — planning only, no implementation. "
         "Prefer Goal / Context / Options / Recommended approach / Risks / Open questions. "
+        "For analysis or backlog tasks, add Deliverables, Epic roadmap, and Definition of done sections. "
         "Do not add code edits, file changes, or run-test deliverables unless the user asked to plan them."
     ),
     "ask": (
@@ -102,6 +105,19 @@ class ResolvedCursorMode:
 def is_precision_tool(tool: str) -> bool:
     """Return True when the tool must never auto-apply improvements."""
     return _normalize_key(tool) in PRECISION_TOOLS
+
+
+def detect_task_class(text: str) -> TaskClass:
+    """Classify prompt intent for improver validation tuning."""
+    lowered = text.lower()
+    if re.search(
+        r"\b(deep dive|backlog|roadmap|gap analysis|architecture review|product owner|adr)\b",
+        lowered,
+    ):
+        return "analysis"
+    if re.search(r"\b(implement|refactor|add feature|build|write tests?|fix bug)\b", lowered):
+        return "implementation"
+    return "structural"
 
 
 def default_auto_apply(tool: str, mode: CursorMode) -> bool:

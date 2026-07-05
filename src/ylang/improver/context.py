@@ -28,6 +28,7 @@ class ImproveContext:
     conversation_block: str | None = None
     facts_block: str | None = None
     reference_prompts_block: str | None = None
+    reference_template_ids: tuple[str, ...] = ()
 
     @property
     def has_content(self) -> bool:
@@ -59,15 +60,17 @@ def build_improve_context(
 ) -> ImproveContext:
     """Assemble capped context blocks from conversation, facts, and library prompts."""
     resolved = resolve_cursor_mode(tool, text, explicit_mode=mode)
+    reference_block, reference_ids = _build_reference_prompts_block(
+        text,
+        tool,
+        library,
+        cursor_mode=resolved.mode,
+    )
     return ImproveContext(
         conversation_block=_build_conversation_block(conversation),
         facts_block=_build_facts_block(memory),
-        reference_prompts_block=_build_reference_prompts_block(
-            text,
-            tool,
-            library,
-            cursor_mode=resolved.mode,
-        ),
+        reference_prompts_block=reference_block,
+        reference_template_ids=reference_ids,
     )
 
 
@@ -115,7 +118,7 @@ def _build_reference_prompts_block(
     library: Library,
     *,
     cursor_mode: str | None = None,
-) -> str | None:
+) -> tuple[str | None, tuple[str, ...]]:
     learned = select_learned_templates(
         library,
         limit=_learned_template_limit(),
@@ -137,13 +140,15 @@ def _build_reference_prompts_block(
         seen.add(summary.template_id)
         ordered.append(summary)
     if not ordered:
-        return None
+        return None, ()
     sections: list[str] = []
     used = 0
+    template_ids: list[str] = []
     for summary in ordered:
         template = library.recall(summary.template_id)
         if template is None:
             continue
+        template_ids.append(summary.template_id)
         section = (
             f"### {summary.name} ({summary.template_id})\n"
             f"tags: {', '.join(summary.tags) or 'none'}\n"
@@ -154,5 +159,5 @@ def _build_reference_prompts_block(
         sections.append(section)
         used += len(section) + 2
     if not sections:
-        return None
-    return "\n\n".join(sections)
+        return None, ()
+    return "\n\n".join(sections), tuple(template_ids)

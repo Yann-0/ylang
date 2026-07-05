@@ -32,6 +32,11 @@ class BearerTokenMiddleware:
             await self.app(scope, receive, send)
             return
 
+        path = scope.get("path", "")
+        if path == "/health":
+            await self.app(scope, receive, send)
+            return
+
         auth = _authorization_header(scope)
         if auth is None or not secrets.compare_digest(auth, self._expected):
             response = Response("Unauthorized", status_code=401)

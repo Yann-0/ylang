@@ -17,9 +17,11 @@ CREATE TABLE IF NOT EXISTS facts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     fact TEXT NOT NULL,
     scope TEXT NOT NULL CHECK (scope IN ('private', 'shareable')),
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    workspace TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_facts_scope_created ON facts (scope, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_facts_workspace_scope ON facts (workspace, scope, created_at DESC);
 """
 
 _VALID_SCOPES = frozenset({"private", "shareable"})
@@ -67,6 +69,7 @@ class Fact:
     fact: str
     scope: FactScope
     created_at: datetime
+    workspace: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,17 +108,18 @@ class MemoryStore:
         self._connection.executescript(_SCHEMA_SQL)
         self._connection.commit()
 
-    def remember(self, fact: str, scope: str) -> RememberResult:
+    def remember(self, fact: str, scope: str, *, workspace: str = "") -> RememberResult:
         """Persist one fact under the given scope. Commits immediately."""
         validated_fact = _validate_fact(fact)
         validated_scope = _validate_scope(scope)
+        validated_workspace = workspace.strip()
         created_at = datetime.now(timezone.utc)
         cursor = self._connection.execute(
             """
-            INSERT INTO facts (fact, scope, created_at)
-            VALUES (?, ?, ?)
+            INSERT INTO facts (fact, scope, created_at, workspace)
+            VALUES (?, ?, ?, ?)
             """,
-            (validated_fact, validated_scope, _to_iso(created_at)),
+            (validated_fact, validated_scope, _to_iso(created_at), validated_workspace),
         )
         self._connection.commit()
         return RememberResult(
@@ -130,39 +134,41 @@ class MemoryStore:
         *,
         scope: str | None = None,
         limit: int = 100,
+        workspace: str | None = None,
     ) -> list[Fact]:
-        """Return facts newest first, optionally filtered by scope."""
+        """Return facts newest first, optionally filtered by scope and workspace."""
+        clauses: list[str] = []
+        params: list[object] = []
         if scope is not None:
-            validated_scope = _validate_scope(scope)
-            cursor = self._connection.execute(
-                """
-                SELECT id, fact, scope, created_at
-                FROM facts
-                WHERE scope = ?
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-                """,
-                (validated_scope, limit),
-            )
-        else:
-            cursor = self._connection.execute(
-                """
-                SELECT id, fact, scope, created_at
-                FROM facts
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            )
+            _validate_scope(scope)
+            clauses.append("scope = ?")
+            params.append(scope)
+        if workspace is not None:
+            clauses.append("workspace = ?")
+            params.append(workspace.strip())
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.append(limit)
+        cursor = self._connection.execute(
+            f"""
+            SELECT id, fact, scope, created_at, COALESCE(workspace, '')
+            FROM facts
+            {where}
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        )
         return [_row_to_fact(row) for row in cursor.fetchall()]
 
 
 def _row_to_fact(row: tuple[object, ...]) -> Fact:
+    workspace = str(row[4]) if len(row) > 4 else ""
     return Fact(
         id=int(row[0]),
         fact=str(row[1]),
         scope=str(row[2]),  # type: ignore[arg-type]
         created_at=_from_iso(str(row[3])),
+        workspace=workspace,
     )
 
 

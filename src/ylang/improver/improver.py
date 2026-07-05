@@ -12,6 +12,7 @@ from ylang.improver.context import ImproveContext, _EMPTY_CONVERSATION
 from ylang.improver.registry import (
     ResolvedCursorMode,
     default_auto_apply,
+    detect_task_class,
     mode_guidance,
     resolve_cursor_mode,
 )
@@ -35,7 +36,7 @@ _MODAL_RE = re.compile(r"\b(must|should|shall|never|always|may|might|will|won't)
 _SEQ_RE = re.compile(r"\b(first|then|before|after|finally)\b", re.I)
 _PLACEHOLDER_RE = re.compile(r"<[^>]+>|\be\.g\.\b|example", re.I)
 _WORD_RE = re.compile(r"[a-z0-9']{4,}", re.I)
-_SALVAGE_MODES: frozenset[str] = frozenset({"agent", "multitask", "debug"})
+_SALVAGE_MODES: frozenset[str] = frozenset({"agent", "multitask", "debug", "plan"})
 _SHORT_PROMPT_MAX_LEN = 50
 _FALLBACK_REJECTION_REASONS: frozenset[str] = frozenset({"length ratio out of bounds"})
 _VAGUE_SHORT_PROMPT_RES: tuple[re.Pattern[str], ...] = (
@@ -640,7 +641,7 @@ def _validate(
             validated=False,
             rejection_reason="improved text changed but changes[] is empty",
         ), False
-    reason = _validation_failure_reason(original, improved, changes)
+    reason = _validation_failure_reason(original, improved, changes, resolved=resolved)
     if reason is not None:
         return _safe_result(
             original,
@@ -683,11 +684,13 @@ def _validation_failure_reason(
     original: str,
     improved: str,
     changes: list[Change],
+    *,
+    resolved: ResolvedCursorMode,
 ) -> str | None:
     """Return a short reason when validation fails, else None."""
     if improved != original and not changes:
         return "improved text changed but changes[] is empty"
-    if not _length_ok(original, improved, changes):
+    if not _length_ok(original, improved, changes, resolved=resolved):
         return "length ratio out of bounds"
     if not _numbers_preserved(original, improved):
         return "numbers changed"
@@ -733,19 +736,26 @@ def _scope_preserves_intent(original: str, improved: str, changes: list[Change])
     return _intent_preserved(original, improved, min_ratio=min_ratio)
 
 
-def _length_ok(original: str, improved: str, changes: list[Change]) -> bool:
+def _length_ok(
+    original: str,
+    improved: str,
+    changes: list[Change],
+    *,
+    resolved: ResolvedCursorMode,
+) -> bool:
     """Allow generous growth for spec rewrites; keep tight bounds for minor edits."""
     if not original:
         return True
     if len(improved) > 16_000:
         return False
     ratio = len(improved) / len(original)
+    task_class = detect_task_class(original)
     restructuring = _is_restructuring(original, improved, changes) or _is_restructured_spec(
         original, improved
     )
-    if restructuring:
+    if restructuring or task_class == "analysis" or resolved.mode == "plan":
         max_ratio = min(16_000 / len(original), 200.0)
-        min_ratio = 0.25 if len(original) < 80 else 0.4
+        min_ratio = 0.2 if len(original) < 80 else 0.35
         return min_ratio <= ratio <= max_ratio
     if len(original) < 80:
         # Minor clarity edits can shorten informal prompts (e.g. "let's do all" → "do all").

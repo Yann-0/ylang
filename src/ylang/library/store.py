@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Self
 
 from ylang.core.db import open_connection
+from ylang.library.search import index_template, search_templates
 from ylang.library.seeds import ensure_seeds
 from ylang.library.types import (
     Template,
@@ -232,6 +233,14 @@ class Library:
             )
         self._connection.commit()
         self._list_cache.clear()
+        index_template(
+            self._connection,
+            template_id=template_id,
+            name=name,
+            body=body,
+            tags=resolved_tags,
+        )
+        self._connection.commit()
         return Template(
             template_id=template_id,
             name=name,
@@ -337,6 +346,19 @@ class Library:
             )
         self._list_cache[cache_key] = summaries
         return summaries
+
+    def search(self, query: str, *, limit: int = 20) -> list[TemplateSummary]:
+        """Return templates ranked by FTS match for ``query``."""
+        hits = search_templates(self._connection, query, limit=limit)
+        if not hits:
+            return []
+        by_id = {item.template_id: item for item in self.list()}
+        results: list[TemplateSummary] = []
+        for template_id, _rank in hits:
+            summary = by_id.get(template_id)
+            if summary is not None:
+                results.append(summary)
+        return results
 
     def render(
         self,

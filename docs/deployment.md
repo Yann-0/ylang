@@ -118,6 +118,16 @@ Point Cursor (or any MCP HTTP client) at the service:
 
 For remote access, put a reverse proxy (nginx, Caddy) with TLS in front and restrict by network policy.
 
+Example Caddy snippet:
+
+```caddy
+ylang.example.com {
+    reverse_proxy 127.0.0.1:8787
+}
+```
+
+Health check (no auth): `GET https://ylang.example.com/health`
+
 ### Multi-client HTTP setup
 
 One HTTP Ylang instance can serve multiple Cursor workstations or agents concurrently:
@@ -175,7 +185,7 @@ curl -s -o /dev/null -w "%{http_code}\n" \
   http://127.0.0.1:8787/v1/models
 ```
 
-Expect **200** when the service and token are valid. A bare GET to `/mcp` is not a reliable health probe (MCP uses the streamable HTTP protocol).
+Expect **200** when the service and token are valid. **`GET /health`** returns version JSON without auth.
 
 Startup stderr (journalctl) shows transport, storage path, tools, gateway routes, and LLM routing:
 
@@ -195,13 +205,35 @@ sudo journalctl -u ylang -n 50 --no-pager
 
 ## Backup
 
-Back up the SQLite file (and `-wal`/`-shm` if present):
+Online backup via CLI (recommended):
+
+```bash
+ylang backup --output /backup/ylang-$(date +%F).db
+```
+
+Or SQLite directly:
 
 ```bash
 sqlite3 /srv/ylang/data/ylang.db ".backup /backup/ylang-$(date +%F).db"
 ```
 
-Stop the service or use SQLite online backup for consistency under load.
+Optional nightly systemd timer (as root):
+
+```ini
+# /etc/systemd/system/ylang-backup.timer
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+# /etc/systemd/system/ylang-backup.service
+[Service]
+Type=oneshot
+User=ylang
+EnvironmentFile=/srv/ylang/ylang.env
+ExecStart=/srv/ylang/.venv/bin/ylang backup --output /backup/ylang-%Y-%m-%d.db
+```
+
+Stop the service or use online backup for consistency under load.
 
 ## CLI against a systemd install
 

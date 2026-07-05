@@ -32,8 +32,25 @@ from ylang.usage.store import UsageWindow
 logger = logging.getLogger(__name__)
 
 
+def register_health_route(server: FastMCP) -> None:
+    """Register unauthenticated ``GET /health`` (exempt in bearer middleware)."""
+
+    @server.custom_route("/health", methods=["GET"])
+    async def health(_request: Request) -> Response:
+        from ylang import __version__
+
+        return JSONResponse(
+            {
+                "status": "ok",
+                "version": __version__,
+                "service": "ylang",
+            }
+        )
+
+
 def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
     """Register OpenAI-compatible routes on the shared HTTP app."""
+    register_health_route(server)
 
     @server.custom_route("/v1/chat/completions", methods=["POST"])
     async def chat_completions(request: Request) -> Response:

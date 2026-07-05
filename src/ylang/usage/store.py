@@ -158,6 +158,10 @@ class UsageStore:
             self._connection.execute(
                 "ALTER TABLE usage ADD COLUMN improver_input_sample TEXT"
             )
+        if "improver_context_templates" not in columns:
+            self._connection.execute(
+                "ALTER TABLE usage ADD COLUMN improver_context_templates TEXT"
+            )
         self._connection.commit()
 
     def write_usage(
@@ -174,6 +178,7 @@ class UsageStore:
         success: bool,
         timestamp: datetime | None = None,
         improver_input_sample: str | None = None,
+        improver_context_templates: str | None = None,
     ) -> None:
         """Insert one per-request usage row. Commits immediately."""
         when = timestamp or datetime.now(timezone.utc)
@@ -190,6 +195,7 @@ class UsageStore:
             sample,
             latency_ms,
             int(success),
+            improver_context_templates,
         )
         try:
             self._execute_write(params)
@@ -206,16 +212,28 @@ class UsageStore:
             self._execute_write(params)
 
     def _execute_write(self, params: tuple[object, ...]) -> None:
-        self._connection.execute(
-            """
-            INSERT INTO usage (
-                timestamp, surface, activity, model_used, prompt_tokens, cost,
-                improver_fired, improver_accepted, improver_input_sample,
-                latency_ms, success
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            params,
-        )
+        if len(params) == 11:
+            self._connection.execute(
+                """
+                INSERT INTO usage (
+                    timestamp, surface, activity, model_used, prompt_tokens, cost,
+                    improver_fired, improver_accepted, improver_input_sample,
+                    latency_ms, success
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+        else:
+            self._connection.execute(
+                """
+                INSERT INTO usage (
+                    timestamp, surface, activity, model_used, prompt_tokens, cost,
+                    improver_fired, improver_accepted, improver_input_sample,
+                    latency_ms, success, improver_context_templates
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
         self._connection.commit()
 
     def update_last_improver_accepted(self, accepted: bool) -> None:
@@ -227,6 +245,21 @@ class UsageStore:
             WHERE id = (SELECT id FROM usage ORDER BY id DESC LIMIT 1)
             """,
             (int(accepted),),
+        )
+        self._connection.commit()
+
+    def update_last_improver_context_templates(self, template_ids: list[str]) -> None:
+        """Attach reference template ids to the most recent usage row."""
+        if not template_ids:
+            return
+        joined = ",".join(template_ids)
+        self._connection.execute(
+            """
+            UPDATE usage
+            SET improver_context_templates = ?
+            WHERE id = (SELECT id FROM usage ORDER BY id DESC LIMIT 1)
+            """,
+            (joined,),
         )
         self._connection.commit()
 
