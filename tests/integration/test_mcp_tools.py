@@ -738,4 +738,8 @@ async def test_all_tools_registered(mcp_server: Any) -> None:
         "detect_patterns",
         "save_learned_template",
         "search_templates",
+        "improver_analytics",
+        "template_effectiveness_report",
+        "optimization_suggestions",
+        "record_prompt_edit",
     }

@@ -11,8 +11,8 @@ from mcp.server.fastmcp import FastMCP
 from ylang.core import Engine
 from ylang.core.stores import open_stores
 from ylang.improver import Improver
-from ylang.library.pattern_detector import UsagePatternDetector
 from ylang.library.patterns import register_pattern_detector
+from ylang.library.semantic_pattern_detector import create_pattern_detector
 from ylang.gateway import VIRTUAL_MODEL_NAMES, register_gateway_routes
 from ylang.gateway.routes import register_health_route
 from ylang.mcp.auth import BearerTokenMiddleware
@@ -36,6 +36,10 @@ _TOOL_NAMES = (
     "detect_patterns",
     "save_learned_template",
     "search_templates",
+    "improver_analytics",
+    "template_effectiveness_report",
+    "optimization_suggestions",
+    "record_prompt_edit",
 )
 
 
@@ -130,7 +134,8 @@ def run_server() -> None:
     settings = Settings.load()
     path = settings.resolved_storage_path()
     stores = open_stores(path)
-    register_pattern_detector(UsagePatternDetector(stores.store))
+    pattern_mode = os.environ.get("YLANG_PATTERN_DETECTOR", "lexical").strip().lower()
+    register_pattern_detector(create_pattern_detector(stores.store, mode=pattern_mode))
     engine = Engine.from_settings(stores.store, surface="mcp", settings=settings)
     gateway_engine = (
         Engine.from_settings(stores.store, surface="gateway", settings=settings)

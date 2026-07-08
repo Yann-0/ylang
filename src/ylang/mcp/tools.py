@@ -27,6 +27,14 @@ from ylang.library.types import (
 )
 from ylang.mcp.deps import YlangDeps
 from ylang.usage.aggregates import summarize_usage
+from ylang.usage.feedback import FeedbackStore
+from ylang.usage.improver_analytics import summarize_improver, template_effectiveness
+from ylang.usage.optimizer import (
+    generate_optimization_suggestions,
+    serialize_funnel,
+    serialize_suggestion,
+    serialize_template_row,
+)
 from ylang.usage.store import UsageRecord, UsageWindow
 
 
@@ -57,6 +65,7 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
                 deps.library,
                 deps.memory,
                 mode=mode,
+                store=deps.store,
             )
         result = deps.improver.improve(
             text,
@@ -276,6 +285,91 @@ def register_tools(server: FastMCP, deps: YlangDeps) -> None:
             "templates": [_serialize_summary(item) for item in results],
         }
 
+    @server.tool()
+    def improver_analytics(
+        last_hours: int | None = None,
+        last_days: int | None = None,
+    ) -> dict[str, Any]:
+        """Return improver funnel statistics for a time window."""
+        try:
+            window = _parse_window(
+                last_hours=last_hours,
+                last_days=last_days,
+                since=None,
+                until=None,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        funnel = summarize_improver(deps.store, window)
+        return {"ok": True, **serialize_funnel(funnel)}
+
+    @server.tool()
+    def template_effectiveness_report(
+        last_hours: int | None = None,
+        last_days: int | None = None,
+        min_samples: int = 3,
+    ) -> dict[str, Any]:
+        """Rank templates by accept rate when injected into improver context."""
+        try:
+            window = _parse_window(
+                last_hours=last_hours,
+                last_days=last_days,
+                since=None,
+                until=None,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "templates": []}
+        rows = template_effectiveness(deps.store, window, min_samples=min_samples)
+        return {
+            "ok": True,
+            "templates": [serialize_template_row(row) for row in rows],
+        }
+
+    @server.tool()
+    def optimization_suggestions(
+        last_hours: int | None = None,
+        last_days: int | None = None,
+    ) -> dict[str, Any]:
+        """Return evidence-backed propose-only prompt optimization suggestions."""
+        try:
+            window = _parse_window(
+                last_hours=last_hours,
+                last_days=last_days,
+                since=None,
+                until=None,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "suggestions": []}
+        feedback = FeedbackStore(deps.store._connection)
+        suggestions = generate_optimization_suggestions(
+            deps.store,
+            window,
+            feedback=feedback,
+        )
+        return {
+            "ok": True,
+            "suggestions": [serialize_suggestion(item) for item in suggestions],
+        }
+
+    @server.tool()
+    def record_prompt_edit(
+        original_text: str,
+        submitted_text: str,
+    ) -> dict[str, Any]:
+        """Record user edit feedback between improved and submitted prompt text."""
+        feedback = FeedbackStore(deps.store._connection)
+        usage_id = deps.store.latest_usage_id()
+        event = feedback.record_edit(
+            original_text=original_text,
+            submitted_text=submitted_text,
+            usage_id=usage_id,
+        )
+        return {
+            "ok": True,
+            "id": event.id,
+            "edit_distance": event.edit_distance,
+        }
+
 
 def _serialize_improvement(result: ImprovementResult) -> dict[str, Any]:
     payload: dict[str, Any] = {
@@ -337,7 +431,14 @@ def _serialize_summary(summary: TemplateSummary) -> dict[str, Any]:
 
 
 def _serialize_usage(record: UsageRecord) -> dict[str, Any]:
-    return {
+    context_templates: list[str] = []
+    if record.improver_context_templates:
+        context_templates = [
+            part.strip()
+            for part in record.improver_context_templates.split(",")
+            if part.strip()
+        ]
+    payload: dict[str, Any] = {
         "id": record.id,
         "timestamp": record.timestamp.isoformat(),
         "surface": record.surface,
@@ -350,7 +451,21 @@ def _serialize_usage(record: UsageRecord) -> dict[str, Any]:
         "improver_input_sample": record.improver_input_sample,
         "latency_ms": record.latency_ms,
         "success": record.success,
+        "improver_context_templates": context_templates,
     }
+    if record.improver_validated is not None:
+        payload["improver_validated"] = record.improver_validated
+    if record.improver_changed is not None:
+        payload["improver_changed"] = record.improver_changed
+    if record.improver_rejection_reason is not None:
+        payload["improver_rejection_reason"] = record.improver_rejection_reason
+    if record.improver_task_class is not None:
+        payload["improver_task_class"] = record.improver_task_class
+    if record.cursor_mode is not None:
+        payload["cursor_mode"] = record.cursor_mode
+    if record.experiment_variant is not None:
+        payload["experiment_variant"] = record.experiment_variant
+    return payload
 
 
 def _parse_params(raw: list[dict[str, str | None]]) -> list[TemplateParam]:

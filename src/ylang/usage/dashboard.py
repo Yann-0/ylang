@@ -6,6 +6,7 @@ import json
 from html import escape
 
 from ylang.usage.aggregates import DailyUsageBucket, UsageSummary
+from ylang.usage.improver_analytics import ImproverFunnelSummary
 
 
 def render_usage_dashboard_html(
@@ -13,6 +14,7 @@ def render_usage_dashboard_html(
     *,
     title: str = "Ylang Usage",
     daily_buckets: list[DailyUsageBucket] | None = None,
+    improver_funnel: ImproverFunnelSummary | None = None,
     refresh_seconds: int = 30,
     live: bool = False,
 ) -> str:
@@ -31,6 +33,19 @@ def render_usage_dashboard_html(
     model_labels = list(summary.by_model.keys())
     model_values = list(summary.by_model.values())
 
+    improver_mode_labels: list[str] = []
+    improver_accept_rates: list[float] = []
+    rejection_labels: list[str] = []
+    rejection_values: list[int] = []
+    if improver_funnel is not None:
+        for mode, stats in sorted(improver_funnel.by_mode.items()):
+            improver_mode_labels.append(mode)
+            rate = stats.accepted / stats.fired * 100 if stats.fired else 0.0
+            improver_accept_rates.append(round(rate, 1))
+        for reason, count in list(improver_funnel.top_rejection_reasons.items())[:8]:
+            rejection_labels.append(reason[:40])
+            rejection_values.append(count)
+
     refresh_meta = (
         f'<meta http-equiv="refresh" content="{refresh_seconds}">' if live else ""
     )
@@ -45,6 +60,16 @@ def render_usage_dashboard_html(
             "modelLabels": model_labels,
             "modelValues": model_values,
             "successRate": round(summary.success_rate * 100, 1),
+            "improverModeLabels": improver_mode_labels,
+            "improverAcceptRates": improver_accept_rates,
+            "rejectionLabels": rejection_labels,
+            "rejectionValues": rejection_values,
+            "improverAcceptRate": round(improver_funnel.accept_rate * 100, 1)
+            if improver_funnel
+            else 0.0,
+            "improverValidationRate": round(improver_funnel.validation_rate * 100, 1)
+            if improver_funnel
+            else 0.0,
         }
     )
 
@@ -79,6 +104,8 @@ def render_usage_dashboard_html(
   <div class="card"><div class="label">Total cost</div><div class="value">${summary.total_cost:.4f}</div></div>
   <div class="card"><div class="label">Tokens</div><div class="value">{summary.total_tokens:,}</div></div>
   <div class="card"><div class="label">Success rate</div><div class="value">{summary.success_rate * 100:.1f}%</div></div>
+  {f'<div class="card"><div class="label">Improver accept</div><div class="value">{improver_funnel.accept_rate * 100:.1f}%</div></div>' if improver_funnel else ''}
+  {f'<div class="card"><div class="label">Improver validated</div><div class="value">{improver_funnel.validation_rate * 100:.1f}%</div></div>' if improver_funnel else ''}
 </div>
 <section>
   <h2>Cost over time</h2>
@@ -98,6 +125,14 @@ def render_usage_dashboard_html(
 <section>
   <h2>Daily success rate</h2>
   <div class="chart-box"><canvas id="successChart"></canvas></div>
+</section>
+<section>
+  <h2>Improver accept rate by mode</h2>
+  <div class="chart-box"><canvas id="improverModeChart"></canvas></div>
+</section>
+<section>
+  <h2>Top improver rejection reasons</h2>
+  <div class="chart-box"><canvas id="rejectionChart"></canvas></div>
 </section>
 <script>
 const DATA = {chart_data};
@@ -128,6 +163,8 @@ barChart("requestsChart", DATA.costLabels, DATA.requestValues, "Requests", "rgba
 doughnutChart("activityChart", DATA.activityLabels, DATA.activityValues, "Requests");
 doughnutChart("modelChart", DATA.modelLabels, DATA.modelValues, "Requests");
 barChart("successChart", DATA.costLabels, DATA.successRates, "Success %", "rgba(34, 197, 94, 0.8)");
+barChart("improverModeChart", DATA.improverModeLabels, DATA.improverAcceptRates, "Accept %", "rgba(168, 85, 247, 0.8)");
+barChart("rejectionChart", DATA.rejectionLabels, DATA.rejectionValues, "Count", "rgba(239, 68, 68, 0.8)");
 </script>
 </body>
 </html>

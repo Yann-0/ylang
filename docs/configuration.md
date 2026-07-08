@@ -27,6 +27,11 @@ For production systemd deployments, use an environment file (e.g. `/srv/ylang/yl
 | `YLANG_PROVIDER_COOLDOWN_SECONDS` | `60` | [Fallback and resilience](#fallback-and-resilience) |
 | `YLANG_DAILY_BUDGET_USD` | *(none)* | [Daily budget cap](#daily-budget-cap) |
 | `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | [Improver context](#improver-context) |
+| `YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT` | `0.5` | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_PATTERN_DETECTOR` | `lexical` | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_CAPTURE_EDIT_FEEDBACK` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_IMPROVER_CRITIQUE` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_EXPERIMENTS` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
 | `YLANG_HOOK_DISABLED` | *(unset)* | [Cursor hook overrides](#cursor-hook-overrides) |
 | `YLANG_HOOK_MODEL` | `claude-sonnet-4-5` | [Cursor hook overrides](#cursor-hook-overrides) |
 | `YLANG_MCP_URL` | from `~/.cursor/mcp.json` | [Cursor hook overrides](#cursor-hook-overrides) |
@@ -346,7 +351,25 @@ This is automatic when a usage store is wired (always true for the MCP server). 
 |----------|---------|-------------|
 | `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | Max learned templates injected into `improve_prompt` reference context |
 
-Learned templates (source `learned`) are merged with keyword-matched reference prompts, most recently updated first. Set `0` to disable learned template injection.
+Learned templates (source `learned`) are merged with keyword-matched reference prompts, ranked by historical accept rate when enough data exists. Set `0` to disable learned template injection.
+
+Tag templates with `block:persona`, `block:task`, `block:constraints`, `block:examples`, or `block:output_format` for dynamic prompt block assembly.
+
+---
+
+## Improver analytics and optimization
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT` | `0.5` | Blend weight (0–1) for outcome-aware template retrieval |
+| `YLANG_PATTERN_DETECTOR` | `lexical` | Pattern detector: `lexical` (difflib) or `semantic` (TF-IDF cosine) |
+| `YLANG_CAPTURE_EDIT_FEEDBACK` | *(unset)* | When `1`, Cursor hook records edit distance via `record_prompt_edit` |
+| `YLANG_IMPROVER_CRITIQUE` | *(unset)* | When `1`, optional second-pass critique on validated improvements |
+| `YLANG_EXPERIMENTS` | *(unset)* | When `1`, assign A/B experiment variants from `prompt_experiments` table |
+
+CLI: `ylang usage improver-report` — improver funnel and template effectiveness.
+
+MCP: `improver_analytics`, `template_effectiveness_report`, `optimization_suggestions`.
 
 ---
 

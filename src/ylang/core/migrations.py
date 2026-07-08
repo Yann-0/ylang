@@ -73,6 +73,61 @@ def _migrate_templates_fts(connection: sqlite3.Connection) -> None:
     )
 
 
+@migration(4, "usage_improver_outcome_metadata")
+def _migrate_usage_improver_outcome(connection: sqlite3.Connection) -> None:
+    if not _table_exists(connection, "usage"):
+        return
+    for column, ddl in (
+        ("improver_validated", "INTEGER"),
+        ("improver_changed", "INTEGER"),
+        ("improver_rejection_reason", "TEXT"),
+        ("improver_task_class", "TEXT"),
+        ("cursor_mode", "TEXT"),
+        ("experiment_variant", "TEXT"),
+    ):
+        if not _column_exists(connection, "usage", column):
+            connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
+
+
+@migration(5, "feedback_events")
+def _migrate_feedback_events(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS feedback_events (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp       TEXT NOT NULL,
+            event_type      TEXT NOT NULL,
+            original_text   TEXT,
+            submitted_text  TEXT,
+            edit_distance   INTEGER,
+            usage_id        INTEGER,
+            metadata_json   TEXT
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_feedback_timestamp ON feedback_events (timestamp)"
+    )
+
+
+@migration(6, "prompt_experiments")
+def _migrate_prompt_experiments(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_experiments (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            experiment_id   TEXT NOT NULL,
+            variant_id      TEXT NOT NULL,
+            config_hash     TEXT NOT NULL,
+            traffic_pct     REAL NOT NULL DEFAULT 50.0,
+            active          INTEGER NOT NULL DEFAULT 1,
+            created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+            UNIQUE (experiment_id, variant_id)
+        )
+        """
+    )
+
+
 def run_migrations(connection: sqlite3.Connection) -> int:
     """Apply pending migrations; return count applied."""
     connection.execute(

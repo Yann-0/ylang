@@ -1,6 +1,6 @@
 # MCP tools reference
 
-Ylang exposes **11 MCP tools** via [FastMCP](https://github.com/modelcontextprotocol/python-sdk). All tools return JSON-serializable dicts. Errors use `ok: false` and an `error` string where applicable.
+Ylang exposes **16 MCP tools** via [FastMCP](https://github.com/modelcontextprotocol/python-sdk). All tools return JSON-serializable dicts. Errors use `ok: false` and an `error` string where applicable.
 
 Transport: stdio (`python -m ylang`) or HTTP (`YLANG_TRANSPORT=http`, Bearer auth).
 
@@ -370,12 +370,83 @@ Same as `save_template` with `source: "learned"`.
 
 ---
 
+## improver_analytics
+
+Return improver funnel statistics: fired → validated → changed → accepted, by Cursor mode.
+
+### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `last_days` | integer | — | Rolling window in days |
+| `last_hours` | integer | — | Rolling window in hours |
+
+### Response
+
+```json
+{
+  "ok": true,
+  "total_fired": 42,
+  "total_validated": 38,
+  "total_changed": 35,
+  "total_accepted": 28,
+  "validation_rate": 0.9048,
+  "change_rate": 0.8333,
+  "accept_rate": 0.6667,
+  "top_rejection_reasons": {"length ratio out of bounds": 3},
+  "by_mode": {
+    "agent": {"fired": 30, "validated": 28, "changed": 26, "accepted": 22, "accept_rate": 0.7333}
+  }
+}
+```
+
+CLI equivalent: `ylang usage improver-report`.
+
+---
+
+## template_effectiveness_report
+
+Rank templates by accept rate when injected into improver context.
+
+### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `last_days` | integer | — | Rolling window in days |
+| `last_hours` | integer | — | Rolling window in hours |
+| `min_samples` | integer | `3` | Minimum injections before ranking |
+
+---
+
+## optimization_suggestions
+
+Return evidence-backed propose-only optimization suggestions (never auto-applied).
+
+Analyzes improver accept rates, rejection reasons, template effectiveness, detected patterns, and optional edit feedback.
+
+---
+
+## record_prompt_edit
+
+Record user edit feedback when the submitted prompt differs from the Ylang-improved text.
+
+### Parameters
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `original_text` | string | yes | Improved prompt text |
+| `submitted_text` | string | yes | Text the user actually submitted |
+
+Enabled in the Cursor hook when `YLANG_CAPTURE_EDIT_FEEDBACK=1`.
+
+---
+
 ## Tool registration
 
 Tools are registered in `src/ylang/mcp/tools.py` via `register_tools(server, deps)`. The server prints the tool list on startup:
 
 ```
-tools (11): improve_prompt, save_template, recall_template, ...
+tools (16): improve_prompt, save_template, recall_template, ...
 ```
 
 ## Related docs

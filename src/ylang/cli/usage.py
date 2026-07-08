@@ -12,6 +12,9 @@ from ylang.library.pattern_detector import UsagePatternDetector, propose_templat
 from ylang.settings import Settings
 from ylang.usage.aggregates import daily_usage_buckets, rolling_cost, summarize_usage
 from ylang.usage.dashboard import render_usage_dashboard_html
+from ylang.usage.feedback import FeedbackStore
+from ylang.usage.improver_analytics import summarize_improver
+from ylang.usage.optimizer import generate_optimization_suggestions
 from ylang.usage.store import UsageWindow
 
 
@@ -43,6 +46,14 @@ def build_usage_parser() -> argparse.ArgumentParser:
     dash_window = dashboard.add_mutually_exclusive_group()
     dash_window.add_argument("--last-days", type=int, help="Rolling window in days")
     dash_window.add_argument("--last-hours", type=int, help="Rolling window in hours")
+
+    improver_report = subparsers.add_parser(
+        "improver-report",
+        help="Print improver funnel and template effectiveness report",
+    )
+    report_window = improver_report.add_mutually_exclusive_group()
+    report_window.add_argument("--last-days", type=int, help="Rolling window in days")
+    report_window.add_argument("--last-hours", type=int, help="Rolling window in hours")
 
     return parser
 
@@ -122,6 +133,59 @@ def print_usage_digest(
             print(f"  {index}. {proposal.suggested_template_id} — {proposal.rationale}")
             print(f"     apply: ylang patterns apply --index {index} --yes")
 
+    from ylang.usage.optimizer import serialize_suggestion
+
+    feedback = FeedbackStore(store._connection)  # type: ignore[attr-defined]
+    suggestions = generate_optimization_suggestions(
+        store,  # type: ignore[arg-type]
+        window,
+        feedback=feedback,
+    )
+    print("\nOptimization suggestions:")
+    if not suggestions:
+        print("  (none — need more improver usage data)")
+    else:
+        for index, suggestion in enumerate(suggestions[:5], start=1):
+            serialized = serialize_suggestion(suggestion)
+            print(
+                f"  {index}. [{serialized['priority']}] {serialized['title']}"
+            )
+            print(f"     {serialized['evidence']}")
+
+
+def print_improver_report(store: object, window: UsageWindow) -> None:
+    """Pretty-print improver funnel and template effectiveness."""
+    from ylang.usage.improver_analytics import template_effectiveness
+    from ylang.usage.optimizer import serialize_funnel, serialize_template_row
+
+    funnel = summarize_improver(store, window)  # type: ignore[arg-type]
+    serialized = serialize_funnel(funnel)
+    print("=== Improver funnel ===")
+    print(f"Fired:      {serialized['total_fired']}")
+    print(f"Validated:  {serialized['total_validated']} ({serialized['validation_rate']:.0%})")
+    print(f"Changed:    {serialized['total_changed']} ({serialized['change_rate']:.0%})")
+    print(f"Accepted:   {serialized['total_accepted']} ({serialized['accept_rate']:.0%})")
+    if serialized["by_mode"]:
+        print("\nBy mode:")
+        for mode, stats in serialized["by_mode"].items():
+            print(
+                f"  {mode:12} fired={stats['fired']:>4} "
+                f"accept={stats['accept_rate']:.0%} "
+                f"avg_cost=${stats['avg_cost']:.4f}"
+            )
+    rows = template_effectiveness(store, window)  # type: ignore[arg-type]
+    print("\nTemplate effectiveness (min 3 injections):")
+    if not rows:
+        print("  (none)")
+    else:
+        for row in rows[:10]:
+            item = serialize_template_row(row)
+            print(
+                f"  {item['template_id']:30} "
+                f"injections={item['injections']:>3} "
+                f"accept={item['accept_rate']:.0%}"
+            )
+
 
 def run_usage_cli(argv: list[str] | None = None) -> int:
     """Entry point for ``ylang usage`` subcommands."""
@@ -147,10 +211,12 @@ def run_usage_cli(argv: list[str] | None = None) -> int:
             return 0
 
         if args.command == "dashboard":
+            funnel = summarize_improver(stores.store, window)  # type: ignore[attr-defined]
             html = render_usage_dashboard_html(
                 summary,
                 title="Ylang Usage Dashboard",
                 daily_buckets=buckets,
+                improver_funnel=funnel,
             )
             args.output.write_text(html, encoding="utf-8")
             print(f"Wrote dashboard to {args.output.resolve()}", file=sys.stderr)
@@ -158,6 +224,10 @@ def run_usage_cli(argv: list[str] | None = None) -> int:
                 webbrowser.open(args.output.resolve().as_uri())
             except OSError:
                 pass
+            return 0
+
+        if args.command == "improver-report":
+            print_improver_report(stores.store, window)  # type: ignore[attr-defined]
             return 0
     finally:
         stores.close()  # type: ignore[attr-defined]

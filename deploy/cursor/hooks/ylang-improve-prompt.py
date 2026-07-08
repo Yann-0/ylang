@@ -239,6 +239,22 @@ async def _call_improve_prompt(
             return payload
 
 
+async def _record_edit_feedback(
+    mcp_url: str,
+    auth_token: str,
+    improved: str,
+    submitted: str,
+) -> None:
+    headers = {"Authorization": f"Bearer {auth_token}"}
+    async with streamablehttp_client(mcp_url, headers=headers) as (read, write, _):
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            await session.call_tool(
+                "record_prompt_edit",
+                {"original_text": improved, "submitted_text": submitted},
+            )
+
+
 def _fail_open() -> None:
     print(json.dumps({"continue": True}), flush=True)
 
@@ -353,6 +369,17 @@ def main() -> None:
             _log("recorded improver_accepted=true")
         except Exception as exc:  # noqa: BLE001 - hook must fail open
             _log(f"record improver_accepted failed: {exc}")
+
+    if (
+        os.environ.get("YLANG_CAPTURE_EDIT_FEEDBACK", "").strip().lower() in {"1", "true", "yes"}
+        and improved
+        and prompt.strip() != improved.strip()
+    ):
+        try:
+            asyncio.run(_record_edit_feedback(mcp_url, auth_token, improved, prompt))
+            _log("recorded prompt edit feedback")
+        except Exception as exc:  # noqa: BLE001 - hook must fail open
+            _log(f"record prompt edit feedback failed: {exc}")
 
     # Cursor currently documents only `continue`/`user_message` for this hook.
     # We also emit `updated_input` for forward compatibility if Cursor adds support.

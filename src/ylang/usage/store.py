@@ -87,6 +87,13 @@ class UsageRecord:
     improver_input_sample: str | None
     latency_ms: int
     success: bool
+    improver_context_templates: str | None = None
+    improver_validated: bool | None = None
+    improver_changed: bool | None = None
+    improver_rejection_reason: str | None = None
+    improver_task_class: str | None = None
+    cursor_mode: str | None = None
+    experiment_variant: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +169,16 @@ class UsageStore:
             self._connection.execute(
                 "ALTER TABLE usage ADD COLUMN improver_context_templates TEXT"
             )
+        for column, ddl in (
+            ("improver_validated", "INTEGER"),
+            ("improver_changed", "INTEGER"),
+            ("improver_rejection_reason", "TEXT"),
+            ("improver_task_class", "TEXT"),
+            ("cursor_mode", "TEXT"),
+            ("experiment_variant", "TEXT"),
+        ):
+            if column not in columns:
+                self._connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
         self._connection.commit()
 
     def write_usage(
@@ -179,6 +196,12 @@ class UsageStore:
         timestamp: datetime | None = None,
         improver_input_sample: str | None = None,
         improver_context_templates: str | None = None,
+        improver_validated: bool | None = None,
+        improver_changed: bool | None = None,
+        improver_rejection_reason: str | None = None,
+        improver_task_class: str | None = None,
+        cursor_mode: str | None = None,
+        experiment_variant: str | None = None,
     ) -> None:
         """Insert one per-request usage row. Commits immediately."""
         when = timestamp or datetime.now(timezone.utc)
@@ -196,6 +219,12 @@ class UsageStore:
             latency_ms,
             int(success),
             improver_context_templates,
+            int(improver_validated) if improver_validated is not None else None,
+            int(improver_changed) if improver_changed is not None else None,
+            improver_rejection_reason,
+            improver_task_class,
+            cursor_mode,
+            experiment_variant,
         )
         try:
             self._execute_write(params)
@@ -223,7 +252,7 @@ class UsageStore:
                 """,
                 params,
             )
-        else:
+        elif len(params) == 12:
             self._connection.execute(
                 """
                 INSERT INTO usage (
@@ -231,6 +260,19 @@ class UsageStore:
                     improver_fired, improver_accepted, improver_input_sample,
                     latency_ms, success, improver_context_templates
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                params,
+            )
+        else:
+            self._connection.execute(
+                """
+                INSERT INTO usage (
+                    timestamp, surface, activity, model_used, prompt_tokens, cost,
+                    improver_fired, improver_accepted, improver_input_sample,
+                    latency_ms, success, improver_context_templates,
+                    improver_validated, improver_changed, improver_rejection_reason,
+                    improver_task_class, cursor_mode, experiment_variant
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 params,
             )
@@ -263,6 +305,47 @@ class UsageStore:
         )
         self._connection.commit()
 
+    def update_last_improver_outcome(
+        self,
+        *,
+        validated: bool,
+        changed: bool,
+        rejection_reason: str | None = None,
+        task_class: str | None = None,
+        cursor_mode: str | None = None,
+        experiment_variant: str | None = None,
+    ) -> None:
+        """Persist improver outcome metadata on the most recent usage row."""
+        self._connection.execute(
+            """
+            UPDATE usage
+            SET improver_validated = ?,
+                improver_changed = ?,
+                improver_rejection_reason = ?,
+                improver_task_class = ?,
+                cursor_mode = ?,
+                experiment_variant = ?
+            WHERE id = (SELECT id FROM usage ORDER BY id DESC LIMIT 1)
+            """,
+            (
+                int(validated),
+                int(changed),
+                rejection_reason,
+                task_class,
+                cursor_mode,
+                experiment_variant,
+            ),
+        )
+        self._connection.commit()
+
+    def latest_usage_id(self) -> int | None:
+        """Return the most recently inserted usage row id."""
+        cursor = self._connection.execute(
+            "SELECT id FROM usage ORDER BY id DESC LIMIT 1"
+        )
+        row = cursor.fetchone()
+        return int(row[0]) if row is not None else None
+
     def recall_usage(self, window: UsageWindow) -> list[UsageRecord]:
         """Return usage rows with timestamp in [since, until), newest first."""
         cursor = self._connection.execute(
@@ -270,7 +353,9 @@ class UsageStore:
             SELECT
                 id, timestamp, surface, activity, model_used, prompt_tokens, cost,
                 improver_fired, improver_accepted, improver_input_sample,
-                latency_ms, success
+                latency_ms, success, improver_context_templates,
+                improver_validated, improver_changed, improver_rejection_reason,
+                improver_task_class, cursor_mode, experiment_variant
             FROM usage
             WHERE timestamp >= ? AND timestamp < ?
             ORDER BY timestamp DESC, id DESC
@@ -281,6 +366,13 @@ class UsageStore:
 
 
 def _row_to_record(row: tuple[object, ...]) -> UsageRecord:
+    context_templates = str(row[12]) if len(row) > 12 and row[12] is not None else None
+    validated = bool(row[13]) if len(row) > 13 and row[13] is not None else None
+    changed = bool(row[14]) if len(row) > 14 and row[14] is not None else None
+    rejection = str(row[15]) if len(row) > 15 and row[15] is not None else None
+    task_class = str(row[16]) if len(row) > 16 and row[16] is not None else None
+    cursor_mode = str(row[17]) if len(row) > 17 and row[17] is not None else None
+    experiment = str(row[18]) if len(row) > 18 and row[18] is not None else None
     return UsageRecord(
         id=int(row[0]),
         timestamp=_from_iso(str(row[1])),
@@ -294,6 +386,13 @@ def _row_to_record(row: tuple[object, ...]) -> UsageRecord:
         improver_input_sample=str(row[9]) if row[9] is not None else None,
         latency_ms=int(row[10]),
         success=bool(row[11]),
+        improver_context_templates=context_templates,
+        improver_validated=validated,
+        improver_changed=changed,
+        improver_rejection_reason=rejection,
+        improver_task_class=task_class,
+        cursor_mode=cursor_mode,
+        experiment_variant=experiment,
     )
 
 

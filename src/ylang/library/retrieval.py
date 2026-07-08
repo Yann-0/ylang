@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from ylang.library.effectiveness import blend_retrieval_score
 from ylang.library.store import Library
 from ylang.library.types import TemplateSummary
 
@@ -27,7 +28,10 @@ def _score_template(
     text: str,
     tool: str,
     cursor_mode: str | None,
-) -> tuple[int, int]:
+    *,
+    effectiveness: dict[str, float] | None = None,
+    weight: float = 0.5,
+) -> tuple[float, int]:
     """Return (score, public_tiebreak) for ranking."""
     score = 0
     if cursor_mode and (cursor_mode == summary.template_id or cursor_mode in summary.tags):
@@ -37,8 +41,14 @@ def _score_template(
     text_keywords = _keywords(text)
     overlap = text_keywords & _template_keywords(summary)
     score += 2 * len(overlap)
+    blended = blend_retrieval_score(
+        score,
+        summary.template_id,
+        effectiveness or {},
+        weight=weight,
+    )
     public_tiebreak = 1 if summary.visibility == "public" else 0
-    return score, public_tiebreak
+    return blended, public_tiebreak
 
 
 def select_learned_templates(
@@ -46,10 +56,22 @@ def select_learned_templates(
     *,
     limit: int = 2,
     max_chars: int = 4000,
+    effectiveness: dict[str, float] | None = None,
+    weight: float = 0.5,
 ) -> list[TemplateSummary]:
-    """Return recently updated learned templates for improver context."""
+    """Return learned templates ranked by effectiveness or recency."""
     summaries = library.list(source="learned")
-    ranked = sorted(summaries, key=lambda item: item.updated_at, reverse=True)
+    if effectiveness:
+        ranked = sorted(
+            summaries,
+            key=lambda item: (
+                effectiveness.get(item.template_id, 0.0),
+                item.updated_at.timestamp(),
+            ),
+            reverse=True,
+        )
+    else:
+        ranked = sorted(summaries, key=lambda item: item.updated_at, reverse=True)
     selected: list[TemplateSummary] = []
     used_chars = 0
     for summary in ranked:
@@ -74,12 +96,21 @@ def select_reference_prompts(
     cursor_mode: str | None = None,
     limit: int = 3,
     max_chars: int = 4000,
+    effectiveness: dict[str, float] | None = None,
+    weight: float = 0.5,
 ) -> list[TemplateSummary]:
     """Return top-scoring library prompts within a character budget."""
     summaries = library.list()
     ranked = sorted(
         summaries,
-        key=lambda summary: _score_template(summary, text, tool, cursor_mode),
+        key=lambda summary: _score_template(
+            summary,
+            text,
+            tool,
+            cursor_mode,
+            effectiveness=effectiveness,
+            weight=weight,
+        ),
         reverse=True,
     )
     selected: list[TemplateSummary] = []
@@ -87,7 +118,14 @@ def select_reference_prompts(
     for summary in ranked:
         if len(selected) >= limit:
             break
-        score, _ = _score_template(summary, text, tool, cursor_mode)
+        score, _ = _score_template(
+            summary,
+            text,
+            tool,
+            cursor_mode,
+            effectiveness=effectiveness,
+            weight=weight,
+        )
         if score <= 0 and selected:
             break
         template = library.recall(summary.template_id)

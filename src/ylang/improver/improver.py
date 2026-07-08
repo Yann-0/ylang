@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from collections import Counter
 
 from ylang.core.engine import Engine
 from ylang.improver.context import ImproveContext, _EMPTY_CONVERSATION
+from ylang.improver.mode_optimizer import get_mode_config
 from ylang.improver.registry import (
     ResolvedCursorMode,
     default_auto_apply,
@@ -88,6 +90,21 @@ Respond with JSON only:
 """
 
 
+_CRITIQUE_SYSTEM = """\
+You review improved AI coding agent prompts for clarity and completeness.
+Respond with JSON only: {"improved": "...", "changes": [{"kind": "...", "description": "...", "before": "...", "after": "..."}]}
+Preserve intent; fix only clarity, structure, and missing constraints. Do not add unrelated scope.
+"""
+
+
+def _critique_enabled() -> bool:
+    return os.environ.get("YLANG_IMPROVER_CRITIQUE", "").strip().lower() in {"1", "true", "yes"}
+
+
+def _experiments_enabled() -> bool:
+    return os.environ.get("YLANG_EXPERIMENTS", "").strip().lower() in {"1", "true", "yes"}
+
+
 class Improver:
     """Propose-only improver: returns suggestions, never applies them."""
 
@@ -108,8 +125,13 @@ class Improver:
         resolved = resolve_cursor_mode(tool, text, explicit_mode=mode)
         apply_default = default_auto_apply(tool, resolved.mode)
         if is_reference_only_prompt(text):
-            return _safe_result(text, apply_default, resolved=resolved)
+            return self._finalize(
+                _safe_result(text, apply_default, resolved=resolved),
+                text,
+                resolved=resolved,
+            )
         user_content = _build_user_message(text, resolved, context)
+        experiment_variant = self._resolve_experiment_variant(resolved.mode)
         completion = self._engine.complete(
             [
                 {"role": "system", "content": _SYSTEM_PROMPT},
@@ -128,7 +150,12 @@ class Improver:
                 completion.model_used,
                 completion.error or "unknown error",
             )
-            return _safe_result(text, apply_default, resolved=resolved)
+            return self._finalize(
+                _safe_result(text, apply_default, resolved=resolved),
+                text,
+                resolved=resolved,
+                experiment_variant=experiment_variant,
+            )
         try:
             parsed_improved, changes = _parse_model_output(completion.content)
             result, validated = _validate(
@@ -149,7 +176,7 @@ class Improver:
                         completion.model_used,
                         result.rejection_reason,
                     )
-                    return salvaged
+                    return self._finalize(salvaged, text, resolved=resolved, experiment_variant=experiment_variant)
                 if result.rejection_reason in _FALLBACK_REJECTION_REASONS:
                     fallback = _fallback_short_prompt_expansion(
                         text,
@@ -163,7 +190,7 @@ class Improver:
                             completion.model_used,
                             result.rejection_reason,
                         )
-                        return fallback
+                        return self._finalize(fallback, text, resolved=resolved, experiment_variant=experiment_variant)
                 if result.rejection_reason:
                     logger.warning(
                         "improve_prompt validation rejected model output (model=%s): %s",
@@ -182,8 +209,9 @@ class Improver:
                         "improve_prompt expanded unchanged short prompt (model=%s)",
                         completion.model_used,
                     )
-                    return fallback
-            return result
+                    return self._finalize(fallback, text, resolved=resolved, experiment_variant=experiment_variant)
+            result = self._finalize(result, text, resolved=resolved, experiment_variant=experiment_variant)
+            return self._maybe_critique(text, result, resolved, model)
         except Exception as exc:
             salvaged = _try_salvage_parse_failure(
                 text,
@@ -197,19 +225,98 @@ class Improver:
                     completion.model_used,
                     exc,
                 )
-                return salvaged
+                return self._finalize(salvaged, text, resolved=resolved, experiment_variant=experiment_variant)
             logger.warning(
                 "improve_prompt failed to parse model output (model=%s): %s",
                 completion.model_used,
                 exc,
             )
-            return _safe_result(
+            return self._finalize(
+                _safe_result(
+                    text,
+                    apply_default,
+                    resolved=resolved,
+                    validated=False,
+                    rejection_reason=f"parse error: {exc}",
+                ),
                 text,
-                apply_default,
                 resolved=resolved,
-                validated=False,
-                rejection_reason=f"parse error: {exc}",
+                experiment_variant=experiment_variant,
             )
+
+    def _resolve_experiment_variant(self, mode: str) -> str | None:
+        if not _experiments_enabled():
+            return None
+        from ylang.usage.experiments import ExperimentStore
+
+        store = ExperimentStore(self._engine.store._connection)
+        variant = store.assign_variant(f"improver-{mode}")
+        return variant.variant_id if variant is not None else None
+
+    def _finalize(
+        self,
+        result: ImprovementResult,
+        original_text: str,
+        *,
+        resolved: ResolvedCursorMode,
+        experiment_variant: str | None = None,
+    ) -> ImprovementResult:
+        """Persist improver outcome metadata on the latest usage row."""
+        changed = result.improved.strip() != original_text.strip()
+        self._engine.store.update_last_improver_outcome(
+            validated=result.validated,
+            changed=changed,
+            rejection_reason=result.rejection_reason,
+            task_class=detect_task_class(original_text),
+            cursor_mode=resolved.mode,
+            experiment_variant=experiment_variant,
+        )
+        return result
+
+    def _maybe_critique(
+        self,
+        text: str,
+        result: ImprovementResult,
+        resolved: ResolvedCursorMode,
+        model: str,
+    ) -> ImprovementResult:
+        """Optional second-pass critique for validated improvements."""
+        if not _critique_enabled() or not result.validated:
+            return result
+        if result.improved.strip() == text.strip():
+            return result
+        completion = self._engine.complete(
+            [
+                {"role": "system", "content": _CRITIQUE_SYSTEM},
+                {
+                    "role": "user",
+                    "content": (
+                        f"{mode_guidance(resolved.mode)}\n\n"
+                        f"Original:\n{text}\n\nImproved draft:\n{result.improved}"
+                    ),
+                },
+            ],
+            activity=f"improve:{resolved.mode}",
+            model=model,
+            response_format={"type": "json_object"},
+            improver_fired=False,
+        )
+        if not completion.success:
+            return result
+        try:
+            parsed_improved, changes = _parse_model_output(completion.content)
+            critiqued, validated = _validate(
+                text,
+                parsed_improved,
+                changes,
+                result.auto_apply_default,
+                resolved=resolved,
+            )
+            if validated:
+                return critiqued
+        except Exception:
+            logger.debug("critique pass failed; keeping original improvement", exc_info=True)
+        return result
 
 
 _EMPTY_FACTS = "(No project facts stored.)"
@@ -222,11 +329,16 @@ def _build_user_message(
     context: ImproveContext | None,
 ) -> str:
     """Format the user message with Cursor mode guidance and optional context blocks."""
+    mode_config = get_mode_config(resolved.mode)
     parts = [
         f"Tool context: {resolved.tool}",
-        mode_guidance(resolved.mode),
+        mode_config.guidance,
         f"Resolved Cursor mode: {resolved.mode} (source: {resolved.source})",
     ]
+    if context is not None and context.mode_handoff:
+        previous = context.mode_handoff.get("previous_mode")
+        if previous:
+            parts.append(f"Mode handoff: previous={previous}, current={resolved.mode}")
     if context is not None:
         conversation = context.conversation_block or _EMPTY_CONVERSATION
         facts = context.facts_block or _EMPTY_FACTS
@@ -234,6 +346,8 @@ def _build_user_message(
         parts.append(f"Recent conversation:\n{conversation}")
         parts.append(f"Project facts:\n{facts}")
         parts.append(f"Reference prompts:\n{reference_prompts}")
+        if context.blocks_block:
+            parts.append(f"Prompt blocks:\n{context.blocks_block}")
     parts.append(f"Text:\n{text}")
     return "\n\n".join(parts)
 

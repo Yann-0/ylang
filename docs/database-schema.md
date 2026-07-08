@@ -49,6 +49,25 @@ erDiagram
         TEXT scope
         TEXT created_at
     }
+    feedback_events {
+        INTEGER id PK
+        TEXT timestamp
+        TEXT event_type
+        TEXT original_text
+        TEXT submitted_text
+        INTEGER edit_distance
+        INTEGER usage_id
+        TEXT metadata_json
+    }
+    prompt_experiments {
+        INTEGER id PK
+        TEXT experiment_id
+        TEXT variant_id
+        TEXT config_hash
+        REAL traffic_pct
+        INTEGER active
+        TEXT created_at
+    }
 ```
 
 ## Table: usage
@@ -67,6 +86,13 @@ Written on **every** `Engine.complete()` or `Engine.complete_stream()` call.
 | `improver_fired` | INTEGER | 1 if improver initiated the call |
 | `improver_accepted` | INTEGER | 1 when improver suggestion was accepted |
 | `improver_input_sample` | TEXT | Truncated original prompt when improver fired (~200 chars) |
+| `improver_context_templates` | TEXT | Comma-separated template ids injected into improver context |
+| `improver_validated` | INTEGER | 1 when improver output passed validation |
+| `improver_changed` | INTEGER | 1 when improved text differs from input |
+| `improver_rejection_reason` | TEXT | Validation rejection reason, if any |
+| `improver_task_class` | TEXT | Detected task class: `structural`, `analysis`, `implementation` |
+| `cursor_mode` | TEXT | Resolved Cursor mode for improver calls |
+| `experiment_variant` | TEXT | A/B experiment variant id when `YLANG_EXPERIMENTS=1` |
 | `latency_ms` | INTEGER | Wall-clock latency |
 | `success` | INTEGER | 1 if completion succeeded |
 

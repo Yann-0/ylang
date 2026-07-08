@@ -27,6 +27,7 @@ from ylang.gateway.openai import (
 from ylang.usage.aggregates import daily_usage_buckets, summarize_usage
 from ylang.usage.async_ops import run_store_sync
 from ylang.usage.dashboard import render_usage_dashboard_html
+from ylang.usage.improver_analytics import summarize_improver
 from ylang.usage.store import UsageWindow
 
 logger = logging.getLogger(__name__)
@@ -101,10 +102,12 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
         window = UsageWindow.last_days(7)
         summary = await run_store_sync(summarize_usage, engine.store, window)
         buckets = await run_store_sync(daily_usage_buckets, engine.store, window)
+        funnel = await run_store_sync(summarize_improver, engine.store, window)
         html = render_usage_dashboard_html(
             summary,
             title="Ylang Usage Dashboard",
             daily_buckets=buckets,
+            improver_funnel=funnel,
             live=True,
         )
         return HTMLResponse(html)
