@@ -59,19 +59,47 @@ _PROMPT_MODE_PATTERNS: tuple[tuple[re.Pattern[str], CursorMode, int], ...] = (
     (re.compile(r"\b(debug|fix the bug|stack trace|reproduc|root cause|failing test)\b", re.I), "debug", 3),
     (re.compile(r"\b(plan|roadmap|architecture|design approach|trade-?offs?)\b", re.I), "plan", 2),
     (re.compile(r"\b(explain|what is|how does|why does|describe|clarify)\b", re.I), "ask", 2),
-    (re.compile(r"\b(parallel|multitask|workstreams?|sub-?agents?)\b", re.I), "multitask", 3),
+    (
+        re.compile(
+            r"\b(parallel|multitask|workstreams?|sub-?agents?|background agents?|"
+            r"concurrent(?:ly)?|simultaneous(?:ly)?|in parallel|at the same time|fan[- ]?out)\b",
+            re.I,
+        ),
+        "multitask",
+        3,
+    ),
     (re.compile(r"\b(implement|refactor|add feature|build|write tests?|fix)\b", re.I), "agent", 2),
 )
+
+# Signals that a request contains multiple independent deliverables worth
+# parallelizing across Cursor subagents / background agents.
+_PARALLEL_KEYWORD_RE = re.compile(
+    r"\b(parallel|in parallel|concurrent(?:ly)?|simultaneous(?:ly)?|at the same time|"
+    r"multitask|sub-?agents?|background agents?|fan[- ]?out|each of|for each|"
+    r"across (?:all|multiple)|batch)\b",
+    re.I,
+)
+_ACTION_VERB_RE = re.compile(
+    r"\b(implement|add|fix|refactor|write|build|create|update|migrate|test|document|"
+    r"remove|delete|rename|optimize|integrate|deploy)\b",
+    re.I,
+)
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S", re.M)
 
 _MODE_GUIDANCE: dict[CursorMode, str] = {
     "agent": (
         "Cursor mode: agent — expand into an implementation-ready spec. "
         "Use Goal / Deliverables / Constraints / Test plan / Definition of done when helpful. "
-        "Implementation, tests, and docs scope are allowed when implied."
+        "Implementation, tests, and docs scope are allowed when implied. "
+        "If the work has independent parts, note which can run as parallel subagents."
     ),
     "plan": (
-        "Cursor mode: plan — planning only, no implementation. "
-        "Prefer Goal / Context / Options / Recommended approach / Risks / Open questions. "
+        "Cursor mode: plan — planning only, no implementation or side effects. "
+        "Prefer Goal / Context / Exploration (read-only) / Options (with trade-offs) / "
+        "Recommended approach / Phased roadmap / Risks / Open questions. "
+        "Begin with read-only exploration before proposing; compare at least two options with trade-offs. "
+        "In the phased roadmap, mark which phases or tasks are parallelizable vs sequential so execution "
+        "can later fan out to parallel workers. "
         "For analysis or backlog tasks, add Deliverables, Epic roadmap, and Definition of done sections. "
         "Do not add code edits, file changes, or run-test deliverables unless the user asked to plan them."
     ),
@@ -86,11 +114,27 @@ _MODE_GUIDANCE: dict[CursorMode, str] = {
         "Keep scope tight; avoid unrelated feature work."
     ),
     "multitask": (
-        "Cursor mode: multitask — decompose into parallel workstreams. "
-        "Prefer Goal / Workstreams (with owners or ordering) / Dependencies / Integration / Done criteria. "
-        "Split unrelated work explicitly; keep each stream actionable."
+        "Cursor mode: multitask — decompose the work into independent, parallelizable workstreams that "
+        "map to Cursor's parallel subagents / background agents. "
+        "Structure with: Goal / Workstreams / Parallelization plan / Dependencies / Integration / Done criteria. "
+        "Give each workstream a short id and make it independently actionable. "
+        "In the Parallelization plan, state explicitly which workstreams can run concurrently (spawn parallel "
+        "subagents or background agents) and which must run sequentially due to dependencies. "
+        "Recommend batching independent tool calls in a single step to cut latency, and add an Integration/merge "
+        "step that reconciles parallel results. "
+        "Optimize for wall-clock time: prefer concurrency for independent work; keep shared-file edits sequential."
     ),
 }
+
+_PARALLELISM_DIRECTIVE = (
+    "Parallelization directive: this request contains multiple independent deliverables. "
+    "Structure the improved spec to activate Cursor's multitask / parallel subagents when it speeds delivery:\n"
+    "- group genuinely independent work into concurrently-runnable workstreams;\n"
+    "- mark dependencies that force sequential execution;\n"
+    "- recommend spawning parallel or background subagents and batching independent tool calls;\n"
+    "- add an integration step that merges parallel results and resolves conflicts.\n"
+    "Only parallelize independent work; keep edits to shared files sequential. Do not invent unrelated work."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +174,26 @@ def default_auto_apply(tool: str, mode: CursorMode) -> bool:
 def mode_guidance(mode: CursorMode) -> str:
     """Return LLM guidance for optimizing prompts in the given Cursor mode."""
     return _MODE_GUIDANCE[mode]
+
+
+def recommend_parallelism(text: str) -> bool:
+    """Return True when a prompt has multiple independent deliverables worth parallelizing.
+
+    Detects explicit parallel keywords, multiple enumerated list items, or several
+    distinct action verbs — signals that Cursor's multitask / parallel subagents
+    would deliver faster results.
+    """
+    if _PARALLEL_KEYWORD_RE.search(text):
+        return True
+    if len(_LIST_ITEM_RE.findall(text)) >= 2:
+        return True
+    distinct_verbs = {match.group(0).lower() for match in _ACTION_VERB_RE.finditer(text)}
+    return len(distinct_verbs) >= 3
+
+
+def parallelism_directive() -> str:
+    """Return the directive instructing the improver to activate parallel workstreams."""
+    return _PARALLELISM_DIRECTIVE
 
 
 def resolve_cursor_mode(

@@ -21,6 +21,7 @@ class ModeOptimizerConfig:
     learned_template_limit: int
     validation_strict: bool
     include_test_plan_scope: bool
+    encourage_parallelism: bool
     guidance: str
 
 
@@ -36,6 +37,7 @@ _MODE_CONFIGS: dict[CursorMode, ModeOptimizerConfig] = {
         learned_template_limit=2,
         validation_strict=True,
         include_test_plan_scope=True,
+        encourage_parallelism=False,
         guidance=mode_guidance("agent"),
     ),
     "plan": ModeOptimizerConfig(
@@ -49,6 +51,7 @@ _MODE_CONFIGS: dict[CursorMode, ModeOptimizerConfig] = {
         learned_template_limit=1,
         validation_strict=False,
         include_test_plan_scope=False,
+        encourage_parallelism=True,
         guidance=mode_guidance("plan"),
     ),
     "debug": ModeOptimizerConfig(
@@ -62,6 +65,7 @@ _MODE_CONFIGS: dict[CursorMode, ModeOptimizerConfig] = {
         learned_template_limit=1,
         validation_strict=True,
         include_test_plan_scope=False,
+        encourage_parallelism=False,
         guidance=mode_guidance("debug"),
     ),
     "ask": ModeOptimizerConfig(
@@ -75,6 +79,7 @@ _MODE_CONFIGS: dict[CursorMode, ModeOptimizerConfig] = {
         learned_template_limit=0,
         validation_strict=True,
         include_test_plan_scope=False,
+        encourage_parallelism=False,
         guidance=mode_guidance("ask"),
     ),
     "multitask": ModeOptimizerConfig(
@@ -88,6 +93,7 @@ _MODE_CONFIGS: dict[CursorMode, ModeOptimizerConfig] = {
         learned_template_limit=2,
         validation_strict=True,
         include_test_plan_scope=True,
+        encourage_parallelism=True,
         guidance=mode_guidance("multitask"),
     ),
 }

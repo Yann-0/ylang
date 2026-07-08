@@ -172,6 +172,16 @@ The repository includes [`.cursor/rules/00-project.mdc`](../.cursor/rules/00-pro
 
 Mode changes the structure and scope of improved prompts (e.g. plan mode avoids implementation deliverables). See [architecture.md](architecture.md#cursor-mode-resolution).
 
+### Parallel workers and multitask
+
+`improve_prompt` actively shapes prompts to leverage Cursor's parallel subagents and background agents:
+
+- **multitask mode** — decomposes work into independent workstreams and adds a *Parallelization plan* that marks which streams run concurrently (spawn parallel/background subagents) vs sequentially, plus an integration/merge step. Optimizes for wall-clock time.
+- **plan mode** — starts with read-only exploration, compares options with trade-offs, and produces a phased roadmap that marks parallelizable vs sequential phases so execution can later fan out to parallel workers.
+- **auto-detection** — even in `agent` mode, when a prompt has multiple independent deliverables (explicit parallel keywords, ≥2 list items, or ≥3 distinct action verbs), Ylang injects a parallelization directive so the improved spec groups concurrently-runnable work and recommends batching independent tool calls.
+
+Only genuinely independent work is parallelized; edits to shared files stay sequential and no unrelated work is added (improver remains propose-only).
+
 ## Troubleshooting
 
 | Symptom | Fix |

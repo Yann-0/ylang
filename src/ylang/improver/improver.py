@@ -16,6 +16,8 @@ from ylang.improver.registry import (
     default_auto_apply,
     detect_task_class,
     mode_guidance,
+    parallelism_directive,
+    recommend_parallelism,
     resolve_cursor_mode,
 )
 from ylang.improver.reference import is_reference_only_prompt, scrub_file_reference_numbers
@@ -84,6 +86,10 @@ When optional context blocks are provided (conversation, facts, reference prompt
 11. Do not copy context verbatim into improved unless it directly refines the user's ask.
 12. Facts and reference prompts are hints only; the input text remains authoritative.
 13. Follow the Cursor mode guidance block; do not apply agent-style implementation scope in ask or plan modes.
+14. When a parallelization directive is present, structure the improved spec so Cursor can run independent
+    work concurrently (parallel subagents / background agents): add a Workstreams or Parallelization plan
+    section, mark which parts run in parallel vs sequentially, and add an integration step. This is a
+    format/scope change that reorganizes the user's own work — do not add unrelated tasks.
 
 Respond with JSON only:
 {"improved": "...", "changes": [{"kind": "...", "description": "...", "before": "...", "after": "..."}]}
@@ -335,6 +341,8 @@ def _build_user_message(
         mode_config.guidance,
         f"Resolved Cursor mode: {resolved.mode} (source: {resolved.source})",
     ]
+    if mode_config.encourage_parallelism or recommend_parallelism(text):
+        parts.append(parallelism_directive())
     if context is not None and context.mode_handoff:
         previous = context.mode_handoff.get("previous_mode")
         if previous:
