@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ylang"
-version = "0.3.0"
+version = "0.4.0"
 description = "Personal AI efficiency layer – MCP server (Phase 1)"
 readme = "README.md"
 license = "MIT"

@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-08
+
+### Added
+
+- Prompt Usage Analytics & Optimization module (PAO-001–014)
+- Persist improver outcome metadata on usage rows (`improver_validated`, `improver_changed`, rejection reason, task class, cursor mode)
+- MCP `improver_analytics`, `template_effectiveness_report`, `optimization_suggestions`, `record_prompt_edit`
+- CLI `ylang usage improver-report`; digest includes optimization suggestions
+- Dashboard improver panels (accept rate by mode, top rejection reasons)
+- Outcome-aware template retrieval (`YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT`)
+- Semantic pattern detection (`YLANG_PATTERN_DETECTOR=semantic`)
+- Dynamic prompt block assembly via `block:*` template tags
+- Mode-aware optimization layer (`improver/mode_optimizer.py`)
+- Prompt A/B experiments table and assignment (`YLANG_EXPERIMENTS=1`)
+- Optional self-critique improver pass (`YLANG_IMPROVER_CRITIQUE=1`)
+- Edit feedback capture in Cursor hook (`YLANG_CAPTURE_EDIT_FEEDBACK=1`)
+- SQLite migrations: usage outcome columns, `feedback_events`, `prompt_experiments`
+
+### Changed
+
+- Version 0.4.0; MCP tool count 16
+- `recall_usage` exposes full improver context and outcome fields
+
 ## [0.3.0] - 2026-07-05
 
 ### Added
