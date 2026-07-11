@@ -9,7 +9,7 @@
     "beforeSubmitPrompt": [
       {
         "command": "./hooks/ylang-improve-prompt.py",
-        "timeout": 120
+        "timeout": 20
       }
     ],
     "beforeMCPExecution": [

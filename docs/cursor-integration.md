@@ -148,6 +148,7 @@ The `beforeSubmitPrompt` hook:
 |----------|--------|
 | `YLANG_HOOK_DISABLED=1` | Skip improvement entirely |
 | `YLANG_HOOK_MODEL` | Model slug for `improve_prompt` (default `claude-sonnet-4-5`) |
+| `YLANG_HOOK_TIMEOUT_SEC` | MCP call timeout in seconds (default `15`); on timeout the hook fail-opens |
 | `YLANG_MCP_URL` | Override MCP URL (default from `~/.cursor/mcp.json`) |
 | `YLANG_AUTH_TOKEN` | Bearer token for HTTP MCP |
 

@@ -3,8 +3,9 @@
 
 Reads ``YLANG_MCP_URL`` / ``YLANG_AUTH_TOKEN`` (from ``sessionStart`` hook env or
 ``~/.cursor/mcp.json``). Skips ``/loop``, ``/YOLO``, ``/ylang-skip``, meta prompts,
-and reference-only ``@file`` lines. Fail-open: errors log to
+and reference-only ``@file`` lines. Fail-open: errors and timeouts log to
 ``~/.cursor/hooks/ylang-improve-prompt.log`` and return ``continue: true``.
+MCP calls honor ``YLANG_HOOK_TIMEOUT_SEC`` (default 15s).
 
 Writes the latest result to ``.cursor/ylang-improved-prompt.md`` in the workspace.
 The shebang path is deployment-specific; point hooks at your venv Python.
@@ -38,6 +39,28 @@ _META_MARKERS = (
 )
 _USER_QUERY_RE = re.compile(r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL)
 _TIMESTAMP_RE = re.compile(r"<timestamp>.*?</timestamp>\s*", re.DOTALL)
+_DEFAULT_HOOK_TIMEOUT_SEC = 15.0
+
+
+def _hook_timeout_sec() -> float:
+    """Return MCP call timeout in seconds (``YLANG_HOOK_TIMEOUT_SEC``, default 15)."""
+    raw = os.environ.get("YLANG_HOOK_TIMEOUT_SEC", "").strip()
+    if not raw:
+        return _DEFAULT_HOOK_TIMEOUT_SEC
+    try:
+        value = float(raw)
+    except ValueError:
+        return _DEFAULT_HOOK_TIMEOUT_SEC
+    return max(1.0, value)
+
+
+async def _run_timed(coro: Any, *, label: str) -> Any:
+    """Await ``coro`` with a hook timeout; raise ``TimeoutError`` when exceeded."""
+    timeout = _hook_timeout_sec()
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except TimeoutError as exc:
+        raise TimeoutError(f"{label} timed out after {timeout}s") from exc
 
 
 def _log(message: str) -> None:
@@ -259,7 +282,7 @@ def _fail_open() -> None:
     print(json.dumps({"continue": True}), flush=True)
 
 
-def main() -> None:
+def _run_main() -> None:
     """Parse stdin hook payload, call ``improve_prompt``, and emit Cursor JSON."""
     try:
         raw = sys.stdin.read()
@@ -306,16 +329,23 @@ def main() -> None:
     try:
         mcp_url, auth_token = _load_mcp_config()
         result = asyncio.run(
-            _call_improve_prompt(
-                mcp_url=mcp_url,
-                auth_token=auth_token,
-                text=prompt,
-                tool=tool,
-                mode=mode,
-                conversation=conversation,
-                model=model,
+            _run_timed(
+                _call_improve_prompt(
+                    mcp_url=mcp_url,
+                    auth_token=auth_token,
+                    text=prompt,
+                    tool=tool,
+                    mode=mode,
+                    conversation=conversation,
+                    model=model,
+                ),
+                label="improve_prompt",
             )
         )
+    except TimeoutError as exc:
+        _log(f"improve_prompt timed out: {exc}")
+        _fail_open()
+        return
     except Exception as exc:  # noqa: BLE001 - hook must fail open
         _log(f"improve_prompt failed: {exc}")
         traceback.print_exc(file=sys.stderr)
@@ -354,19 +384,24 @@ def main() -> None:
     if changed and validated:
         try:
             asyncio.run(
-                _call_improve_prompt(
-                    mcp_url=mcp_url,
-                    auth_token=auth_token,
-                    text=original,
-                    tool=tool,
-                    mode=mode,
-                    conversation=[],
-                    model=model,
-                    accepted=True,
-                    record_acceptance_only=True,
+                _run_timed(
+                    _call_improve_prompt(
+                        mcp_url=mcp_url,
+                        auth_token=auth_token,
+                        text=original,
+                        tool=tool,
+                        mode=mode,
+                        conversation=[],
+                        model=model,
+                        accepted=True,
+                        record_acceptance_only=True,
+                    ),
+                    label="record improver_accepted",
                 )
             )
             _log("recorded improver_accepted=true")
+        except TimeoutError as exc:
+            _log(f"record improver_accepted timed out: {exc}")
         except Exception as exc:  # noqa: BLE001 - hook must fail open
             _log(f"record improver_accepted failed: {exc}")
 
@@ -376,8 +411,15 @@ def main() -> None:
         and prompt.strip() != improved.strip()
     ):
         try:
-            asyncio.run(_record_edit_feedback(mcp_url, auth_token, improved, prompt))
+            asyncio.run(
+                _run_timed(
+                    _record_edit_feedback(mcp_url, auth_token, improved, prompt),
+                    label="record prompt edit feedback",
+                )
+            )
             _log("recorded prompt edit feedback")
+        except TimeoutError as exc:
+            _log(f"record prompt edit feedback timed out: {exc}")
         except Exception as exc:  # noqa: BLE001 - hook must fail open
             _log(f"record prompt edit feedback failed: {exc}")
 
@@ -387,6 +429,16 @@ def main() -> None:
     if improved and improved != original:
         output["updated_input"] = {"prompt": improved}
     print(json.dumps(output), flush=True)
+
+
+def main() -> None:
+    """Run the hook; always fail-open on unexpected errors."""
+    try:
+        _run_main()
+    except Exception:
+        _log("unhandled hook error; fail-open")
+        traceback.print_exc(file=sys.stderr)
+        _fail_open()
 
 
 if __name__ == "__main__":
