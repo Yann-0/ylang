@@ -13,25 +13,39 @@ The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr
 
 ## Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/v1/chat/completions` | Chat completions (streaming and non-streaming) |
-| `GET` | `/v1/models` | Virtual route model catalog |
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/v1/chat/completions` | Bearer | Chat completions (streaming and non-streaming) |
+| `GET` | `/v1/models` | Bearer | Virtual route model catalog |
+| `GET` | `/usage` | Bearer | Chart.js usage dashboard (last 7 days; 30s auto-refresh) |
+| `GET` | `/health` | None | Service health and version JSON |
 
-Both routes share the same HTTP server as MCP (`/mcp`). There is no separate gateway port or process.
+All routes share the same HTTP server as MCP (`/mcp`). There is no separate gateway port or process.
 
 ## Authorization
 
-HTTP transport requires a bearer token on **every** HTTP request (MCP and gateway):
+HTTP transport requires `YLANG_AUTH_TOKEN`. Bearer auth applies to **`/mcp`, `/v1/*`, and `/usage`**:
 
 | Item | Value |
 |------|-------|
 | Header | `Authorization: Bearer <YLANG_AUTH_TOKEN>` |
 | Env var | `YLANG_AUTH_TOKEN` (required when `YLANG_TRANSPORT=http`) |
+| Protected paths | `/mcp`, `/v1/chat/completions`, `/v1/models`, `/usage` |
+| Exempt path | `GET /health` (no bearer token) |
 | Missing / wrong token | **401 Unauthorized** (plain text body) |
 | stdio transport | No auth — Cursor spawns a local subprocess |
 
 The middleware compares the full `Authorization` header value with constant-time `secrets.compare_digest`. Send exactly `Bearer <token>` with no extra whitespace.
+
+## GET /health
+
+Unauthenticated liveness probe. Returns JSON with `status`, `version`, and `service`. Exempt from bearer middleware (`mcp/auth.py`).
+
+**Sample response:**
+
+```json
+{"status": "ok", "version": "0.4.0", "service": "ylang"}
+```
 
 ## GET /v1/models
 
@@ -198,6 +212,12 @@ sequenceDiagram
 See also [cursor-integration.md](cursor-integration.md) for MCP and hook setup (complementary to gateway routing).
 
 ## Examples
+
+### Health check (no auth)
+
+```bash
+curl -s http://127.0.0.1:8787/health
+```
 
 ### Auth check (expect 401)
 

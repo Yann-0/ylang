@@ -53,7 +53,7 @@ Full instructions: **[docs/installation.md](docs/installation.md)**
 | [Architecture](docs/architecture.md) | Design, modules, data flow |
 | [MCP tools](docs/mcp-tools.md) | Full API reference (11 tools) |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
-| [Gateway](docs/gateway.md) | OpenAI-compatible `/v1/chat/completions` for Cursor routing |
+| [Gateway](docs/gateway.md) | OpenAI HTTP face: `/v1/chat/completions`, `/v1/models`, `/usage`, `/health`; virtual `route-*` models |
 | [Deployment](docs/deployment.md) | HTTP transport, systemd |
 | [Development](docs/development.md) | Tests, linting, contributing |
 
@@ -72,7 +72,7 @@ Details: [docs/mcp-tools.md](docs/mcp-tools.md)
 
 ## Architecture (one paragraph)
 
-One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs thin **faces**: MCP (stdio/HTTP) and an **OpenAI-compatible gateway** (`POST /v1/chat/completions`, `GET /v1/models`) on the same HTTP server when `YLANG_TRANSPORT=http`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` trigger activity routing; any other model string passthroughs to a named provider. Business logic never lives in face handlers — they only parse, map, and serialize.
+One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs two live **faces** on HTTP transport: the **MCP server** (`/mcp` or stdio) and an **OpenAI-compatible gateway** (`POST /v1/chat/completions`, `GET /v1/models`, `GET /usage`, `GET /health`) on the same HTTP server when `YLANG_TRANSPORT=http`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` trigger activity routing; any other model string passthroughs to a named provider. Business logic never lives in face handlers — they only parse, map, and serialize.
 
 ```
 src/ylang/
@@ -118,8 +118,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 ### Shipped
 
-- MCP tools (improver, templates, facts, usage, patterns)
-- Provider routing (activity-based model selection, fallback chain, cooldown, preference boost)
-- HTTP transport + bearer auth (`YLANG_TRANSPORT=http`, `YLANG_AUTH_TOKEN`)
-- OpenAI-compatible gateway with streaming tool-call passthrough
+- MCP server (stdio and HTTP) and OpenAI-compatible gateway (`/v1/chat/completions`, `/v1/models`, `/usage`, `/health`)
+- Virtual route models (`route-code`, `route-search`, `route-reason`, `route-other`); streaming tool-call passthrough
+- HTTP transport + bearer auth on `/mcp`, `/v1/*`, and `/usage` (`YLANG_AUTH_TOKEN`); `/health` unauthenticated
+- Activity-based routing, fallback chain, cooldown, preference boost; **daily budget cap enforced** when `YLANG_DAILY_BUDGET_USD` is set
 - CLI learning loop (`ylang patterns suggest` / `apply`, `ylang usage digest` / `dashboard`)
+
+### Planned
+
+- Auto-evaluation loop — propose-only optimization/experiment surfaces; no automatic outcome-driven apply
+- Pattern-learning maturity — manual suggest/apply today; notifications and fuller automation pending

@@ -1,14 +1,21 @@
 # Architecture
 
-Ylang follows a **single core engine, multiple thin faces** design. Business logic lives in `src/ylang/core` and domain packages; adapters (MCP and OpenAI gateway) only translate I/O.
+Ylang follows a **single core engine, multiple thin faces** design. Business logic lives in `src/ylang/core` and domain packages; face adapters only translate I/O.
+
+**Two live faces** share one core when running on HTTP transport (`YLANG_TRANSPORT=http`):
+
+1. **MCP server** — stdio (local Cursor subprocess) or HTTP (`/mcp`); improver, templates, facts, usage analytics, pattern tools.
+2. **OpenAI-compatible gateway** — on the same HTTP process: `POST /v1/chat/completions`, `GET /v1/models`, `GET /usage`, `GET /health`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` map to activity-based routing; other model strings passthrough to named providers.
+
+Stdio transport runs MCP only (no `/v1/*` routes). See [gateway.md](gateway.md) for Cursor custom-endpoint setup.
 
 ## High-level diagram
 
 ```mermaid
 flowchart TB
     subgraph faces["Faces (adapters)"]
-        MCP["MCP server<br/>stdio / HTTP"]
-        GW["OpenAI gateway<br/>/v1/chat/completions"]
+        MCP["MCP server<br/>stdio / HTTP /mcp"]
+        GW["OpenAI gateway<br/>/v1/* /usage /health"]
         CLI["CLI<br/>ylang usage / patterns"]
     end
 
@@ -87,7 +94,7 @@ src/ylang/
 │   ├── dashboard.py     # Chart.js HTML for GET /usage and CLI export
 │   └── async_ops.py     # run_store_sync for non-blocking HTTP handlers
 ├── gateway/
-│   ├── routes.py        # /v1/chat/completions, /v1/models, GET /usage
+│   ├── routes.py        # /v1/chat/completions, /v1/models, /usage, /health
 │   ├── mapping.py       # Virtual route-* model resolution
 │   └── openai.py        # Request parsing and response shaping
 ├── importer/            # CSV public-prompt import (CLI + MCP tool)
@@ -193,7 +200,7 @@ Mode affects improver guidance (e.g. plan mode avoids implementation deliverable
 | Transport | Use case | Auth |
 |-----------|----------|------|
 | `stdio` | Cursor subprocess MCP | None |
-| `http` | Shared remote instance, MCP + gateway, Cursor hooks | Bearer `YLANG_AUTH_TOKEN` |
+| `http` | Shared remote instance, MCP + gateway, Cursor hooks | Bearer `YLANG_AUTH_TOKEN` on `/mcp`, `/v1/*`, and `/usage`; `GET /health` is unauthenticated |
 
 HTTP uses FastMCP's streamable HTTP app with gateway routes registered on the same app, wrapped with `BearerTokenMiddleware`.
 
@@ -222,28 +229,38 @@ Findings at current scale (single process, ~40 concurrent mocked completions):
 
 See [gateway.md](gateway.md) for virtual models and Cursor setup.
 
-## v0.2.0 faces (HTTP transport)
+## HTTP faces (gateway routes)
 
-| Face | Path / command | Notes |
-|------|----------------|-------|
-| MCP | `/mcp` or stdio | 11 tools including `improve_prompt` |
-| Gateway | `POST /v1/chat/completions`, `GET /v1/models` | Streaming tool-call passthrough; token counts in final SSE chunk |
-| Usage dashboard | `GET /usage` | Chart.js, 30s auto-refresh |
-| CLI | `ylang usage`, `ylang patterns suggest` / `apply` | Standalone HTML export via `ylang usage dashboard`; digest via `ylang usage digest` |
+| Route | Method | Auth | Notes |
+|-------|--------|------|-------|
+| `/v1/chat/completions` | `POST` | Bearer | Activity routing via virtual `route-*` models; streaming SSE + tool passthrough |
+| `/v1/models` | `GET` | Bearer | Catalog of four virtual `route-*` models |
+| `/usage` | `GET` | Bearer | Chart.js dashboard; 30s auto-refresh |
+| `/health` | `GET` | None | Version JSON for probes |
 
 `Library.list_templates()` caches summaries in memory until the next `save()`.
 
 Optional Ollama smoke tests use `@pytest.mark.llm_e2e`.
 
-## Extension points
+## Status
 
-| Seam | Location | Status |
-|------|----------|--------|
-| OpenAI gateway | `gateway/` | **Live** on HTTP transport |
-| Usage dashboard | `usage/dashboard.py`, `GET /usage` | **Live** on HTTP transport |
-| Pattern detector | `library/patterns.py` | **Live** (`UsagePatternDetector`) |
-| Personal preference routing | `model_router.apply_preference_order` | Implemented, uses usage aggregates |
-| Learned templates | `library/store.py` `source="learned"` | MCP tools + `ylang patterns suggest` / `apply`; auto-injected in improver context |
+### Shipped
+
+- MCP server (stdio and HTTP `/mcp`) — improver, library, facts, usage, pattern and analytics tools
+- OpenAI-compatible gateway on HTTP transport — all four routes above; virtual models `route-code`, `route-search`, `route-reason`, `route-other`
+- Bearer auth on `/mcp`, `/v1/*`, and `/usage` when `YLANG_AUTH_TOKEN` is set; `/health` exempt
+- Activity-based model routing, fallback chain, provider cooldown, usage-based preference boost
+- **Daily budget cap enforced at runtime** — when `YLANG_DAILY_BUDGET_USD` is set and rolling 24h spend ≥ cap, `ModelRouter.apply_budget_filter` drops cloud models from candidate lists (local `ollama/*` remains via fallback); 80% startup stderr warning
+- Usage logging on every LLM call; `GET /usage` dashboard and CLI export
+- Pattern detection (`detect_patterns`, `ylang patterns suggest` / `apply`) and learned-template improver context
+- Propose-only improver and optimization surfaces (`optimization_suggestions`, optional `YLANG_EXPERIMENTS=1`)
+
+### Planned
+
+- **Auto-evaluation loop** — experiments and optimization suggestions are surfaced propose-only; no automatic closure (routing/template updates from outcomes without manual review)
+- **Pattern-learning maturity** — detection and manual apply exist; threshold notifications (BL-005) and fuller automation not yet shipped
+
+Not in scope: optimizer with provenance, GitHub/KB sources, hosted team features.
 
 ## Related docs
 
