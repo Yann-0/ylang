@@ -51,7 +51,8 @@ Full instructions: **[docs/installation.md](docs/installation.md)**
 | [Installation](docs/installation.md) | Setup on Linux, macOS, Windows |
 | [Configuration](docs/configuration.md) | Environment variables, model prioritization, routing |
 | [Architecture](docs/architecture.md) | Design, modules, data flow |
-| [MCP tools](docs/mcp-tools.md) | Full API reference (11 tools) |
+| [MCP tools](docs/mcp-tools.md) | Full API reference (17 tools) |
+| [Console](docs/console.md) | Admin UI guide with screenshots for every `/console` page |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
 | [Gateway](docs/gateway.md) | OpenAI HTTP face: `/v1/chat/completions`, `/v1/models`, `/usage`, `/health`; virtual `route-*` models |
 | [Deployment](docs/deployment.md) | HTTP transport, systemd |
@@ -72,7 +73,7 @@ Details: [docs/mcp-tools.md](docs/mcp-tools.md)
 
 ## Architecture (one paragraph)
 
-One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs two live **faces** on HTTP transport: the **MCP server** (`/mcp` or stdio) and an **OpenAI-compatible gateway** (`POST /v1/chat/completions`, `GET /v1/models`, `GET /usage`, `GET /health`) on the same HTTP server when `YLANG_TRANSPORT=http`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` trigger activity routing; any other model string passthroughs to a named provider. Business logic never lives in face handlers — they only parse, map, and serialize.
+One shared **core engine** (`Engine` + `ModelRouter` + LiteLLM) backs two live **faces** on HTTP transport: the **MCP server** (`/mcp` or stdio) and an **OpenAI-compatible gateway** (`POST /v1/chat/completions`, `GET /v1/models`, `GET /console`, `GET /health`) on the same HTTP server when `YLANG_TRANSPORT=http`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` trigger activity routing; any other model string passthroughs to a named provider. Business logic never lives in face handlers — they only parse, map, and serialize.
 
 ```
 src/ylang/

@@ -96,6 +96,7 @@ pytest --cov=ylang --cov-report=term-missing
 |--------|---------|
 | `scripts/e2e_improve_prompt.py` | Manual improver e2e against live LLM |
 | `scripts/gateway_load_test.py` | Concurrent gateway load probe (mocked or `--live URL TOKEN`) |
+| `scripts/capture-console-screenshots.py` | Full-page PNGs of every `/console` route → `docs/images/console/` (Playwright) |
 | `scripts/import-public-prompts.sh` | Shell wrapper for public prompt import |
 | `scripts/populate-public-prompts-via-mcp.py` | Import via MCP tool |
 
