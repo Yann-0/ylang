@@ -40,7 +40,9 @@ def _mock_response(content: str = "ok", *, model: str = "openai/gpt-4o") -> Magi
 
 
 def test_complete_success(engine: Engine) -> None:
-    with patch("ylang.core.engine.litellm.completion", return_value=_mock_response("hello")):
+    with patch(
+        "ylang.core.engine.litellm.completion", return_value=_mock_response("hello")
+    ):
         result = engine.complete([{"role": "user", "content": "hi"}], "code")
     assert result.success is True
     assert result.content == "hello"

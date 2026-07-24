@@ -10,6 +10,8 @@ import anyio
 T = TypeVar("T")
 
 
-async def run_store_sync(func: Callable[..., T], /, *args: object, **kwargs: object) -> T:
+async def run_store_sync(
+    func: Callable[..., T], /, *args: object, **kwargs: object
+) -> T:
     """Run a synchronous store operation in a worker thread."""
     return await anyio.to_thread.run_sync(lambda: func(*args, **kwargs))

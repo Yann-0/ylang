@@ -104,7 +104,9 @@ def test_chat_completion_stream_sse(gateway_client: TestClient) -> None:
     assert '"delta":{"content":"hel"}' in response.text.replace(" ", "")
 
 
-def test_chat_completion_failure_returns_openai_error(gateway_client: TestClient) -> None:
+def test_chat_completion_failure_returns_openai_error(
+    gateway_client: TestClient,
+) -> None:
     mock_result = CompletionResult(
         content="",
         model_used="openai/gpt-4o",

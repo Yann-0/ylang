@@ -6,6 +6,14 @@ SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 APP_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 WS_ROOT="$(cd "$APP_ROOT/.." && pwd)"
 
+ENV_FILE="${YLANG_ENV_FILE:-$WS_ROOT/ylang.env}"
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck source=/dev/null
+  source "$ENV_FILE"
+  set +a
+fi
+
 for candidate in \
   "$APP_ROOT/.venv/bin/ylang" \
   "$WS_ROOT/.venv/bin/ylang"; do

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -56,6 +57,7 @@ class Engine:
         *,
         surface: str,
         router: ModelRouter | None = None,
+        base_settings: Settings | None = None,
         activity_model_lists: dict[Activity, list[str]] | None = None,
         provider_keys: ProviderKeys | None = None,
         fallback_model: str = FALLBACK_MODEL,
@@ -68,6 +70,8 @@ class Engine:
             store: Shared usage store for writes and router budget/preference reads.
             surface: Logical face label persisted on usage rows (e.g. ``mcp``, ``gateway``).
             router: Pre-built router; when omitted, built from the remaining kwargs.
+            base_settings: Env snapshot for merging runtime overrides; set by
+                ``from_settings``.
             activity_model_lists: Per-activity model priority lists.
             provider_keys: Cloud API keys for availability checks.
             fallback_model: Local floor model appended to every attempt chain.
@@ -76,6 +80,7 @@ class Engine:
         """
         self._store = store
         self._surface = surface
+        self._base_settings = base_settings
         if router is not None:
             self._router = router
         else:
@@ -114,7 +119,23 @@ class Engine:
             store,
             surface=surface,
             router=ModelRouter.from_settings(settings, usage_store=store),
+            base_settings=settings,
         )
+
+    def _refresh_routing(self) -> None:
+        """Apply hot-reloadable runtime overrides to the model router.
+
+        No-op when the engine was constructed without ``base_settings`` (tests
+        and ad-hoc routers inject lists directly and must not be overwritten by
+        env defaults).
+        """
+        if self._base_settings is None:
+            return
+        from ylang.core.runtime_settings import RuntimeSettingsStore, merge_settings
+
+        overrides = RuntimeSettingsStore(self._store._connection).as_dict()
+        effective = merge_settings(self._base_settings, overrides)
+        self._router.apply_settings(effective)
 
     def complete(
         self,
@@ -128,8 +149,14 @@ class Engine:
         improver_input_sample: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        usage_cancelled: threading.Event | None = None,
     ) -> CompletionResult:
-        """Resolve model from activity, complete via LiteLLM, write usage."""
+        """Resolve model from activity, complete via LiteLLM, write usage.
+
+        When ``usage_cancelled`` is set before the usage write, the write is
+        skipped so a caller timeout path can record the outcome instead.
+        """
+        self._refresh_routing()
         attempt_chain = self._router.build_attempt_chain(
             activity,
             explicit_model=model,
@@ -180,18 +207,19 @@ class Engine:
                 )
 
         latency_ms = int((time.perf_counter() - started) * 1000)
-        self._store.write_usage(
-            surface=self._surface,
-            activity=activity,
-            model_used=model_used,
-            prompt_tokens=prompt_tokens,
-            cost=cost,
-            improver_fired=improver_fired,
-            improver_accepted=improver_accepted,
-            improver_input_sample=improver_input_sample,
-            latency_ms=latency_ms,
-            success=success,
-        )
+        if usage_cancelled is None or not usage_cancelled.is_set():
+            self._store.write_usage(
+                surface=self._surface,
+                activity=activity,
+                model_used=model_used,
+                prompt_tokens=prompt_tokens,
+                cost=cost,
+                improver_fired=improver_fired,
+                improver_accepted=improver_accepted,
+                improver_input_sample=improver_input_sample,
+                latency_ms=latency_ms,
+                success=success,
+            )
         return CompletionResult(
             content=content,
             model_used=model_used,
@@ -216,6 +244,7 @@ class Engine:
         tool_choice: str | dict[str, Any] | None = None,
     ) -> Iterator[StreamChunk]:
         """Stream completion deltas via LiteLLM; write exactly one usage row at end."""
+        self._refresh_routing()
         attempt_chain = self._router.build_attempt_chain(
             activity,
             explicit_model=model,
@@ -242,7 +271,11 @@ class Engine:
                         tools=tools,
                         tool_choice=tool_choice,
                     ):
-                        if chunk.content or chunk.tool_calls_delta or chunk.usage is not None:
+                        if (
+                            chunk.content
+                            or chunk.tool_calls_delta
+                            or chunk.usage is not None
+                        ):
                             emitted = True
                             yield chunk
                     model_used = stream_usage.model_used or candidate
@@ -257,7 +290,9 @@ class Engine:
                             message=str(exc),
                             model_used=model_used,
                         ) from exc
-                    if index + 1 >= len(attempt_chain) or not _should_try_next_model(exc):
+                    if index + 1 >= len(attempt_chain) or not _should_try_next_model(
+                        exc
+                    ):
                         break
                     next_model = attempt_chain[index + 1]
                     if _is_retryable_llm_error(exc):
@@ -400,7 +435,9 @@ def _iter_litellm_stream(
         chunk_usage = getattr(chunk, "usage", None)
         if chunk_usage is not None:
             usage.prompt_tokens = int(getattr(chunk_usage, "prompt_tokens", 0) or 0)
-            usage.completion_tokens = int(getattr(chunk_usage, "completion_tokens", 0) or 0)
+            usage.completion_tokens = int(
+                getattr(chunk_usage, "completion_tokens", 0) or 0
+            )
             saw_usage = True
             total = usage.prompt_tokens + usage.completion_tokens
             yield StreamChunk(

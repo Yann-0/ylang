@@ -36,9 +36,13 @@ def verify_storage_writable(db_path: Path) -> None:
     resolved = db_path.expanduser().resolve()
     parent = resolved.parent
     if not parent.exists():
-        msg = f"parent directory does not exist: {parent}"
-        raise StoragePermissionError(resolved, msg)
-    if not os.access(parent, os.W_OK | os.X_OK):
+        ancestor = parent
+        while not ancestor.exists() and ancestor != ancestor.parent:
+            ancestor = ancestor.parent
+        if not ancestor.exists() or not os.access(ancestor, os.W_OK | os.X_OK):
+            msg = f"parent directory does not exist: {parent}"
+            raise StoragePermissionError(resolved, msg)
+    elif not os.access(parent, os.W_OK | os.X_OK):
         msg = f"directory not writable: {parent}"
         raise StoragePermissionError(resolved, msg)
     if resolved.exists() and not os.access(resolved, os.W_OK):

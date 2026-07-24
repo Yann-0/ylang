@@ -58,12 +58,15 @@ def _mock_client(concurrency: int, requests: int) -> dict[str, float]:
         success=True,
     )
 
+    import threading
+
     latencies: list[float] = []
     errors = 0
+    client_lock = threading.Lock()
 
     def one_request() -> float:
         started = time.perf_counter()
-        with patch.object(engine, "complete", return_value=mock_result):
+        with client_lock:
             response = client.post(
                 "/v1/chat/completions",
                 headers={"Authorization": "Bearer load-test-token"},
@@ -78,13 +81,14 @@ def _mock_client(concurrency: int, requests: int) -> dict[str, float]:
         return elapsed_ms
 
     started = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [pool.submit(one_request) for _ in range(requests)]
-        for future in as_completed(futures):
-            try:
-                latencies.append(future.result())
-            except Exception:
-                errors += 1
+    with patch.object(engine, "complete", return_value=mock_result):
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = [pool.submit(one_request) for _ in range(requests)]
+            for future in as_completed(futures):
+                try:
+                    latencies.append(future.result())
+                except Exception:
+                    errors += 1
     total_s = time.perf_counter() - started
     store.close()
     db_path.unlink(missing_ok=True)

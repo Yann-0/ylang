@@ -6,11 +6,15 @@ from ylang.improver.registry import detect_task_class
 
 
 def test_detect_analysis_task() -> None:
-    assert detect_task_class("do a deep dive and prepare a product backlog") == "analysis"
+    assert (
+        detect_task_class("do a deep dive and prepare a product backlog") == "analysis"
+    )
 
 
 def test_detect_implementation_task() -> None:
-    assert detect_task_class("implement dark mode toggle with tests") == "implementation"
+    assert (
+        detect_task_class("implement dark mode toggle with tests") == "implementation"
+    )
 
 
 def test_detect_structural_default() -> None:

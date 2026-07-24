@@ -7,7 +7,9 @@ from datetime import datetime
 from typing import Literal
 
 TemplateSource = Literal["seed", "user", "learned"]  # Origin of a template version
-TemplateVisibility = Literal["public", "private"]  # Library list filter and recall scope
+TemplateVisibility = Literal[
+    "public", "private", "archived"
+]  # Library list filter, recall scope, and archive state
 
 
 @dataclass(frozen=True, slots=True)

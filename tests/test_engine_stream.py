@@ -43,7 +43,9 @@ def test_complete_stream_yields_deltas_and_logs_once(engine: Engine) -> None:
     stream = [_stream_chunk("hel"), _stream_chunk("lo")]
 
     with patch("ylang.core.engine.litellm.completion", return_value=iter(stream)):
-        chunks = list(engine.complete_stream([{"role": "user", "content": "hi"}], "code"))
+        chunks = list(
+            engine.complete_stream([{"role": "user", "content": "hi"}], "code")
+        )
 
     assert [chunk.content for chunk in chunks] == ["hel", "lo"]
     rows = engine._store.recall_usage(UsageWindow.last_hours(1))  # type: ignore[attr-defined]

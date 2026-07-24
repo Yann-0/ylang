@@ -1,6 +1,6 @@
 # MCP tools reference
 
-Ylang exposes **16 MCP tools** via [FastMCP](https://github.com/modelcontextprotocol/python-sdk). All tools return JSON-serializable dicts. Errors use `ok: false` and an `error` string where applicable.
+Ylang exposes **17 MCP tools** via [FastMCP](https://github.com/modelcontextprotocol/python-sdk). All tools return JSON-serializable dicts. Errors use `ok: false` and an `error` string where applicable.
 
 Transport: stdio (`python -m ylang`) or HTTP (`YLANG_TRANSPORT=http`, Bearer auth).
 
@@ -160,6 +160,42 @@ List templates with latest-version metadata.
   ]
 }
 ```
+
+---
+
+## search_templates
+
+Search the local template library by keyword using the FTS index (hybrid lexical + optional semantic ranking).
+
+### Parameters
+
+| Name | Type | Required | Default | Description |
+|------|------|----------|---------|-------------|
+| `query` | string | yes | — | Search query |
+| `limit` | integer | no | `20` | Max results |
+
+### Response
+
+```json
+{
+  "ok": true,
+  "query": "code review",
+  "templates": [
+    {
+      "template_id": "code-review",
+      "name": "Code review",
+      "latest_version": 1,
+      "source": "seed",
+      "updated_at": "2026-07-01T00:00:00+00:00",
+      "param_names": ["language"],
+      "visibility": "public",
+      "tags": ["review"]
+    }
+  ]
+}
+```
+
+On SQLite/FTS errors returns `{ok: false, error, templates: []}`.
 
 ---
 
@@ -393,12 +429,28 @@ Return improver funnel statistics: fired → validated → changed → accepted,
   "validation_rate": 0.9048,
   "change_rate": 0.8333,
   "accept_rate": 0.6667,
+  "polish_ratio": 0.92,
+  "performance_ratio": 0.45,
+  "polish_sample_count": 12,
+  "polish_kept_as_is_rate": 0.5,
+  "avg_edit_distance": 8.0,
+  "avg_latency_ms": 12000.0,
   "top_rejection_reasons": {"length ratio out of bounds": 3},
   "by_mode": {
-    "agent": {"fired": 30, "validated": 28, "changed": 26, "accepted": 22, "accept_rate": 0.7333}
+    "agent": {
+      "fired": 30,
+      "validated": 28,
+      "changed": 26,
+      "accepted": 22,
+      "accept_rate": 0.7333,
+      "performance_ratio": 0.49
+    }
   }
 }
 ```
+
+`polish_ratio` is `null` when there are no `prompt_edit` feedback samples.
+`performance_ratio` is `accept_rate × min(1, 8000 / avg_latency_ms)`.
 
 CLI equivalent: `ylang usage improver-report`.
 
@@ -426,6 +478,24 @@ Analyzes improver accept rates, rejection reasons, template effectiveness, detec
 
 ---
 
+## create_experiment_variant
+
+Create or update an improver A/B experiment variant. `config_hash` selects a system-prompt variant (`control`, `concise`, `verbose`).
+
+### Parameters
+
+| Name | Type | Default | Description |
+|------|------|---------|-------------|
+| `experiment_id` | string | required | e.g. `improver-agent` |
+| `variant_id` | string | required | e.g. `control`, `variant-a` |
+| `config_hash` | string | required | `control`, `concise`, or `verbose` |
+| `traffic_pct` | float | `50.0` | Traffic weight (0–100) |
+| `active` | boolean | `true` | Whether variant receives traffic |
+
+Enable experiments via `YLANG_EXPERIMENTS=1` or console runtime setting `experiments=true`.
+
+---
+
 ## record_prompt_edit
 
 Record user edit feedback when the submitted prompt differs from the Ylang-improved text.
@@ -437,7 +507,10 @@ Record user edit feedback when the submitted prompt differs from the Ylang-impro
 | `original_text` | string | yes | Improved prompt text |
 | `submitted_text` | string | yes | Text the user actually submitted |
 
-Enabled in the Cursor hook when `YLANG_CAPTURE_EDIT_FEEDBACK=1`.
+Enabled in the Cursor hook when `YLANG_CAPTURE_EDIT_FEEDBACK` (or alias
+`YLANG_EDIT_FEEDBACK`) is truthy. The `sessionStart` hook defaults capture to
+`1`. The MCP tool itself always records when called — there is no runtime
+`edit_feedback` gate on the tool.
 
 ---
 
@@ -446,7 +519,8 @@ Enabled in the Cursor hook when `YLANG_CAPTURE_EDIT_FEEDBACK=1`.
 Tools are registered in `src/ylang/mcp/tools.py` via `register_tools(server, deps)`. The server prints the tool list on startup:
 
 ```
-tools (16): improve_prompt, save_template, recall_template, ...
+tools (17): improve_prompt, save_template, recall_template, list_templates,
+search_templates, import_public_prompts, ...
 ```
 
 ## Related docs

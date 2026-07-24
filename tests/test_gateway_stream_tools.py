@@ -99,4 +99,6 @@ def test_stream_emits_usage_tokens(gateway_client: TestClient) -> None:
 
     assert response.status_code == 200
     text = response.text.replace(" ", "")
-    assert '"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}' in text
+    assert (
+        '"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}' in text
+    )

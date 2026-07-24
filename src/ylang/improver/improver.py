@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
-import re
-from collections import Counter
+import threading
+import time
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeoutError
 
 from ylang.core.engine import Engine
+from ylang.core.model_router import resolve_improver_explicit_model
+from ylang.core.types import CompletionResult
 from ylang.improver.context import ImproveContext, _EMPTY_CONVERSATION
-from ylang.improver.mode_optimizer import get_mode_config
+from ylang.improver.mode_optimizer import get_mode_config, improver_timeout_sec
+from ylang.improver.parse import _parse_model_output
+from ylang.improver.reference import is_reference_only_prompt
 from ylang.improver.registry import (
     ResolvedCursorMode,
     default_auto_apply,
@@ -20,34 +27,58 @@ from ylang.improver.registry import (
     recommend_parallelism,
     resolve_cursor_mode,
 )
-from ylang.improver.reference import is_reference_only_prompt, scrub_file_reference_numbers
+from ylang.improver.salvage import (
+    _ANCHOR_SALVAGE_REASONS,
+    _FALLBACK_REJECTION_REASONS,
+    _SALVAGE_VALIDATION_REASONS,
+    _TIMEOUT_FALLBACK_MAX_LEN,
+    _fallback_short_prompt_expansion,
+    _salvage_omitted_changes,
+    _try_salvage,
+    _try_salvage_parse_failure,
+    _try_salvage_validation_failure,
+)
 from ylang.improver.types import Change, ImprovementResult
+from ylang.improver.validate import _safe_result, _validate
+
+# Re-exports for tests and internal callers that import from this module.
+from ylang.improver.parse import (  # noqa: F401
+    _extract_json_payload,
+    _is_model_prose_response,
+    _loads_improver_payload,
+    _try_parse_plain_spec,
+)
+from ylang.improver.salvage import (  # noqa: F401
+    _is_vague_short_prompt,
+    _salvage_result,
+)
+from ylang.improver.validate import (  # noqa: F401
+    _change_before_valid,
+    _extract_quoted_spans,
+    _intent_preserved,
+    _is_restructured_spec,
+    _numbers_preserved,
+    _quoted_spans_preserved,
+    _replay,
+)
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_KINDS: frozenset[str] = frozenset(
-    {"clarity", "format", "constraint", "example", "scope"}
+_IMPROVE_CACHE_TTL_SEC = 60.0
+
+_DEFAULT_IMPROVER_TIMEOUT_SEC = 12.0
+
+_CRITIQUE_MIN_REMAINING_SEC = 2.0
+
+_CRITIQUE_MIN_REMAINING_FRACTION = 0.2
+
+_improve_cache: dict[str, tuple[float, ImprovementResult]] = {}
+
+_IMPROVE_EXECUTOR = ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="ylang-improve"
 )
-_NUMBER_RE = re.compile(r"\d+")
-_ISO_TIMESTAMP_RE = re.compile(
-    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"
-)
-_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
-_DOUBLE_QUOTED_RE = re.compile(r'"[^"]*"')
-_BACKTICK_QUOTED_RE = re.compile(r"`[^`]*`")
-_SINGLE_QUOTED_RE = re.compile(r"(?<![\w])'[^']+'(?![\w])")
-_MODAL_RE = re.compile(r"\b(must|should|shall|never|always|may|might|will|won't)\b", re.I)
-_SEQ_RE = re.compile(r"\b(first|then|before|after|finally)\b", re.I)
-_PLACEHOLDER_RE = re.compile(r"<[^>]+>|\be\.g\.\b|example", re.I)
-_WORD_RE = re.compile(r"[a-z0-9']{4,}", re.I)
-_SALVAGE_MODES: frozenset[str] = frozenset({"agent", "multitask", "debug", "plan"})
-_SHORT_PROMPT_MAX_LEN = 50
-_FALLBACK_REJECTION_REASONS: frozenset[str] = frozenset({"length ratio out of bounds"})
-_VAGUE_SHORT_PROMPT_RES: tuple[re.Pattern[str], ...] = (
-    re.compile(r"^(let'?s\s+)?(do|finish|complete|fix|ship)\s+(all|everything|it|this|them)\.?$", re.I),
-    re.compile(r"^(what\s+(should|shall)\s+we\s+do|what\s+next|next\s+steps?)\??$", re.I),
-    re.compile(r"^(go|continue|proceed)\.?$", re.I),
-)
+
+_TIMEOUT_GRACE_SEC = 2.0
 
 _SYSTEM_PROMPT = """\
 You turn rough user prompts into clear, actionable full specs for AI coding agents.
@@ -95,7 +126,6 @@ Respond with JSON only:
 {"improved": "...", "changes": [{"kind": "...", "description": "...", "before": "...", "after": "..."}]}
 """
 
-
 _CRITIQUE_SYSTEM = """\
 You review improved AI coding agent prompts for clarity and completeness.
 Respond with JSON only: {"improved": "...", "changes": [{"kind": "...", "description": "...", "before": "...", "after": "..."}]}
@@ -103,12 +133,86 @@ Preserve intent; fix only clarity, structure, and missing constraints. Do not ad
 """
 
 
-def _critique_enabled() -> bool:
-    return os.environ.get("YLANG_IMPROVER_CRITIQUE", "").strip().lower() in {"1", "true", "yes"}
+def _improve_cache_key(text: str, tool: str, mode: str | None) -> str:
+    payload = f"{tool}:{mode or ''}:{text.strip()}"
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
-def _experiments_enabled() -> bool:
-    return os.environ.get("YLANG_EXPERIMENTS", "").strip().lower() in {"1", "true", "yes"}
+def _get_cached_improvement(
+    key: str, store: object | None = None
+) -> ImprovementResult | None:
+    entry = _improve_cache.get(key)
+    if entry is not None:
+        expires_at, result = entry
+        if time.monotonic() <= expires_at:
+            return result
+        _improve_cache.pop(key, None)
+    if store is not None:
+        from ylang.improver.cache_store import get_cached_improvement
+
+        persisted = get_cached_improvement(store._connection, key)  # type: ignore[attr-defined]
+        if persisted is not None:
+            _improve_cache[key] = (
+                time.monotonic() + _IMPROVE_CACHE_TTL_SEC,
+                persisted,
+            )
+            return persisted
+    return None
+
+
+def _set_cached_improvement(
+    key: str, result: ImprovementResult, store: object | None = None
+) -> None:
+    _improve_cache[key] = (time.monotonic() + _IMPROVE_CACHE_TTL_SEC, result)
+    if store is not None:
+        from ylang.improver.cache_store import set_cached_improvement
+
+        set_cached_improvement(store._connection, key, result)  # type: ignore[attr-defined]
+
+
+def clear_improve_cache() -> None:
+    """Clear the in-memory improver result cache (primarily for tests)."""
+    _improve_cache.clear()
+
+
+def _critique_enabled(store: object | None = None) -> bool:
+    if store is not None:
+        from ylang.core.runtime_settings import RuntimeSettingsStore, _parse_bool
+
+        override = RuntimeSettingsStore(store._connection).get("improver_critique")  # type: ignore[attr-defined]
+        parsed = _parse_bool(override)
+        if parsed is not None:
+            return parsed
+    return os.environ.get("YLANG_IMPROVER_CRITIQUE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
+def _improver_timeout_sec(store: object | None = None) -> float:
+    """Return improver LLM wall-clock budget in seconds (0 disables)."""
+    if store is not None:
+        from ylang.usage.store import UsageStore
+
+        if isinstance(store, UsageStore):
+            return improver_timeout_sec(store)
+    return improver_timeout_sec(None)
+
+
+def _experiments_enabled(store: object | None = None) -> bool:
+    if store is not None:
+        from ylang.core.runtime_settings import RuntimeSettingsStore, _parse_bool
+
+        override = RuntimeSettingsStore(store._connection).get("experiments")  # type: ignore[attr-defined]
+        parsed = _parse_bool(override)
+        if parsed is not None:
+            return parsed
+    return os.environ.get("YLANG_EXPERIMENTS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 class Improver:
@@ -136,20 +240,30 @@ class Improver:
                 text,
                 resolved=resolved,
             )
+        cache_key = _improve_cache_key(text, tool, mode)
+        if not accepted:
+            cached = _get_cached_improvement(cache_key, self._engine.store)
+            if cached is not None:
+                return cached
         user_content = _build_user_message(text, resolved, context)
-        experiment_variant = self._resolve_experiment_variant(resolved.mode)
-        completion = self._engine.complete(
-            [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-            ],
-            activity=f"improve:{resolved.mode}",
+        experiment_variant, system_prompt = self._resolve_experiment(resolved.mode)
+        timeout_sec = _improver_timeout_sec(self._engine.store)
+        deadline = time.monotonic() + timeout_sec if timeout_sec > 0 else None
+        activity = f"improve:{resolved.mode}"
+        completion = self._run_improve_completion(
+            text=text,
             model=model,
-            response_format={"type": "json_object"},
-            improver_fired=True,
-            improver_accepted=accepted,
-            improver_input_sample=text,
+            accepted=accepted,
+            apply_default=apply_default,
+            resolved=resolved,
+            system_prompt=system_prompt,
+            user_content=user_content,
+            timeout_sec=timeout_sec,
+            activity=activity,
+            experiment_variant=experiment_variant,
         )
+        if isinstance(completion, ImprovementResult):
+            return completion
         if not completion.success:
             logger.warning(
                 "improve_prompt LLM failed (model=%s): %s",
@@ -162,6 +276,96 @@ class Improver:
                 resolved=resolved,
                 experiment_variant=experiment_variant,
             )
+        return self._process_improve_completion(
+            text=text,
+            completion=completion,
+            apply_default=apply_default,
+            resolved=resolved,
+            model=model,
+            accepted=accepted,
+            cache_key=cache_key,
+            deadline=deadline,
+            timeout_sec=timeout_sec,
+            experiment_variant=experiment_variant,
+        )
+
+    def _run_improve_completion(
+        self,
+        *,
+        text: str,
+        model: str,
+        accepted: bool,
+        apply_default: bool,
+        resolved: ResolvedCursorMode,
+        system_prompt: str,
+        user_content: str,
+        timeout_sec: float,
+        activity: str,
+        experiment_variant: str | None,
+    ) -> CompletionResult | ImprovementResult:
+        """Call the engine with optional timeout/grace; may return a timeout result."""
+        usage_cancelled = threading.Event()
+
+        def _complete() -> CompletionResult:
+            return self._engine.complete(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                activity=activity,
+                model=resolve_improver_explicit_model(model),
+                response_format={"type": "json_object"},
+                improver_fired=True,
+                improver_accepted=accepted,
+                improver_input_sample=text,
+                usage_cancelled=usage_cancelled,
+            )
+
+        if timeout_sec <= 0:
+            return _complete()
+        future = _IMPROVE_EXECUTOR.submit(_complete)
+        try:
+            return future.result(timeout=timeout_sec)
+        except FuturesTimeoutError:
+            usage_cancelled.set()
+            grace = min(_TIMEOUT_GRACE_SEC, max(0.5, timeout_sec * 0.15))
+            try:
+                completion = future.result(timeout=grace)
+                logger.info(
+                    "improve_prompt accepted late completion within %.1fs grace "
+                    "(budget=%.1fs)",
+                    grace,
+                    timeout_sec,
+                )
+                return completion
+            except FuturesTimeoutError:
+                return self._timeout_result(
+                    text,
+                    apply_default,
+                    resolved=resolved,
+                    model=model,
+                    accepted=accepted,
+                    timeout_sec=timeout_sec,
+                    activity=activity,
+                    experiment_variant=experiment_variant,
+                    future=future,
+                )
+
+    def _process_improve_completion(
+        self,
+        *,
+        text: str,
+        completion: CompletionResult,
+        apply_default: bool,
+        resolved: ResolvedCursorMode,
+        model: str,
+        accepted: bool,
+        cache_key: str,
+        deadline: float | None,
+        timeout_sec: float,
+        experiment_variant: str | None,
+    ) -> ImprovementResult:
+        """Parse, validate, salvage, critique, and cache a successful completion."""
         try:
             parsed_improved, changes = _parse_model_output(completion.content)
             result, validated = _validate(
@@ -175,34 +379,18 @@ class Improver:
             if validated and changed and not accepted:
                 self._engine.store.update_last_improver_accepted(True)
             if not validated:
-                salvaged = _try_salvage(text, parsed_improved, apply_default, resolved=resolved)
+                salvaged = self._salvage_invalid_result(
+                    text=text,
+                    parsed_improved=parsed_improved,
+                    changes=changes,
+                    apply_default=apply_default,
+                    resolved=resolved,
+                    result=result,
+                    model_used=completion.model_used,
+                    experiment_variant=experiment_variant,
+                )
                 if salvaged is not None:
-                    logger.info(
-                        "improve_prompt salvaged restructured output (model=%s; was: %s)",
-                        completion.model_used,
-                        result.rejection_reason,
-                    )
-                    return self._finalize(salvaged, text, resolved=resolved, experiment_variant=experiment_variant)
-                if result.rejection_reason in _FALLBACK_REJECTION_REASONS:
-                    fallback = _fallback_short_prompt_expansion(
-                        text,
-                        apply_default,
-                        resolved=resolved,
-                        require_vague=False,
-                    )
-                    if fallback is not None:
-                        logger.info(
-                            "improve_prompt applied short-prompt fallback (model=%s; was: %s)",
-                            completion.model_used,
-                            result.rejection_reason,
-                        )
-                        return self._finalize(fallback, text, resolved=resolved, experiment_variant=experiment_variant)
-                if result.rejection_reason:
-                    logger.warning(
-                        "improve_prompt validation rejected model output (model=%s): %s",
-                        completion.model_used,
-                        result.rejection_reason,
-                    )
+                    return salvaged
             elif not changed and _is_vague_short_prompt(text):
                 fallback = _fallback_short_prompt_expansion(
                     text,
@@ -215,49 +403,266 @@ class Improver:
                         "improve_prompt expanded unchanged short prompt (model=%s)",
                         completion.model_used,
                     )
-                    return self._finalize(fallback, text, resolved=resolved, experiment_variant=experiment_variant)
-            result = self._finalize(result, text, resolved=resolved, experiment_variant=experiment_variant)
-            return self._maybe_critique(text, result, resolved, model)
-        except Exception as exc:
-            salvaged = _try_salvage_parse_failure(
+                    return self._finalize(
+                        fallback,
+                        text,
+                        resolved=resolved,
+                        experiment_variant=experiment_variant,
+                    )
+            result = self._finalize(
+                result, text, resolved=resolved, experiment_variant=experiment_variant
+            )
+            final = self._maybe_critique(
                 text,
-                completion.content,
+                result,
+                resolved,
+                model,
+                deadline=deadline,
+                timeout_sec=timeout_sec,
+            )
+            if not accepted:
+                _set_cached_improvement(cache_key, final, self._engine.store)
+            return final
+        except (ValueError, TypeError, KeyError, json.JSONDecodeError) as exc:
+            return self._handle_improve_parse_error(
+                text=text,
+                completion=completion,
+                apply_default=apply_default,
+                resolved=resolved,
+                experiment_variant=experiment_variant,
+                exc=exc,
+            )
+        except Exception as exc:
+            # Model output can raise unexpected parse/shape errors; keep fail-open.
+            logger.debug("improve_prompt unexpected parse error", exc_info=True)
+            return self._handle_improve_parse_error(
+                text=text,
+                completion=completion,
+                apply_default=apply_default,
+                resolved=resolved,
+                experiment_variant=experiment_variant,
+                exc=exc,
+            )
+
+    def _salvage_invalid_result(
+        self,
+        *,
+        text: str,
+        parsed_improved: str,
+        changes: list[Change],
+        apply_default: bool,
+        resolved: ResolvedCursorMode,
+        result: ImprovementResult,
+        model_used: str,
+        experiment_variant: str | None,
+    ) -> ImprovementResult | None:
+        """Attempt salvage/fallback paths for a validation failure."""
+        salvaged = _try_salvage(
+            text, parsed_improved, apply_default, resolved=resolved
+        )
+        if salvaged is None and result.rejection_reason in _ANCHOR_SALVAGE_REASONS:
+            salvaged = _salvage_omitted_changes(
+                text,
+                parsed_improved,
                 apply_default,
                 resolved=resolved,
             )
-            if salvaged is not None:
-                logger.info(
-                    "improve_prompt salvaged unparseable model output (model=%s; was: %s)",
-                    completion.model_used,
-                    exc,
-                )
-                return self._finalize(salvaged, text, resolved=resolved, experiment_variant=experiment_variant)
-            logger.warning(
-                "improve_prompt failed to parse model output (model=%s): %s",
-                completion.model_used,
-                exc,
+        if salvaged is None and result.rejection_reason in _SALVAGE_VALIDATION_REASONS:
+            salvaged = _try_salvage_validation_failure(
+                text,
+                parsed_improved,
+                changes,
+                apply_default,
+                resolved=resolved,
+                rejection_reason=result.rejection_reason,
+            )
+        if salvaged is not None:
+            logger.info(
+                "improve_prompt salvaged restructured output (model=%s; was: %s)",
+                model_used,
+                result.rejection_reason,
             )
             return self._finalize(
-                _safe_result(
-                    text,
-                    apply_default,
-                    resolved=resolved,
-                    validated=False,
-                    rejection_reason=f"parse error: {exc}",
-                ),
+                salvaged,
                 text,
                 resolved=resolved,
                 experiment_variant=experiment_variant,
             )
+        if result.rejection_reason in _FALLBACK_REJECTION_REASONS:
+            fallback = _fallback_short_prompt_expansion(
+                text,
+                apply_default,
+                resolved=resolved,
+                require_vague=False,
+            )
+            if fallback is not None:
+                logger.info(
+                    "improve_prompt applied short-prompt fallback (model=%s; was: %s)",
+                    model_used,
+                    result.rejection_reason,
+                )
+                return self._finalize(
+                    fallback,
+                    text,
+                    resolved=resolved,
+                    experiment_variant=experiment_variant,
+                )
+        if result.rejection_reason:
+            logger.warning(
+                "improve_prompt validation rejected model output (model=%s): %s",
+                model_used,
+                result.rejection_reason,
+            )
+        return None
 
-    def _resolve_experiment_variant(self, mode: str) -> str | None:
-        if not _experiments_enabled():
-            return None
+    def _handle_improve_parse_error(
+        self,
+        *,
+        text: str,
+        completion: CompletionResult,
+        apply_default: bool,
+        resolved: ResolvedCursorMode,
+        experiment_variant: str | None,
+        exc: BaseException,
+    ) -> ImprovementResult:
+        """Salvage or fail-open when model output cannot be parsed."""
+        salvaged = _try_salvage_parse_failure(
+            text,
+            completion.content,
+            apply_default,
+            resolved=resolved,
+        )
+        if salvaged is not None:
+            logger.info(
+                "improve_prompt salvaged unparseable model output (model=%s; was: %s)",
+                completion.model_used,
+                exc,
+            )
+            return self._finalize(
+                salvaged,
+                text,
+                resolved=resolved,
+                experiment_variant=experiment_variant,
+            )
+        logger.warning(
+            "improve_prompt failed to parse model output (model=%s): %s",
+            completion.model_used,
+            exc,
+        )
+        return self._finalize(
+            _safe_result(
+                text,
+                apply_default,
+                resolved=resolved,
+                validated=False,
+                rejection_reason=f"parse error: {exc}",
+            ),
+            text,
+            resolved=resolved,
+            experiment_variant=experiment_variant,
+        )
+
+    def _timeout_result(
+        self,
+        text: str,
+        apply_default: bool,
+        *,
+        resolved: ResolvedCursorMode,
+        model: str,
+        accepted: bool,
+        timeout_sec: float,
+        activity: str,
+        experiment_variant: str | None,
+        future: Future[CompletionResult],
+    ) -> ImprovementResult:
+        """Record a clean timeout usage row and scrub any late orphan writes."""
+        logger.warning(
+            "improve_prompt timed out after %.1fs (model=%s)",
+            timeout_sec,
+            model,
+        )
+        self._engine.store.write_usage(
+            surface=self._engine._surface,  # noqa: SLF001
+            activity=activity,
+            model_used=model,
+            prompt_tokens=0,
+            cost=0.0,
+            improver_fired=True,
+            improver_accepted=accepted,
+            improver_input_sample=text,
+            latency_ms=max(0, int(timeout_sec * 1000)),
+            success=False,
+            improver_validated=False,
+            improver_changed=False,
+            improver_rejection_reason="improver timeout",
+            improver_task_class=detect_task_class(text),
+            cursor_mode=resolved.mode,
+            experiment_variant=experiment_variant,
+        )
+        timeout_row_id = self._engine.store.latest_usage_id() or 0
+
+        def _scrub_orphan(done: Future[CompletionResult]) -> None:
+            try:
+                done.result()
+            except Exception:
+                logger.debug(
+                    "timed-out improve worker finished with error", exc_info=True
+                )
+            try:
+                self._engine.store.mark_late_improver_orphans(after_id=timeout_row_id)
+            except Exception:
+                logger.debug(
+                    "failed to scrub late improver timeout orphan", exc_info=True
+                )
+
+        future.add_done_callback(_scrub_orphan)
+        # On timeout prefer a deterministic skeleton for short/medium prompts so
+        # the user still gets a usable agent spec instead of a hard rejection.
+        fallback = _fallback_short_prompt_expansion(
+            text,
+            apply_default,
+            resolved=resolved,
+            require_vague=False,
+            max_len=_TIMEOUT_FALLBACK_MAX_LEN,
+        )
+        if fallback is not None:
+            logger.info(
+                "improve_prompt timeout: applied prompt fallback after %.1fs",
+                timeout_sec,
+            )
+            return self._finalize(
+                fallback,
+                text,
+                resolved=resolved,
+                experiment_variant=experiment_variant,
+            )
+        return self._finalize(
+            _safe_result(
+                text,
+                apply_default,
+                resolved=resolved,
+                validated=False,
+                rejection_reason="improver timeout",
+            ),
+            text,
+            resolved=resolved,
+            experiment_variant=experiment_variant,
+        )
+
+    def _resolve_experiment(self, mode: str) -> tuple[str | None, str]:
+        """Return assigned variant id and system prompt (with experiment suffix)."""
+        if not _experiments_enabled(self._engine.store):
+            return None, _SYSTEM_PROMPT
+        from ylang.usage.experiment_config import resolve_experiment_config
         from ylang.usage.experiments import ExperimentStore
 
         store = ExperimentStore(self._engine.store._connection)
         variant = store.assign_variant(f"improver-{mode}")
-        return variant.variant_id if variant is not None else None
+        if variant is None:
+            return None, _SYSTEM_PROMPT
+        config = resolve_experiment_config(variant.config_hash)
+        system_prompt = _SYSTEM_PROMPT + config.system_prompt_suffix
+        return variant.variant_id, system_prompt
 
     def _finalize(
         self,
@@ -285,12 +690,29 @@ class Improver:
         result: ImprovementResult,
         resolved: ResolvedCursorMode,
         model: str,
+        *,
+        deadline: float | None = None,
+        timeout_sec: float = _DEFAULT_IMPROVER_TIMEOUT_SEC,
     ) -> ImprovementResult:
         """Optional second-pass critique for validated improvements."""
-        if not _critique_enabled() or not result.validated:
+        if not _critique_enabled(self._engine.store) or not result.validated:
             return result
         if result.improved.strip() == text.strip():
             return result
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            min_remaining = max(
+                _CRITIQUE_MIN_REMAINING_SEC,
+                timeout_sec * _CRITIQUE_MIN_REMAINING_FRACTION,
+            )
+            if remaining < min_remaining:
+                logger.info(
+                    "improve_prompt skipping critique; %.1fs left of timeout budget "
+                    "(need %.1fs)",
+                    max(0.0, remaining),
+                    min_remaining,
+                )
+                return result
         completion = self._engine.complete(
             [
                 {"role": "system", "content": _CRITIQUE_SYSTEM},
@@ -303,7 +725,7 @@ class Improver:
                 },
             ],
             activity=f"improve:{resolved.mode}",
-            model=model,
+            model=resolve_improver_explicit_model(model),
             response_format={"type": "json_object"},
             improver_fired=False,
         )
@@ -321,12 +743,10 @@ class Improver:
             if validated:
                 return critiqued
         except Exception:
-            logger.debug("critique pass failed; keeping original improvement", exc_info=True)
+            logger.debug(
+                "critique pass failed; keeping original improvement", exc_info=True
+            )
         return result
-
-
-_EMPTY_FACTS = "(No project facts stored.)"
-_EMPTY_REFERENCE_PROMPTS = "(No matching reference prompts found.)"
 
 
 def _build_user_message(
@@ -348,674 +768,17 @@ def _build_user_message(
         if previous:
             parts.append(f"Mode handoff: previous={previous}, current={resolved.mode}")
     if context is not None:
-        conversation = context.conversation_block or _EMPTY_CONVERSATION
-        facts = context.facts_block or _EMPTY_FACTS
-        reference_prompts = context.reference_prompts_block or _EMPTY_REFERENCE_PROMPTS
-        parts.append(f"Recent conversation:\n{conversation}")
-        parts.append(f"Project facts:\n{facts}")
-        parts.append(f"Reference prompts:\n{reference_prompts}")
+        if (
+            context.conversation_block
+            and context.conversation_block != _EMPTY_CONVERSATION
+        ):
+            parts.append(f"Recent conversation:\n{context.conversation_block}")
+        if context.facts_block:
+            parts.append(f"Project facts:\n{context.facts_block}")
+        if context.reference_prompts_block:
+            parts.append(f"Reference prompts:\n{context.reference_prompts_block}")
         if context.blocks_block:
             parts.append(f"Prompt blocks:\n{context.blocks_block}")
     parts.append(f"Text:\n{text}")
     return "\n\n".join(parts)
 
-
-def _safe_result(
-    text: str,
-    auto_apply_default: bool,
-    *,
-    resolved: ResolvedCursorMode,
-    validated: bool = True,
-    rejection_reason: str | None = None,
-) -> ImprovementResult:
-    return ImprovementResult(
-        original=text,
-        improved=text,
-        changes=[],
-        auto_apply_default=auto_apply_default,
-        validated=validated,
-        rejection_reason=rejection_reason,
-        cursor_mode=resolved.mode,
-        mode_source=resolved.source,
-    )
-
-
-def _parse_model_output(raw: str) -> tuple[str, list[Change]]:
-    data = _loads_improver_payload(_extract_json_payload(raw))
-    improved = str(data.get("improved", ""))
-    changes: list[Change] = []
-    for item in data.get("changes", []):
-        kind = str(item.get("kind", ""))
-        if kind not in _ALLOWED_KINDS:
-            msg = f"invalid change kind: {kind}"
-            raise ValueError(msg)
-        changes.append(
-            Change(
-                kind=kind,  # type: ignore[arg-type]
-                description=str(item.get("description", "")),
-                before=str(item.get("before", "")),
-                after=str(item.get("after", "")),
-            )
-        )
-    return improved, changes
-
-
-def _loads_improver_payload(payload: str) -> dict[str, object]:
-    """Parse improver JSON, with a regex fallback for multiline model output."""
-    try:
-        data = json.loads(payload)
-    except json.JSONDecodeError:
-        data = _extract_improver_fields(payload)
-    if not isinstance(data, dict):
-        msg = "model output must be a JSON object"
-        raise ValueError(msg)
-    return data
-
-
-def _decode_improved_json_string(raw: str) -> str:
-    """Unescape a JSON string value recovered from broken model output."""
-    return raw.replace("\\n", "\n").replace('\\"', '"')
-
-
-def _extract_changes_array(payload: str) -> tuple[list[object], int | None]:
-    """Return (changes, match_start) from broken JSON; empty list when absent."""
-    for pattern in (
-        r'"changes"\s*:\s*(\[[\s\S]*?\])\s*,\s*"improved"\s*:',
-        r'"changes"\s*:\s*(\[[\s\S]*?\])\s*\}',
-        r'"changes"\s*:\s*(\[[\s\S]*\])\s*\}?\s*$',
-    ):
-        match = re.search(pattern, payload)
-        if match is not None:
-            return json.loads(match.group(1)), match.start()
-    return [], None
-
-
-def _extract_improved_from_payload(payload: str, *, before: str | None = None) -> str | None:
-    """Extract the improved string from a (possibly broken) JSON payload."""
-    head = before if before is not None else payload
-    improved_match = re.search(
-        r'"improved"\s*:\s*"(.*?)"\s*,\s*"changes"\s*:',
-        head,
-        re.DOTALL,
-    )
-    if improved_match is not None:
-        return _decode_improved_json_string(improved_match.group(1))
-    improved_match = re.search(
-        r'"changes"\s*:\s*\[[\s\S]*?\]\s*,\s*"improved"\s*:\s*"(.*?)"\s*\}?\s*$',
-        payload,
-        re.DOTALL,
-    )
-    if improved_match is not None:
-        return _decode_improved_json_string(improved_match.group(1))
-    loose = re.search(r'"improved"\s*:\s*"([\s\S]*)', head)
-    if loose is None:
-        return None
-    improved_raw = loose.group(1)
-    for sentinel in ('",\n  "changes"', '", "changes"', '",\n"changes"', '",'):
-        if sentinel in improved_raw:
-            improved_raw = improved_raw.split(sentinel, 1)[0]
-            break
-    improved_raw = improved_raw.rstrip('"')
-    if not improved_raw:
-        return None
-    return _decode_improved_json_string(improved_raw)
-
-
-def _extract_improver_fields(payload: str) -> dict[str, object]:
-    """Recover improved/changes when json.loads fails on multiline strings."""
-    changes, changes_start = _extract_changes_array(payload)
-    head = payload[:changes_start] if changes_start is not None else payload
-    improved = _extract_improved_from_payload(payload, before=head)
-    if improved is None:
-        msg = "could not locate improved field in model output"
-        raise ValueError(msg)
-    return {"improved": improved, "changes": changes}
-
-
-def _try_parse_plain_spec(raw: str) -> str | None:
-    """Return markdown spec text when the model skipped JSON entirely."""
-    text = _extract_json_payload(raw).strip()
-    if text.startswith("{") or text.startswith("["):
-        return None
-    if text.startswith("## ") or "\n## " in text:
-        if _has_structured_expansion(text):
-            return text
-    return None
-
-
-def _is_model_prose_response(raw: str) -> bool:
-    """Return True when the model replied in plain prose instead of JSON or a spec."""
-    text = _extract_json_payload(raw).strip()
-    if not text:
-        return False
-    if text.startswith("{") or text.startswith("["):
-        return False
-    if text.startswith("## ") or "\n## " in text:
-        return False
-    return True
-
-
-def _try_salvage_parse_failure(
-    original: str,
-    raw: str,
-    auto_apply_default: bool,
-    *,
-    resolved: ResolvedCursorMode,
-) -> ImprovementResult | None:
-    """Salvage structured output when JSON parsing fails."""
-    if _is_model_prose_response(raw):
-        return _safe_result(original, auto_apply_default, resolved=resolved)
-    plain = _try_parse_plain_spec(raw)
-    if plain is None:
-        return None
-    if not _numbers_preserved(original, plain) or not _quoted_spans_preserved(original, plain):
-        return None
-    if _is_restructured_spec(original, plain):
-        return _salvage_result(
-            original,
-            plain,
-            auto_apply_default,
-            resolved=resolved,
-            description="Salvaged markdown spec from non-JSON model output",
-        )
-    return _try_salvage(original, plain, auto_apply_default, resolved=resolved)
-
-
-_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
-
-
-def _extract_json_payload(raw: str) -> str:
-    """Strip markdown fences and whitespace so json.loads can parse model output."""
-    text = raw.strip()
-    if not text:
-        msg = "model returned empty content"
-        raise ValueError(msg)
-    match = _JSON_FENCE_RE.search(text)
-    if match:
-        return match.group(1).strip()
-    return text
-
-
-def _has_scope_changes(changes: list[Change]) -> bool:
-    return any(change.kind == "scope" for change in changes)
-
-
-def _is_restructuring(original: str, improved: str, changes: list[Change]) -> bool:
-    """Return True when the model substantially restructured the prompt."""
-    if not original:
-        return False
-    if _has_scope_changes(changes):
-        return True
-    if any(change.kind == "format" for change in changes):
-        return len(improved) > len(original) * 1.2
-    return len(improved) > len(original) * 1.5
-
-
-def _significant_words(text: str) -> set[str]:
-    """Return lowercased tokens of four or more characters for intent matching."""
-    return set(_WORD_RE.findall(text.lower()))
-
-
-def _intent_preserved(original: str, improved: str, *, min_ratio: float = 0.55) -> bool:
-    """Return True when improved text still reflects the original ask."""
-    normalized_original = " ".join(original.split())
-    normalized_improved = " ".join(improved.split())
-    if normalized_original in normalized_improved:
-        return True
-    prefix_len = 80 if len(normalized_original) >= 200 else 40
-    prefix = normalized_original[: min(len(normalized_original), prefix_len)]
-    if prefix and normalized_improved.startswith(prefix):
-        return True
-    words = _significant_words(original)
-    if not words:
-        return True
-    overlap = len(words & _significant_words(improved)) / len(words)
-    return overlap >= min_ratio
-
-
-def _has_structured_expansion(improved: str) -> bool:
-    """Return True when improved text uses headings or list structure."""
-    if "##" in improved:
-        return True
-    if improved.count("\n- ") >= 2:
-        return True
-    return improved.count("\n1.") >= 1
-
-
-def _is_restructured_spec(original: str, improved: str) -> bool:
-    """Return True when improved looks like a markdown agent spec."""
-    if improved == original:
-        return False
-    if improved.count("##") >= 2:
-        return True
-    if improved.startswith("## ") or "\n## " in improved:
-        return True
-    growth_threshold = 1.1 if len(original) >= 300 else 1.2
-    if len(improved) <= len(original) * growth_threshold:
-        return False
-    if len(original) >= 300 and _has_structured_expansion(improved):
-        return True
-    return False
-
-
-def _is_minor_clarity_edit(original: str, improved: str) -> bool:
-    """Return True for tiny typo/clarity fixes that must cite changes[]."""
-    if _has_structured_expansion(improved) and not _has_structured_expansion(original):
-        return False
-    if improved.count("##") > original.count("##"):
-        return False
-    ratio = len(improved) / max(len(original), 1)
-    if ratio > 1.2 or ratio < 0.8:
-        return False
-    orig_words = _significant_words(original)
-    imp_words = _significant_words(improved)
-    if len(orig_words.symmetric_difference(imp_words)) > 3:
-        return False
-    return True
-
-
-def _salvage_omitted_changes(
-    original: str,
-    improved: str,
-    auto_apply_default: bool,
-    *,
-    resolved: ResolvedCursorMode,
-) -> ImprovementResult | None:
-    """Accept safe model output when the model omitted changes[]."""
-    if improved.strip() == original.strip():
-        return None
-    if _is_minor_clarity_edit(original, improved):
-        return None
-    restructuring = _is_restructured_spec(original, improved) or _has_structured_expansion(
-        improved
-    )
-    if restructuring:
-        min_ratio = 0.25 if len(original) >= 200 else 0.35
-    elif len(original) >= 200:
-        min_ratio = 0.25
-    else:
-        min_ratio = 0.55
-    if not _intent_preserved(original, improved, min_ratio=min_ratio):
-        return None
-    if not _numbers_preserved(original, improved):
-        return None
-    if not _quoted_spans_preserved(original, improved):
-        return None
-    if not restructuring and not _modals_preserved(original, improved):
-        return None
-    if not _length_ok(original, improved, [], resolved=resolved):
-        return None
-    description = (
-        "Accepted restructured spec with omitted changes[]"
-        if restructuring
-        else "Accepted model output with omitted changes[]"
-    )
-    return _salvage_result(
-        original,
-        improved,
-        auto_apply_default,
-        resolved=resolved,
-        description=description,
-    )
-
-
-def _salvage_result(
-    original: str,
-    improved: str,
-    auto_apply_default: bool,
-    *,
-    resolved: ResolvedCursorMode,
-    description: str = "Restructured prompt into agent spec sections",
-) -> ImprovementResult:
-    """Build a validated salvage result for a restructured model output."""
-    return ImprovementResult(
-        original=original,
-        improved=improved,
-        changes=[
-            Change(
-                kind="scope",
-                description=description,
-                before=original,
-                after=improved,
-            )
-        ],
-        auto_apply_default=auto_apply_default,
-        validated=True,
-        rejection_reason=None,
-        cursor_mode=resolved.mode,
-        mode_source=resolved.source,
-    )
-
-
-def _try_salvage(
-    original: str,
-    improved: str,
-    auto_apply_default: bool,
-    *,
-    resolved: ResolvedCursorMode,
-) -> ImprovementResult | None:
-    """Accept a restructured spec when strict change validation is too brittle."""
-    if improved == original:
-        return None
-    restructuring = _is_restructured_spec(original, improved) or _has_structured_expansion(
-        improved
-    )
-    if restructuring:
-        min_ratio = 0.25 if len(original) >= 200 else 0.35
-    elif len(original) >= 200:
-        min_ratio = 0.25
-    else:
-        min_ratio = 0.45
-    if not _intent_preserved(original, improved, min_ratio=min_ratio):
-        return None
-    if not _numbers_preserved(original, improved):
-        return None
-    if not _quoted_spans_preserved(original, improved):
-        return None
-    if _is_restructured_spec(original, improved):
-        return _salvage_result(original, improved, auto_apply_default, resolved=resolved)
-    if resolved.mode in _SALVAGE_MODES:
-        if len(improved) >= len(original) * 1.05 and _has_structured_expansion(improved):
-            if len(original) >= 200:
-                return _salvage_result(
-                    original,
-                    improved,
-                    auto_apply_default,
-                    resolved=resolved,
-                    description="Salvaged structured expansion for long agent prompt",
-                )
-            if len(original) < 80:
-                return _salvage_result(
-                    original,
-                    improved,
-                    auto_apply_default,
-                    resolved=resolved,
-                    description="Salvaged structured expansion for short vague prompt",
-                )
-    return None
-
-
-def _is_vague_short_prompt(text: str) -> bool:
-    """Return True for underspecified short asks that need a spec skeleton."""
-    stripped = text.strip()
-    if not stripped:
-        return False
-    return any(pattern.search(stripped) for pattern in _VAGUE_SHORT_PROMPT_RES)
-
-
-def _fallback_short_prompt_expansion(
-    original: str,
-    auto_apply_default: bool,
-    *,
-    resolved: ResolvedCursorMode,
-    require_vague: bool = False,
-) -> ImprovementResult | None:
-    """Build a deterministic spec skeleton for very short prompts."""
-    stripped = original.strip()
-    if not stripped or len(stripped) > _SHORT_PROMPT_MAX_LEN:
-        return None
-    if require_vague and not _is_vague_short_prompt(stripped):
-        return None
-    if resolved.mode in ("ask", "plan"):
-        improved = (
-            f"## Question\n{original.strip()}\n\n"
-            "## Context\n- Expand only what the user asked; do not invent scope.\n\n"
-            "## Answer format\n- Direct, concise response"
-        )
-    elif resolved.mode == "debug":
-        improved = (
-            f"## Symptom\n{original.strip()}\n\n"
-            "## Investigation plan\n"
-            "- Reproduce and isolate the failure\n"
-            "- Confirm root cause before fixing\n\n"
-            "## Success criteria\n- Issue resolved with evidence"
-        )
-    elif resolved.mode == "multitask":
-        improved = (
-            f"## Goal\n{original.strip()}\n\n"
-            "## Workstreams\n"
-            "1. Inventory all work implied by the request\n"
-            "2. Execute remaining items in parallel where safe\n\n"
-            "## Dependencies\n"
-            "- Resolve ambiguous items before parallel execution\n\n"
-            "## Definition of done\n"
-            "- All implied work complete"
-        )
-    else:
-        improved = (
-            f"## Goal\n{original.strip()}\n\n"
-            "## Deliverables\n"
-            "- Complete all work implied by the request\n\n"
-            "## Test plan\n"
-            "- Run relevant tests and lint/typecheck when code changes\n\n"
-            "## Definition of done\n"
-            "- Request fully satisfied with evidence"
-        )
-    return _salvage_result(
-        original,
-        improved,
-        auto_apply_default,
-        resolved=resolved,
-        description="Deterministic expansion for short vague prompt",
-    )
-
-
-def _validate(
-    original: str,
-    improved: str,
-    changes: list[Change],
-    auto_apply_default: bool,
-    *,
-    resolved: ResolvedCursorMode,
-) -> tuple[ImprovementResult, bool]:
-    """Run safety checks; fall back to original on failure."""
-    if original == improved and not changes:
-        return _safe_result(original, auto_apply_default, resolved=resolved), True
-    if improved != original and not changes:
-        salvaged = _salvage_omitted_changes(
-            original,
-            improved,
-            auto_apply_default,
-            resolved=resolved,
-        )
-        if salvaged is not None:
-            return salvaged, True
-        return _safe_result(
-            original,
-            auto_apply_default,
-            resolved=resolved,
-            validated=False,
-            rejection_reason="improved text changed but changes[] is empty",
-        ), False
-    reason = _validation_failure_reason(original, improved, changes, resolved=resolved)
-    if reason is not None:
-        return _safe_result(
-            original,
-            auto_apply_default,
-            resolved=resolved,
-            validated=False,
-            rejection_reason=reason,
-        ), False
-    try:
-        replayed = _replay(original, changes)
-    except ValueError:
-        if not _has_scope_changes(changes):
-            return _safe_result(
-                original,
-                auto_apply_default,
-                resolved=resolved,
-                validated=False,
-                rejection_reason="change replay failed without scope changes",
-            ), False
-        replayed = None
-    if replayed is not None and replayed != improved:
-        logger.debug(
-            "improve_prompt: improved differs from replay (%r vs %r); accepting improved",
-            replayed,
-            improved,
-        )
-    return ImprovementResult(
-        original=original,
-        improved=improved,
-        changes=changes,
-        auto_apply_default=auto_apply_default,
-        validated=True,
-        rejection_reason=None,
-        cursor_mode=resolved.mode,
-        mode_source=resolved.source,
-    ), True
-
-
-def _validation_failure_reason(
-    original: str,
-    improved: str,
-    changes: list[Change],
-    *,
-    resolved: ResolvedCursorMode,
-) -> str | None:
-    """Return a short reason when validation fails, else None."""
-    if improved != original and not changes:
-        return "improved text changed but changes[] is empty"
-    if not _length_ok(original, improved, changes, resolved=resolved):
-        return "length ratio out of bounds"
-    if not _numbers_preserved(original, improved):
-        return "numbers changed"
-    if not _quoted_spans_preserved(original, improved):
-        return "quoted spans changed"
-    restructuring = _is_restructuring(original, improved, changes)
-    if not restructuring:
-        if not _modals_preserved(original, improved):
-            return "modal verbs changed"
-        if not _sequencing_preserved(original, improved, changes):
-            return "sequencing words changed"
-    for change in changes:
-        if change.kind not in _ALLOWED_KINDS:
-            return f"invalid change kind: {change.kind}"
-        if not _change_before_valid(original, change):
-            return "change.before not anchored to original"
-        if change.kind == "example" and not _PLACEHOLDER_RE.search(change.after):
-            return "example change missing placeholder"
-    if not _scope_preserves_intent(original, improved, changes):
-        return "scope expansion dropped original intent"
-    return None
-
-
-def _change_before_valid(original: str, change: Change) -> bool:
-    """Return True when change.before anchors to the original text."""
-    if change.kind == "scope" and change.before == original:
-        return True
-    if not change.before:
-        return False
-    return change.before in original
-
-
-def _scope_preserves_intent(original: str, improved: str, changes: list[Change]) -> bool:
-    """Ensure scope expansions keep the original ask visible in improved."""
-    if not _has_scope_changes(changes):
-        return True
-    if any(
-        change.kind == "scope" and change.before.strip() == original.strip()
-        for change in changes
-    ):
-        return True
-    min_ratio = 0.45 if len(original) >= 200 else 0.55
-    return _intent_preserved(original, improved, min_ratio=min_ratio)
-
-
-def _length_ok(
-    original: str,
-    improved: str,
-    changes: list[Change],
-    *,
-    resolved: ResolvedCursorMode,
-) -> bool:
-    """Allow generous growth for spec rewrites; keep tight bounds for minor edits."""
-    if not original:
-        return True
-    if len(improved) > 16_000:
-        return False
-    ratio = len(improved) / len(original)
-    task_class = detect_task_class(original)
-    restructuring = _is_restructuring(original, improved, changes) or _is_restructured_spec(
-        original, improved
-    )
-    if restructuring or task_class == "analysis" or resolved.mode == "plan":
-        max_ratio = min(16_000 / len(original), 200.0)
-        min_ratio = 0.2 if len(original) < 80 else 0.35
-        return min_ratio <= ratio <= max_ratio
-    if len(original) < 80:
-        # Minor clarity edits can shorten informal prompts (e.g. "let's do all" → "do all").
-        min_ratio = 0.25 if changes else 0.5
-        return min_ratio <= ratio <= 3.0
-    return 0.8 <= ratio <= 1.5
-
-
-def _extract_numbers(text: str) -> list[str]:
-    """Extract numeric literals, ignoring timestamps and HTML comment metadata."""
-    scrubbed = _HTML_COMMENT_RE.sub("", text)
-    scrubbed = _ISO_TIMESTAMP_RE.sub("", scrubbed)
-    return _NUMBER_RE.findall(scrubbed.replace(",", ""))
-
-
-def _numbers_preserved(original: str, improved: str) -> bool:
-    """Ensure every distinct numeric literal from the original still appears in improved."""
-    orig_nums = set(_extract_numbers(scrub_file_reference_numbers(original)))
-    if not orig_nums:
-        return True
-    imp_nums = set(_extract_numbers(improved))
-    return orig_nums <= imp_nums
-
-
-def _extract_quoted_spans(text: str) -> list[str]:
-    """Extract double-quoted, backtick, and single-quoted spans (not contractions)."""
-    spans: list[str] = []
-    spans.extend(_DOUBLE_QUOTED_RE.findall(text))
-    spans.extend(_BACKTICK_QUOTED_RE.findall(text))
-    spans.extend(_SINGLE_QUOTED_RE.findall(text))
-    return spans
-
-
-def _quoted_spans_preserved(original: str, improved: str) -> bool:
-    """Ensure quoted/backtick spans from the original still appear in improved."""
-    orig = Counter(_extract_quoted_spans(original))
-    if not orig:
-        return True
-    imp = Counter(_extract_quoted_spans(improved))
-    return all(imp[span] >= count for span, count in orig.items())
-
-
-def _modals_preserved(original: str, improved: str) -> bool:
-    orig = [word.lower() for word in _MODAL_RE.findall(original)]
-    imp = [word.lower() for word in _MODAL_RE.findall(improved)]
-    return sorted(orig) == sorted(imp)
-
-
-def _sequencing_preserved(
-    original: str,
-    improved: str,
-    changes: list[Change],
-) -> bool:
-    orig = [word.lower() for word in _SEQ_RE.findall(original)]
-    imp = [word.lower() for word in _SEQ_RE.findall(improved)]
-    if sorted(orig) == sorted(imp):
-        return True
-    return all(change.kind in ("format", "scope") for change in changes)
-
-
-def _replay(original: str, changes: list[Change]) -> str:
-    result = original
-    non_scope = [change for change in changes if change.kind != "scope"]
-    ordered = sorted(
-        non_scope,
-        key=lambda change: (len(change.before), original.find(change.before)),
-    )
-    for change in ordered:
-        if change.before not in result:
-            msg = "change.before not found during replay"
-            raise ValueError(msg)
-        result = result.replace(change.before, change.after, 1)
-    for change in changes:
-        if change.kind == "scope" and change.before == original:
-            result = change.after
-            break
-    return result

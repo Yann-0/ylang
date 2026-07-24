@@ -1,14 +1,20 @@
 # Ylang — Deep-Dive Audit & Roadmap
 
-> **Historical document (2026-06-30).** This audit predates the live OpenAI gateway, 11 MCP tools, consolidated SQLite connection, expanded test suite, and **Phase 4 (v0.2.0)** shipping. For current status see [README.md](../README.md#status), [backlog-shipped.md](backlog-shipped.md), and [architecture.md](architecture.md).
+> **Historical document (2026-06-30 / updated pointers 2026-07-20).**  
+> Snapshot of early Phase 1 (6 MCP tools, ~26 tests). **Do not treat counts or gaps below as current.**  
+> **Current truth (v0.5.2+):** [architecture.md](architecture.md), [console.md](console.md), [mcp-tools.md](mcp-tools.md), [README.md](../README.md), [backlog-shipped.md](backlog-shipped.md), [quality-charter.md](quality-charter.md).
 
-## Phase 4 status (2026-07-04)
+## Current architecture (pointer)
 
-All Phase 4 backlog items shipped in v0.2.0 — see [backlog-shipped.md](backlog-shipped.md#phase-4-2026-07-04--v020). This section supersedes remaining gaps listed below for gateway streaming, dashboard, and pattern CLI.
+As of v0.5.2 the product has three HTTP faces (MCP `/mcp`, OpenAI gateway `/v1/*`, admin console `/console/*`), 17+ MCP tools, runtime settings, experiments, Operator Hub, and a full test suite (~430+ non-`llm_e2e` tests). Quality soft limits and the improvement loop live in [quality-charter.md](quality-charter.md) and [quality-loop.md](quality-loop.md).
+
+## Phase 4 status (2026-07-04) — historical
+
+All Phase 4 backlog items shipped in v0.2.0 — see [backlog-shipped.md](backlog-shipped.md#phase-4-2026-07-04--v020).
 
 **Date:** 2026-06-30  
-**Scope:** Phase 1 codebase at `src/ylang/`  
-**Status:** 26 tests passing; 6 MCP tools live; local-first SQLite storage
+**Scope:** Phase 1 codebase at `src/ylang/` (historical)  
+**Status (then):** 26 tests passing; 6 MCP tools live; local-first SQLite storage
 
 ---
 
@@ -201,7 +207,7 @@ For analysis tasks, refine the prompt manually with: target repo, deliverable fo
 
 Templates now support `visibility` (`public`/`private`, default private for user/learned, public for seeds) and `tags` for retrieval. Pass `use_context=false` to opt out (backward compatible).
 
-**Cursor mode optimization:** `improve_prompt` resolves Cursor mode (`agent`, `plan`, `debug`, `ask`, `multitask`) from optional `mode`, the `tool` name, or prompt keywords. Mode-specific guidance is injected into the LLM user message; usage logs `improve:{mode}`; model routing maps ask/plan → `reason`, agent/debug/multitask → `code`. Response includes `cursor_mode` and `mode_source`.
+**Cursor mode optimization:** `improve_prompt` resolves Cursor mode (`agent`, `plan`, `debug`, `ask`, `multitask`) from optional `mode`, the `tool` name, or prompt keywords. Mode-specific guidance is injected into the LLM user message; usage logs `improve:{mode}`; model routing maps all `improve:*` → `improve` (`YLANG_MODELS_IMPROVE`). Response includes `cursor_mode` and `mode_source`.
 
 ---
 

@@ -7,7 +7,15 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from ylang.usage.store import _require_utc, _to_iso
+from ylang.core.sqlite_rows import (
+    SqliteRow,
+    cell,
+    cell_int,
+    cell_optional_int,
+    cell_optional_str,
+    cell_str,
+)
+from ylang.usage.store import UsageWindow, _require_utc, _to_iso
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,26 +129,41 @@ class FeedbackStore:
             """,
             (limit,),
         )
-        events: list[FeedbackEvent] = []
-        for row in cursor.fetchall():
-            parsed = datetime.fromisoformat(str(row[1]))
-            _require_utc(parsed)
-            metadata_raw = row[7]
-            metadata: dict[str, object] = {}
-            if metadata_raw:
-                loaded = json.loads(str(metadata_raw))
-                if isinstance(loaded, dict):
-                    metadata = loaded
-            events.append(
-                FeedbackEvent(
-                    id=int(row[0]),
-                    timestamp=parsed,
-                    event_type=str(row[2]),
-                    original_text=str(row[3]) if row[3] is not None else None,
-                    submitted_text=str(row[4]) if row[4] is not None else None,
-                    edit_distance=int(row[5]) if row[5] is not None else None,
-                    usage_id=int(row[6]) if row[6] is not None else None,
-                    metadata=metadata,
-                )
-            )
-        return events
+        return [_row_to_event(row) for row in cursor.fetchall()]
+
+    def recall_edits(self, window: UsageWindow) -> list[FeedbackEvent]:
+        """Return ``prompt_edit`` events with timestamps in ``[since, until)``."""
+        cursor = self._connection.execute(
+            """
+            SELECT id, timestamp, event_type, original_text, submitted_text,
+                   edit_distance, usage_id, metadata_json
+            FROM feedback_events
+            WHERE event_type = 'prompt_edit'
+              AND timestamp >= ? AND timestamp < ?
+            ORDER BY id DESC
+            """,
+            (_to_iso(window.since), _to_iso(window.until)),
+        )
+        return [_row_to_event(row) for row in cursor.fetchall()]
+
+
+def _row_to_event(row: SqliteRow) -> FeedbackEvent:
+    """Map one ``feedback_events`` SELECT row to :class:`FeedbackEvent`."""
+    parsed = datetime.fromisoformat(cell_str(row, 1))
+    _require_utc(parsed)
+    metadata_raw = cell(row, 7)
+    metadata: dict[str, object] = {}
+    if metadata_raw:
+        loaded = json.loads(str(metadata_raw))
+        if isinstance(loaded, dict):
+            metadata = loaded
+    return FeedbackEvent(
+        id=cell_int(row, 0),
+        timestamp=parsed,
+        event_type=cell_str(row, 2),
+        original_text=cell_optional_str(row, 3),
+        submitted_text=cell_optional_str(row, 4),
+        edit_distance=cell_optional_int(row, 5),
+        usage_id=cell_optional_int(row, 6),
+        metadata=metadata,
+    )

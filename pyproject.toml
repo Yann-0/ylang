@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ylang"
-version = "0.1.0"
-description = "Personal AI efficiency layer – MCP server (Phase 1)"
+version = "0.5.2"
+description = "Personal AI efficiency layer – MCP server, gateway, and admin console"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
@@ -13,8 +13,8 @@ keywords = ["mcp", "llm", "prompt-engineering", "cursor", "litellm"]
 authors = [{ name = "Yann" }]
 dependencies = [
     "mcp>=1.27,<2",
-    "litellm",
-    "pydantic",
+    "litellm>=1.40,<2",
+    "pydantic>=2.6,<3",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +23,7 @@ dev = [
     "pytest-asyncio>=0.24",
     "ruff>=0.9",
     "httpx2>=2",
+    "pyright>=1.1.390",
 ]
 
 [tool.ruff]
@@ -32,11 +33,23 @@ src = ["src", "tests"]
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["E402"]
 
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+venvPath = "."
+venv = ".venv"
+
 [project.scripts]
 ylang = "ylang.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ylang"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/ylang/console/static" = "ylang/console/static"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

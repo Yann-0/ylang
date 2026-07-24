@@ -80,13 +80,44 @@ sudo systemctl enable --now ylang
 sudo systemctl status ylang
 ```
 
-After code changes:
+**Hot-reload vs restart:** Console **Parameters** (`runtime_settings` in SQLite) apply on the next request — no restart. Env-file changes (`ylang.env`) and **code deploys** need a process restart:
 
 ```bash
 sudo systemctl restart ylang
 ```
 
+After readiness / Control Center / template-archive deploys, confirm:
+
+```bash
+curl -s http://127.0.0.1:8787/health
+# With auth: GET /console/control → 200 and “Effective config” / “Store inventory”
+```
+
+If `/console/control` returns **404**, the unit is still running pre-restart code (runtime SQLite settings may already be hot). Restart is required for new routes and archived-template retrieval exclusion.
+
 Do **not** run `python -m ylang` manually while the service owns port 8787.
+
+### LAN / network console access
+
+The HTTP server binds to `0.0.0.0:8787` by default (`YLANG_HOST=0.0.0.0`). Other machines on the network reach the console at:
+
+```
+http://<hostname-or-ip>:8787/console/login
+```
+
+Checklist:
+
+| Check | Command / action |
+|-------|------------------|
+| Service listening on all interfaces | `ss -tlnp \| grep 8787` → `0.0.0.0:8787` |
+| Login page public (not 401) | `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8787/console/login` → **200** |
+| Code deployed | `sudo systemctl restart ylang` after pulling new code |
+| Firewall | Allow inbound TCP **8787** (ufw, firewalld, or cloud security group) |
+| Hostname | Use the machine's real hostname (`hostname`) — typos cause connection errors |
+
+`ylang doctor` reports bind address, running service version, and whether `/console/login` returns 200. A **401** on login usually means an old process (pre-v0.5) is still running — restart the systemd unit.
+
+For TLS or auth beyond a shared bearer token, put nginx or Caddy in front (see below).
 
 ### Hardening notes
 
@@ -300,6 +331,28 @@ set -a && source /srv/ylang/ylang.env && set +a
 ylang usage digest --last-days 7
 ylang patterns apply
 ```
+
+### Scheduled usage digest (cron + optional desktop notify)
+
+Digests are **CLI/cron only** — the admin console does not email or push. Enable
+`usage_digest_enabled` in Settings so digest runs attempt a Linux desktop
+notification when a graphical session is available.
+
+```bash
+# Weekly Monday 09:00 (shared service DB)
+0 9 * * 1 sg ylang -c 'set -a && source /srv/ylang/ylang.env && set +a && ylang usage digest --last-days 7'
+
+# Force a notify attempt (graceful skip without DISPLAY/notify-send):
+ylang usage digest --last-days 7 --notify
+
+# Skip notify even when usage_digest_enabled is on:
+ylang usage digest --last-days 7 --no-notify
+```
+
+For desktop notify from cron, the job must run in a user session with
+`DISPLAY` (or `WAYLAND_DISPLAY`) exported and `notify-send` installed
+(e.g. `libnotify-bin`). Headless service users skip notify gracefully and
+still print the digest to stdout (capture with cron mail or a log redirect).
 
 Manual equivalent (if you cannot run the script):
 

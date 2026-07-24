@@ -12,9 +12,19 @@ from ylang.core import Engine
 from ylang.core.stores import open_stores
 from ylang.improver import Improver
 from ylang.library.pattern_detector import UsagePatternDetector
-from ylang.library.patterns import register_pattern_detector
+from ylang.library.patterns import register_pattern_detector, register_pattern_detector_store
 from ylang.mcp.deps import YlangDeps
 from ylang.mcp.server import create_server
+
+
+@pytest.fixture(autouse=True)
+def _clear_improver_cache() -> None:
+    """Prevent cross-test pollution from the module-level improver cache."""
+    from ylang.improver.improver import clear_improve_cache
+
+    clear_improve_cache()
+    yield
+    clear_improve_cache()
 
 
 @pytest.fixture
@@ -27,6 +37,7 @@ def db_path(tmp_path: Path) -> Path:
 def ylang_deps(db_path: Path) -> Iterator[YlangDeps]:
     """Wired backends matching production MCP startup."""
     stores = open_stores(db_path)
+    register_pattern_detector_store(stores.store)
     register_pattern_detector(UsagePatternDetector(stores.store))
     engine = Engine(stores.store, surface="mcp")
     improver = Improver(engine)

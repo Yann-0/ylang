@@ -68,11 +68,22 @@ erDiagram
         INTEGER active
         TEXT created_at
     }
+
+    runtime_settings {
+        TEXT key PK
+        TEXT value
+        TEXT updated_at
+    }
+    improver_cache {
+        TEXT cache_key PK
+        TEXT result_json
+        REAL expires_at
+    }
 ```
 
 ## Table: usage
 
-Written on **every** `Engine.complete()` or `Engine.complete_stream()` call.
+Written on every `Engine.complete()` or `Engine.complete_stream()` call, except when improver wall-clock timeout cancels a late `complete` usage write (the timeout path records a `success=0` stub with `improver_rejection_reason='improver timeout'` instead; any slipped late success rows are marked `improver timeout orphan` and excluded from improver funnel metrics).
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -117,7 +128,7 @@ One row per logical template (latest version tracked here).
 | `name` | TEXT | Display name |
 | `latest_version` | INTEGER | Highest version number |
 | `updated_at` | TEXT | ISO 8601 UTC |
-| `visibility` | TEXT | `public` or `private` |
+| `visibility` | TEXT | `public`, `private`, or `archived` (archived templates are excluded from improver retrieval by default) |
 | `tags_json` | TEXT | JSON array of tag strings |
 
 ## Table: template_versions
@@ -156,15 +167,41 @@ User-remembered facts for improver context.
 
 Index: `idx_facts_scope_created` on `(scope, created_at DESC)`.
 
+## Table: runtime_settings
+
+Hot-reloadable configuration overrides editable from the admin console without restart.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | TEXT PK | Setting name (see [configuration.md](configuration.md#runtime-settings-console)) |
+| `value` | TEXT | Serialized override value |
+| `updated_at` | TEXT | ISO 8601 UTC |
+
+## Table: improver_cache
+
+Short-lived cache for `improve_prompt` results (60s TTL). Avoids duplicate LLM calls when the same prompt is submitted repeatedly.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `cache_key` | TEXT PK | Hash of improver inputs |
+| `result_json` | TEXT | Serialized `ImprovementResult` JSON |
+| `expires_at` | REAL | Unix timestamp when the row expires |
+
+Expired rows are deleted on read. Tests may call `clear_improver_cache_store()` to reset the table.
+
 ## Schema initialization
 
-Schemas are created idempotently on first store access:
+Base tables are created idempotently on first store access:
 
 - `UsageStore._ensure_schema()`
 - `Library._ensure_schema()` + `ensure_seeds()` for built-in templates
 - `MemoryStore._ensure_schema()`
 
-No separate migration framework in Phase 1 — schema changes are applied via `CREATE TABLE IF NOT EXISTS` on startup.
+Incremental changes use a versioned migration runner in `src/ylang/core/migrations.py`
+(`schema_migrations` table). On open, `run_migrations()` applies any pending versions
+(facts workspace, improver columns, FTS, feedback, experiments, runtime settings,
+improver cache, apply audit log, and related indexes). New installs still get
+`CREATE TABLE IF NOT EXISTS` from stores; upgrades rely on numbered migrations.
 
 ## Files on disk
 

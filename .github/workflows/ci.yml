@@ -25,5 +25,9 @@ jobs:
       - name: Ruff
         run: ruff check .
 
+      - name: Pyright
+        run: pyright
+        continue-on-error: true
+
       - name: Pytest
-        run: pytest
+        run: pytest -m "not llm_e2e"

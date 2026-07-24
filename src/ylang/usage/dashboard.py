@@ -80,7 +80,7 @@ def render_usage_dashboard_html(
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {refresh_meta}
 <title>{escape(title)}</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="/console/static/chart.umd.min.js"></script>
 <style>
   body {{ font-family: system-ui, sans-serif; margin: 2rem; background: #0f1419; color: #e7ecf3; }}
   h1 {{ margin-bottom: 0.25rem; }}
@@ -104,8 +104,8 @@ def render_usage_dashboard_html(
   <div class="card"><div class="label">Total cost</div><div class="value">${summary.total_cost:.4f}</div></div>
   <div class="card"><div class="label">Tokens</div><div class="value">{summary.total_tokens:,}</div></div>
   <div class="card"><div class="label">Success rate</div><div class="value">{summary.success_rate * 100:.1f}%</div></div>
-  {f'<div class="card"><div class="label">Improver accept</div><div class="value">{improver_funnel.accept_rate * 100:.1f}%</div></div>' if improver_funnel else ''}
-  {f'<div class="card"><div class="label">Improver validated</div><div class="value">{improver_funnel.validation_rate * 100:.1f}%</div></div>' if improver_funnel else ''}
+  {f'<div class="card"><div class="label">Improver accept</div><div class="value">{improver_funnel.accept_rate * 100:.1f}%</div></div>' if improver_funnel else ""}
+  {f'<div class="card"><div class="label">Improver validated</div><div class="value">{improver_funnel.validation_rate * 100:.1f}%</div></div>' if improver_funnel else ""}
 </div>
 <section>
   <h2>Cost over time</h2>

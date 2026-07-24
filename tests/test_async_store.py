@@ -40,7 +40,9 @@ def gateway_client(tmp_path: object) -> TestClient:
     return TestClient(app)
 
 
-def test_concurrent_gateway_requests_do_not_deadlock(gateway_client: TestClient) -> None:
+def test_concurrent_gateway_requests_do_not_deadlock(
+    gateway_client: TestClient,
+) -> None:
     mock_result = CompletionResult(
         content="ok",
         model_used="openai/gpt-4o",
@@ -77,7 +79,7 @@ def test_usage_dashboard_route(gateway_client: TestClient) -> None:
     response = gateway_client.get(
         "/usage",
         headers={"Authorization": "Bearer secret-token"},
+        follow_redirects=False,
     )
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    assert "Ylang Usage Dashboard" in response.text
+    assert response.status_code == 302
+    assert response.headers["location"] == "/console/usage"

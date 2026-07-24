@@ -9,7 +9,12 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
-from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from starlette.responses import (
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 
 from ylang.core.engine import Engine
 from ylang.core.types import StreamChunk, StreamCompletionError
@@ -24,11 +29,7 @@ from ylang.gateway.openai import (
     sse_chunk_payload,
     sse_done,
 )
-from ylang.usage.aggregates import daily_usage_buckets, summarize_usage
 from ylang.usage.async_ops import run_store_sync
-from ylang.usage.dashboard import render_usage_dashboard_html
-from ylang.usage.improver_analytics import summarize_improver
-from ylang.usage.store import UsageWindow
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,11 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
     """Register OpenAI-compatible routes on the shared HTTP app."""
     register_health_route(server)
 
+    @server.custom_route("/usage", methods=["GET"])
+    async def usage_dashboard_legacy(request: Request) -> Response:
+        """Redirect legacy ``GET /usage`` to the console usage page."""
+        return RedirectResponse("/console/usage", status_code=302)
+
     @server.custom_route("/v1/chat/completions", methods=["POST"])
     async def chat_completions(request: Request) -> Response:
         try:
@@ -61,7 +67,9 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
             return openai_error_response("Invalid JSON body")
 
         try:
-            messages, request_model, stream, tools, tool_choice = parse_chat_request(body)
+            messages, request_model, stream, tools, tool_choice = parse_chat_request(
+                body
+            )
         except GatewayRequestError as exc:
             return openai_error_response(
                 exc.message,
@@ -95,22 +103,6 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
     @server.custom_route("/v1/models", methods=["GET"])
     async def list_models(_request: Request) -> Response:
         return JSONResponse(models_list_payload())
-
-    @server.custom_route("/usage", methods=["GET"])
-    async def usage_dashboard(_request: Request) -> Response:
-        """Chart.js dashboard for the last 7 days; auto-refreshes every 30 seconds."""
-        window = UsageWindow.last_days(7)
-        summary = await run_store_sync(summarize_usage, engine.store, window)
-        buckets = await run_store_sync(daily_usage_buckets, engine.store, window)
-        funnel = await run_store_sync(summarize_improver, engine.store, window)
-        html = render_usage_dashboard_html(
-            summary,
-            title="Ylang Usage Dashboard",
-            daily_buckets=buckets,
-            improver_funnel=funnel,
-            live=True,
-        )
-        return HTMLResponse(html)
 
 
 async def _complete_response(

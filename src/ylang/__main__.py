@@ -1,7 +1,7 @@
 """Entry point for ``python -m ylang``.
 
 With no subcommand, starts the MCP server (stdio or HTTP per ``Settings``).
-Subcommands: ``usage``, ``patterns``, ``backup``, ``export``, ``import``, ``doctor``.
+Subcommands: ``usage``, ``patterns``, ``backup``, ``export``, ``import``, ``doctor``, ``init``.
 """
 
 from __future__ import annotations
@@ -40,6 +40,10 @@ def main() -> None:
             from ylang.cli.ops import run_doctor_cli
 
             raise SystemExit(run_doctor_cli(sys.argv[2:]))
+        if command == "init":
+            from ylang.cli.init import run_init_cli
+
+            raise SystemExit(run_init_cli(sys.argv[2:]))
 
     parser = argparse.ArgumentParser(prog="ylang", description="Ylang MCP server")
     parser.parse_args(sys.argv[1:] if len(sys.argv) > 1 else [])

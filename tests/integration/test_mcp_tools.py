@@ -71,7 +71,9 @@ async def test_improve_prompt_record_acceptance_only(mcp_server: Any) -> None:
     """record_acceptance_only patches the latest usage row without calling the LLM."""
     mock_response = MagicMock()
     mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps({"improved": "hello", "changes": []})))
+        MagicMock(
+            message=MagicMock(content=json.dumps({"improved": "hello", "changes": []}))
+        )
     ]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
@@ -213,7 +215,9 @@ async def test_improve_prompt_use_context_enriches_message(mcp_server: Any) -> N
     mock_response.usage = MagicMock(prompt_tokens=50)
     mock_response._hidden_params = {"response_cost": 0.001}
 
-    with patch("ylang.core.engine.litellm.completion", return_value=mock_response) as mocked:
+    with patch(
+        "ylang.core.engine.litellm.completion", return_value=mock_response
+    ) as mocked:
         result = await call_mcp_tool(
             mcp_server,
             "improve_prompt",
@@ -263,7 +267,9 @@ async def test_improve_prompt_default_includes_context(mcp_server: Any) -> None:
     mock_response.usage = MagicMock(prompt_tokens=50)
     mock_response._hidden_params = {"response_cost": 0.001}
 
-    with patch("ylang.core.engine.litellm.completion", return_value=mock_response) as mocked:
+    with patch(
+        "ylang.core.engine.litellm.completion", return_value=mock_response
+    ) as mocked:
         result = await call_mcp_tool(
             mcp_server,
             "improve_prompt",
@@ -275,8 +281,7 @@ async def test_improve_prompt_default_includes_context(mcp_server: Any) -> None:
         )
 
     user_message = mocked.call_args.kwargs["messages"][1]["content"]
-    assert "Recent conversation:" in user_message
-    assert "(No prior conversation provided.)" in user_message
+    assert "Recent conversation:" not in user_message
     assert "Project facts:" in user_message
     assert "pytest" in user_message
     assert "Reference prompts:" in user_message
@@ -284,7 +289,9 @@ async def test_improve_prompt_default_includes_context(mcp_server: Any) -> None:
     assert result["context_used"]["facts_count"] >= 1
 
 
-async def test_improve_prompt_use_context_false_disables_context(mcp_server: Any) -> None:
+async def test_improve_prompt_use_context_false_disables_context(
+    mcp_server: Any,
+) -> None:
     """improve_prompt with use_context=false omits context blocks and metadata."""
     await call_mcp_tool(
         mcp_server,
@@ -304,7 +311,9 @@ async def test_improve_prompt_use_context_false_disables_context(mcp_server: Any
     mock_response.usage = MagicMock(prompt_tokens=1)
     mock_response._hidden_params = {"response_cost": 0.0}
 
-    with patch("ylang.core.engine.litellm.completion", return_value=mock_response) as mocked:
+    with patch(
+        "ylang.core.engine.litellm.completion", return_value=mock_response
+    ) as mocked:
         result = await call_mcp_tool(
             mcp_server,
             "improve_prompt",
@@ -367,7 +376,9 @@ async def test_save_template_version_two(mcp_server: Any) -> None:
         {"template_id": "versioned", "version": 1},
     )
     assert recall["body"] == "version one"
-    latest = await call_mcp_tool(mcp_server, "recall_template", {"template_id": "versioned"})
+    latest = await call_mcp_tool(
+        mcp_server, "recall_template", {"template_id": "versioned"}
+    )
     assert latest["body"] == "version two"
 
 
@@ -398,7 +409,10 @@ async def test_recall_template_with_render(mcp_server: Any) -> None:
     )
 
     assert result["found"] is True
-    assert result["rendered"] == "Summarize the following text in about 50 words.\n\nHello world"
+    assert (
+        result["rendered"]
+        == "Summarize the following text in about 50 words.\n\nHello world"
+    )
 
 
 async def test_recall_template_missing_param(mcp_server: Any) -> None:
@@ -689,12 +703,28 @@ async def test_save_learned_template(mcp_server: Any) -> None:
         {
             "template_id": "learned-edit-file",
             "name": "Learned Edit",
-            "body": "Edit {file}",
+            "body": "Edit the file at {file} and update related imports as needed.",
             "params": [{"name": "file", "description": "Path", "default": None}],
         },
     )
     assert result["ok"] is True
     assert result["source"] == "learned"
+
+
+async def test_save_learned_template_rejects_junk(mcp_server: Any) -> None:
+    """save_learned_template rejects underspecified learned bodies."""
+    result = await call_mcp_tool(
+        mcp_server,
+        "save_learned_template",
+        {
+            "template_id": "learned-junk",
+            "name": "Junk",
+            "body": "ok",
+            "params": [],
+        },
+    )
+    assert result["ok"] is False
+    assert "too short" in result["error"]
 
 
 async def test_detect_patterns_with_usage(mcp_server: Any, ylang_deps: Any) -> None:
@@ -715,10 +745,27 @@ async def test_detect_patterns_with_usage(mcp_server: Any, ylang_deps: Any) -> N
             timestamp=now - timedelta(days=1),
             improver_input_sample=prompt if index == 0 else f"{prompt} please",
         )
-    result = await call_mcp_tool(mcp_server, "detect_patterns", {"window_days": 30})
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(
+            message=MagicMock(
+                content=(
+                    '{"body":"Refactor the {module} module with {test_type} tests.",'
+                    '"param_names":["module","test_type"]}'
+                )
+            )
+        )
+    ]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = await call_mcp_tool(mcp_server, "detect_patterns", {"window_days": 30})
     assert result["ok"] is True
     assert len(result["patterns"]) >= 1
     assert len(result["proposals"]) >= 1
+    assert result["patterns"][0].get("proposal") is not None
 
 
 async def test_all_tools_registered(mcp_server: Any) -> None:
@@ -742,4 +789,5 @@ async def test_all_tools_registered(mcp_server: Any) -> None:
         "template_effectiveness_report",
         "optimization_suggestions",
         "record_prompt_edit",
+        "create_experiment_variant",
     }

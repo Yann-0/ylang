@@ -4,15 +4,23 @@ from __future__ import annotations
 
 import re
 
-from ylang.library.effectiveness import blend_retrieval_score
+from ylang.library.effectiveness import (
+    blend_retrieval_score,
+    retrieval_blocked_template_ids,
+)
 from ylang.library.store import Library
 from ylang.library.types import TemplateSummary
+from ylang.usage.store import UsageStore
 
 _WORD_RE = re.compile(r"\w+")
 
 
 def _keywords(text: str) -> set[str]:
-    return {match.group(0).lower() for match in _WORD_RE.finditer(text) if len(match.group(0)) > 2}
+    return {
+        match.group(0).lower()
+        for match in _WORD_RE.finditer(text)
+        if len(match.group(0)) > 2
+    }
 
 
 def _template_keywords(summary: TemplateSummary) -> set[str]:
@@ -31,10 +39,15 @@ def _score_template(
     *,
     effectiveness: dict[str, float] | None = None,
     weight: float = 0.5,
+    preferred_ids: frozenset[str] | None = None,
 ) -> tuple[float, int]:
     """Return (score, public_tiebreak) for ranking."""
     score = 0
-    if cursor_mode and (cursor_mode == summary.template_id or cursor_mode in summary.tags):
+    if preferred_ids and summary.template_id in preferred_ids:
+        score += 5
+    if cursor_mode and (
+        cursor_mode == summary.template_id or cursor_mode in summary.tags
+    ):
         score += 4
     if tool == summary.template_id or tool in summary.tags:
         score += 3
@@ -51,6 +64,19 @@ def _score_template(
     return blended, public_tiebreak
 
 
+def _exclude_retrieval_blocked_templates(
+    summaries: list[TemplateSummary],
+    *,
+    effectiveness: dict[str, float] | None = None,
+    store: UsageStore | None = None,
+) -> list[TemplateSummary]:
+    """Drop zero-accept templates (min samples) and other retrieval blocks."""
+    blocked = retrieval_blocked_template_ids(store, effectiveness)
+    if not blocked:
+        return summaries
+    return [summary for summary in summaries if summary.template_id not in blocked]
+
+
 def select_learned_templates(
     library: Library,
     *,
@@ -58,9 +84,14 @@ def select_learned_templates(
     max_chars: int = 4000,
     effectiveness: dict[str, float] | None = None,
     weight: float = 0.5,
+    store: UsageStore | None = None,
 ) -> list[TemplateSummary]:
     """Return learned templates ranked by effectiveness or recency."""
-    summaries = library.list(source="learned")
+    summaries = _exclude_retrieval_blocked_templates(
+        library.list(source="learned"),
+        effectiveness=effectiveness,
+        store=store,
+    )
     if effectiveness:
         ranked = sorted(
             summaries,
@@ -80,7 +111,9 @@ def select_learned_templates(
         template = library.recall(summary.template_id)
         if template is None:
             continue
-        entry_len = len(template.body) + len(summary.template_id) + len(summary.name) + 32
+        entry_len = (
+            len(template.body) + len(summary.template_id) + len(summary.name) + 32
+        )
         if used_chars + entry_len > max_chars and selected:
             break
         selected.append(summary)
@@ -98,9 +131,15 @@ def select_reference_prompts(
     max_chars: int = 4000,
     effectiveness: dict[str, float] | None = None,
     weight: float = 0.5,
+    store: UsageStore | None = None,
+    preferred_ids: frozenset[str] | None = None,
 ) -> list[TemplateSummary]:
     """Return top-scoring library prompts within a character budget."""
-    summaries = library.list()
+    summaries = _exclude_retrieval_blocked_templates(
+        library.list(),
+        effectiveness=effectiveness,
+        store=store,
+    )
     ranked = sorted(
         summaries,
         key=lambda summary: _score_template(
@@ -110,6 +149,7 @@ def select_reference_prompts(
             cursor_mode,
             effectiveness=effectiveness,
             weight=weight,
+            preferred_ids=preferred_ids,
         ),
         reverse=True,
     )
@@ -125,13 +165,16 @@ def select_reference_prompts(
             cursor_mode,
             effectiveness=effectiveness,
             weight=weight,
+            preferred_ids=preferred_ids,
         )
         if score <= 0 and selected:
             break
         template = library.recall(summary.template_id)
         if template is None:
             continue
-        entry_len = len(template.body) + len(summary.template_id) + len(summary.name) + 32
+        entry_len = (
+            len(template.body) + len(summary.template_id) + len(summary.name) + 32
+        )
         remaining = max_chars - used_chars
         if entry_len > remaining:
             continue

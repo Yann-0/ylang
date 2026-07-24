@@ -9,6 +9,30 @@ from collections import defaultdict, deque
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from ylang.core.runtime_settings import RuntimeSettingsStore, effective_int_setting
+
+_RATE_LIMIT_STORE: object | None = None
+
+
+def register_rate_limit_store(store: object) -> None:
+    """Remember the usage store for hot-reloading rate limit settings."""
+    global _RATE_LIMIT_STORE
+    _RATE_LIMIT_STORE = store
+
+
+def _effective_rate_limit() -> int:
+    overrides: dict[str, str] | None = None
+    if _RATE_LIMIT_STORE is not None:
+        overrides = RuntimeSettingsStore(
+            _RATE_LIMIT_STORE._connection  # type: ignore[attr-defined]
+        ).as_dict()
+    return effective_int_setting(
+        "rate_limit_per_minute",
+        env_var="YLANG_RATE_LIMIT_PER_MINUTE",
+        default=0,
+        overrides=overrides,
+    )
+
 
 def _client_ip(scope: Scope) -> str:
     client = scope.get("client")
@@ -52,8 +76,49 @@ class RateLimitMiddleware:
         await self.app(scope, receive, send)
 
 
+class DynamicRateLimitMiddleware:
+    """Rate limiter that reads the effective limit from runtime settings each request."""
+
+    def __init__(self, app: ASGIApp, *, window_seconds: float = 60.0) -> None:
+        self.app = app
+        self._window = window_seconds
+        self._hits: dict[str, deque[float]] = defaultdict(deque)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        limit = _effective_rate_limit()
+        if limit <= 0:
+            await self.app(scope, receive, send)
+            return
+
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if path == "/health":
+            await self.app(scope, receive, send)
+            return
+
+        now = time.monotonic()
+        ip = _client_ip(scope)
+        bucket = self._hits[ip]
+        while bucket and now - bucket[0] > self._window:
+            bucket.popleft()
+        if len(bucket) >= limit:
+            response: Response = JSONResponse(
+                {"error": "rate limit exceeded"},
+                status_code=429,
+            )
+            await response(scope, receive, send)
+            return
+        bucket.append(now)
+        await self.app(scope, receive, send)
+
+
 def maybe_rate_limit_middleware(app: ASGIApp) -> ASGIApp:
-    """Wrap ``app`` when ``YLANG_RATE_LIMIT_PER_MINUTE`` is set."""
+    """Wrap ``app`` when rate limiting is configured via env or runtime settings."""
+    if _RATE_LIMIT_STORE is not None:
+        return DynamicRateLimitMiddleware(app)
     raw = os.environ.get("YLANG_RATE_LIMIT_PER_MINUTE")
     if not raw or not raw.strip():
         return app

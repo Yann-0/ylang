@@ -1,14 +1,18 @@
 #!/srv/ylang/app/.venv/bin/python3
 """Cursor ``sessionStart`` hook: export Ylang MCP URL and auth for other hooks.
 
-Prints JSON with ``env.YLANG_MCP_URL``, ``YLANG_AUTH_TOKEN``, and a default
-``YLANG_HOOK_MODEL``. On failure, emits ``YLANG_HOOK_ERROR`` so the session still
-starts. MCP config loading mirrors ``ylang-improve-prompt.py``.
+Prints JSON with ``env.YLANG_MCP_URL``, ``YLANG_AUTH_TOKEN``, a default
+``YLANG_HOOK_MODEL`` of ``auto`` (activity routing via ``YLANG_MODELS_IMPROVE``),
+and ``YLANG_CAPTURE_EDIT_FEEDBACK=1`` so the improve hook can record polish
+feedback (console ``edit_feedback`` alone does not reach Cursor hooks).
+On failure, emits ``YLANG_HOOK_ERROR`` so the session still starts.
+MCP config loading mirrors ``ylang-improve-prompt.py``.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 
@@ -26,6 +30,15 @@ def _load_ylang_mcp() -> tuple[str, str]:
     return url, token
 
 
+def _capture_edit_feedback_env() -> str:
+    """Prefer an existing capture/edit-feedback env; default to ``1``."""
+    for key in ("YLANG_CAPTURE_EDIT_FEEDBACK", "YLANG_EDIT_FEEDBACK"):
+        raw = os.environ.get(key, "").strip()
+        if raw:
+            return raw
+    return "1"
+
+
 def main() -> None:
     """Load MCP settings from ``~/.cursor/mcp.json`` and print hook env JSON."""
     try:
@@ -34,7 +47,8 @@ def main() -> None:
             "env": {
                 "YLANG_MCP_URL": mcp_url,
                 "YLANG_AUTH_TOKEN": auth_token,
-                "YLANG_HOOK_MODEL": "claude-sonnet-4-5",
+                "YLANG_HOOK_MODEL": "auto",
+                "YLANG_CAPTURE_EDIT_FEEDBACK": _capture_edit_feedback_env(),
             }
         }
     except Exception as exc:  # noqa: BLE001 - session should still start

@@ -30,7 +30,9 @@ SEED_TEMPLATES: list[SeedTemplateSpec] = [
         body="Summarize the following text in about {length} words.\n\n{text}",
         params=[
             TemplateParam(name="text", description="Text to summarize"),
-            TemplateParam(name="length", description="Target word count", default="100"),
+            TemplateParam(
+                name="length", description="Target word count", default="100"
+            ),
         ],
         tags=("summarize", "text", "summary"),
     ),
@@ -40,7 +42,9 @@ SEED_TEMPLATES: list[SeedTemplateSpec] = [
         body="Explain the following {language} code clearly and concisely.\n\n{code}",
         params=[
             TemplateParam(name="code", description="Source code to explain"),
-            TemplateParam(name="language", description="Programming language", default="Python"),
+            TemplateParam(
+                name="language", description="Programming language", default="Python"
+            ),
         ],
         tags=("code-explain", "code", "explain"),
     ),
@@ -48,8 +52,7 @@ SEED_TEMPLATES: list[SeedTemplateSpec] = [
         template_id="structured-output",
         name="Structured Output",
         body=(
-            "Complete the task below. Respond in {format} format only.\n\n"
-            "Task: {task}"
+            "Complete the task below. Respond in {format} format only.\n\nTask: {task}"
         ),
         params=[
             TemplateParam(name="task", description="Task to complete"),

@@ -4,6 +4,26 @@ Ylang loads configuration from **environment variables** at startup via `Setting
 
 For production systemd deployments, use an environment file (e.g. `/srv/ylang/ylang.env`) referenced by `EnvironmentFile=` in the unit — see [deployment.md](deployment.md).
 
+## Authority order
+
+Effective settings used by the engine, improver, and console resolve in this order:
+
+```mermaid
+flowchart LR
+    ENV["1. Environment<br/>Settings.load() / ylang.env"]
+    RT["2. Runtime overrides<br/>SQLite runtime_settings"]
+    EFF["3. Effective Settings<br/>merge_settings / get_effective_settings"]
+    ENV --> RT --> EFF
+```
+
+| Layer | Source | When applied | Examples |
+|-------|--------|--------------|----------|
+| 1. Env | Process environment / `EnvironmentFile` | Process start | `YLANG_MODELS_IMPROVE`, `YLANG_AUTH_TOKEN` |
+| 2. Runtime | Console Parameters / MCP `runtime_settings` table | Hot-reload without restart | `models_improve`, `improver_timeout_sec`, feature flags |
+| 3. Effective | `merge_settings(base, overrides)` / `get_effective_settings()` | Every request that needs live config | Console pages, improver context, gateway routing |
+
+Restart-required keys (transport, auth token, provider API keys, storage path) remain env-only — see `RESTART_REQUIRED_KEYS` in `core/runtime_settings.py`. Shared parsers live in `core/config_parsers.py` (`parse_model_list`, `parse_bool_flag`).
+
 ## Quick reference — all variables
 
 | Variable | Default | Section |
@@ -13,6 +33,7 @@ For production systemd deployments, use an environment file (e.g. `/srv/ylang/yl
 | `YLANG_HOST` | `0.0.0.0` | [MCP transport](#mcp-transport) |
 | `YLANG_PORT` | `8787` | [MCP transport](#mcp-transport) |
 | `YLANG_AUTH_TOKEN` | *(none)* | [MCP transport](#mcp-transport) |
+| `YLANG_RATE_LIMIT_PER_MINUTE` | `0` | [Runtime settings (console)](#runtime-settings-console) |
 | `OPENAI_API_KEY` | *(none)* | [Provider API keys](#llm-provider-api-keys) |
 | `ANTHROPIC_API_KEY` | *(none)* | [Provider API keys](#llm-provider-api-keys) |
 | `MISTRAL_API_KEY` | *(none)* | [Provider API keys](#llm-provider-api-keys) |
@@ -29,11 +50,13 @@ For production systemd deployments, use an environment file (e.g. `/srv/ylang/yl
 | `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | [Improver context](#improver-context) |
 | `YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT` | `0.5` | [Improver analytics](#improver-analytics-and-optimization) |
 | `YLANG_PATTERN_DETECTOR` | `lexical` | [Improver analytics](#improver-analytics-and-optimization) |
-| `YLANG_CAPTURE_EDIT_FEEDBACK` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_CAPTURE_EDIT_FEEDBACK` | *(unset; sessionStart → `1`)* | [Improver analytics](#improver-analytics-and-optimization) |
 | `YLANG_IMPROVER_CRITIQUE` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_IMPROVER_TIMEOUT_SEC` | `12` | [Improver analytics](#improver-analytics-and-optimization) |
 | `YLANG_EXPERIMENTS` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
 | `YLANG_HOOK_DISABLED` | *(unset)* | [Cursor hook overrides](#cursor-hook-overrides) |
-| `YLANG_HOOK_MODEL` | `claude-sonnet-4-5` | [Cursor hook overrides](#cursor-hook-overrides) |
+| `YLANG_HOOK_MODEL` | `auto` | [Cursor hook overrides](#cursor-hook-overrides) |
+| `YLANG_HOOK_TIMEOUT_SEC` | `15` | [Cursor hook overrides](#cursor-hook-overrides) |
 | `YLANG_MCP_URL` | from `~/.cursor/mcp.json` | [Cursor hook overrides](#cursor-hook-overrides) |
 
 Deprecated (single-model): `YLANG_MODEL_CODE`, `YLANG_MODEL_SEARCH`, `YLANG_MODEL_REASON`, `YLANG_MODEL_OTHER` — use the `YLANG_MODELS_*` list form instead.
@@ -55,9 +78,10 @@ All templates, usage rows, and facts are stored in this single file. Ylang does 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `YLANG_TRANSPORT` | `stdio` | `stdio` (subprocess) or `http` (streamable HTTP) |
-| `YLANG_HOST` | `0.0.0.0` | Bind address when transport is `http` |
+| `YLANG_HOST` | `0.0.0.0` | Bind address when transport is `http`. Use `0.0.0.0` for LAN console access; `127.0.0.1` limits to localhost only |
 | `YLANG_PORT` | `8787` | Bind port when transport is `http` |
 | `YLANG_AUTH_TOKEN` | *(none)* | **Required** for `http` transport. Bearer token for MCP clients |
+| `YLANG_AUTH_TOKEN_PREVIOUS` | *(none)* | Optional previous token accepted during rotation grace period |
 
 ### stdio (default)
 
@@ -157,23 +181,27 @@ Every LLM call is tagged with an **activity** that selects a candidate list:
 
 | Activity | Used for | Default list env var |
 |----------|----------|---------------------|
-| `code` | Implementation-style work, debug mode improver | `YLANG_MODELS_CODE` |
+| `code` | Implementation-style work (gateway / non-improver) | `YLANG_MODELS_CODE` |
 | `search` | Search / retrieval | `YLANG_MODELS_SEARCH` |
-| `reason` | Reasoning, ask/plan mode improver | `YLANG_MODELS_REASON` |
-| `improve` | Prompt improvement (default improver path) | `YLANG_MODELS_IMPROVE` |
+| `reason` | Reasoning (gateway / non-improver) | `YLANG_MODELS_REASON` |
+| `improve` | All prompt improvement (`improve:*`) | `YLANG_MODELS_IMPROVE` |
 | `other` | Unclassified calls | `YLANG_MODELS_OTHER` |
 
 #### Improver mode → activity mapping
 
-`improve_prompt` logs activity as `improve:<cursor_mode>`. The router maps modes to list buckets:
+`improve_prompt` logs activity as `improve:<cursor_mode>`. **All** `improve:*`
+activities route to the dedicated `improve` bucket (`YLANG_MODELS_IMPROVE` /
+runtime `models_improve`), so you can put faster models first without changing
+code/reason lists.
 
 | Cursor mode | Routes to activity list |
 |-------------|-------------------------|
-| `agent`, `debug`, `multitask` | `code` (`YLANG_MODELS_CODE`) |
-| `ask`, `plan` | `reason` (`YLANG_MODELS_REASON`) |
-| *(improve bucket directly)* | `improve` (`YLANG_MODELS_IMPROVE`) — when activity is exactly `improve` |
+| `agent`, `debug`, `multitask`, `ask`, `plan`, *(any)* | `improve` (`YLANG_MODELS_IMPROVE`) |
 
-So tuning `YLANG_MODELS_CODE` affects agent/debug/multitask improvements; tuning `YLANG_MODELS_REASON` affects ask/plan improvements.
+Hooks should pass `model=auto` (default) so this bucket is used. **Cursor slugs**
+(`claude-sonnet-4-*`, `composer`, etc.) and `auto` **defer** to `models_improve`
+— only a LiteLLM `provider/model` string prepends an explicit override. Runtime
+console overrides to `models_improve` hot-reload on each completion (no restart).
 
 ### Default model lists
 
@@ -184,7 +212,7 @@ When no `YLANG_MODELS_*` override is set:
 | `code` | `anthropic/claude-3-5-sonnet-latest` → `openai/o3-mini` → `openai/gpt-4o` → `mistral/mistral-large-latest` |
 | `search` | `perplexity/sonar` → `openai/gpt-4o` → `anthropic/claude-3-5-sonnet-latest` |
 | `reason` | `openai/o3-mini` → `anthropic/claude-3-5-sonnet-latest` → `openai/gpt-4o` |
-| `improve` | `anthropic/claude-3-5-sonnet-latest` → `openai/gpt-4o` → `mistral/mistral-small-latest` |
+| `improve` | `mistral/mistral-small-latest` → `openai/gpt-4o-mini` → `openai/gpt-4o` → `anthropic/claude-3-5-sonnet-latest` |
 | `other` | `mistral/mistral-small-latest` → `openai/gpt-4o-mini` → `anthropic/claude-3-5-sonnet-latest` |
 
 **Leftmost model in the list = highest priority.** Only models whose provider key is set (or that don't need a key) are actually attempted.
@@ -309,6 +337,32 @@ When a cloud provider returns a retryable error, **all models from that provider
 
 ---
 
+## Runtime settings (console)
+
+Hot-reloadable overrides are stored in SQLite (`runtime_settings`) and editable at `GET/POST /console/settings` (**Parameters**) without restart. The Parameters page groups keys into **Routing**, **Improver**, **Limits**, and **Flags** (digest toggles live under Flags), with restart-required env values as a read-only footer. They merge with env-based `Settings` on each request. For integer knobs such as `learned_template_limit` and `rate_limit_per_minute`, runtime overrides take precedence over env vars (`YLANG_LEARNED_TEMPLATE_LIMIT`, `YLANG_RATE_LIMIT_PER_MINUTE`).
+
+**Hot-reload vs restart:** Changing a SQLite runtime key (Models lists, timeouts, flags, etc.) takes effect on the next request — no `systemctl restart`. Changing env-only values (host, port, storage path, API keys, `YLANG_MODELS_*` in the env file) or deploying new Python code requires `sudo systemctl restart ylang`.
+
+Optimization suggestions and the Advisor can propose concrete `setting_key`/`setting_value` (or learned template id) payloads; applying them requires an explicit **Apply** on `/console/proposals` (or Advisor apply buttons that hit the same path). Nothing auto-applies. Proposals whose setting already matches the runtime value (or whose id is in the apply audit log) are omitted from Pending.
+
+| Key | Description |
+|-----|-------------|
+| `daily_budget_usd` | Rolling 24h spend cap (overrides `YLANG_DAILY_BUDGET_USD` at runtime) |
+| `quality_band`, `fallback_model`, `provider_cooldown_seconds` | Router tuning |
+| `models_code`, `models_search`, `models_reason`, `models_improve`, `models_other` | Comma-separated model lists |
+| `pattern_detector` | `lexical` or `semantic` |
+| `learned_template_limit` | Max learned templates in improver context (mode defaults: agent/plan/debug/multitask=`1`, ask=`0`) |
+| `retrieval_preferred_template_ids` | Comma-separated template ids given a retrieval score boost in improver context |
+| `rate_limit_per_minute` | HTTP rate limit (0 = off) |
+| `improver_critique`, `experiments`, `edit_feedback` | Feature flags (`true`/`false`) |
+| `improver_timeout_sec` | Improver LLM wall-clock budget in seconds (`0` disables; default `12`). On timeout: short grace for late completions, then a deterministic skeleton for prompts ≤200 chars; longer prompts return the original and record `improver timeout`. Late completions after hard timeout do not count as successful improver fires. Critique is skipped when less than ~2s or ~20% of budget remains. For `18`, raise `YLANG_HOOK_TIMEOUT_SEC` to at least `20`. |
+| `usage_digest_enabled` | When `true`, indicates cron should run `ylang usage digest` |
+| `usage_digest_last_at` | ISO timestamp; updated automatically when digest CLI runs |
+
+Restart-required values (host, port, storage path, API keys) remain env-only. See [console.md](console.md).
+
+---
+
 ## Daily budget cap
 
 | Variable | Default | Description |
@@ -349,9 +403,9 @@ This is automatic when a usage store is wired (always true for the MCP server). 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | Max learned templates injected into `improve_prompt` reference context |
+| `YLANG_LEARNED_TEMPLATE_LIMIT` | mode default | Max learned templates injected into `improve_prompt` reference context. Overridden at runtime by console key `learned_template_limit`. Per-mode defaults are tuned toward `1` (ask=`0`). |
 
-Learned templates (source `learned`) are merged with keyword-matched reference prompts, ranked by historical accept rate when enough data exists. Set `0` to disable learned template injection.
+Learned templates (source `learned`) are merged with keyword-matched reference prompts, ranked by historical accept rate when enough data exists. Templates with **0% accept rate** and at least **3 injections** in the last 30 days are excluded from improver context. Set `0` to disable learned template injection.
 
 Tag templates with `block:persona`, `block:task`, `block:constraints`, `block:examples`, or `block:output_format` for dynamic prompt block assembly.
 
@@ -363,8 +417,9 @@ Tag templates with `block:persona`, `block:task`, `block:constraints`, `block:ex
 |----------|---------|-------------|
 | `YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT` | `0.5` | Blend weight (0–1) for outcome-aware template retrieval |
 | `YLANG_PATTERN_DETECTOR` | `lexical` | Pattern detector: `lexical` (difflib) or `semantic` (TF-IDF cosine) |
-| `YLANG_CAPTURE_EDIT_FEEDBACK` | *(unset)* | When `1`, Cursor hook records edit distance via `record_prompt_edit` |
+| `YLANG_CAPTURE_EDIT_FEEDBACK` | *(unset; sessionStart defaults to `1`)* | When truthy, Cursor improve hook records edit distance via `record_prompt_edit`. Console `edit_feedback` only gates nav; both are needed for Feedback polish. Alias: `YLANG_EDIT_FEEDBACK`. |
 | `YLANG_IMPROVER_CRITIQUE` | *(unset)* | When `1`, optional second-pass critique on validated improvements |
+| `YLANG_IMPROVER_TIMEOUT_SEC` | `12` (example deploy uses `18`) | Wall-clock budget for improver LLM calls; `0` disables. Keep below `YLANG_HOOK_TIMEOUT_SEC` (use `22+` when improver timeout is `18`) |
 | `YLANG_EXPERIMENTS` | *(unset)* | When `1`, assign A/B experiment variants from `prompt_experiments` table |
 
 CLI: `ylang usage improver-report` — improver funnel and template effectiveness.
@@ -412,9 +467,12 @@ Unknown slugs fall back to activity routing. Full table: `src/ylang/core/model_r
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `YLANG_HOOK_DISABLED` | *(unset)* | Set to `1` to skip auto prompt improvement |
-| `YLANG_HOOK_MODEL` | `claude-sonnet-4-5` | Model slug passed to `improve_prompt` from hooks |
+| `YLANG_HOOK_MODEL` | `auto` | Model for `improve_prompt`; `auto` uses `YLANG_MODELS_IMPROVE` routing |
+| `YLANG_HOOK_TIMEOUT_SEC` | `15` (example deploy uses `22`) | MCP call timeout; on timeout the hook fail-opens; keep above improver timeout |
 | `YLANG_MCP_URL` | from `~/.cursor/mcp.json` | Override MCP HTTP URL for hooks |
 | `YLANG_AUTH_TOKEN` | from mcp.json / env | Bearer token for hook MCP calls |
+
+Per-message bypass (no env change): put **`ylang-off`** or **`/ylang-off`** anywhere in the Cursor chat prompt. The hook skips `improve_prompt` and strips the marker. See [cursor-integration.md](cursor-integration.md#bypass-improvement-with-ylang-off).
 
 See [cursor-integration.md](cursor-integration.md).
 

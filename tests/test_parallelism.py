@@ -23,7 +23,9 @@ def test_recommend_parallelism_list_items() -> None:
 
 
 def test_recommend_parallelism_multiple_verbs() -> None:
-    assert recommend_parallelism("implement the API, write tests, and update docs") is True
+    assert (
+        recommend_parallelism("implement the API, write tests, and update docs") is True
+    )
 
 
 def test_recommend_parallelism_single_task_false() -> None:
@@ -51,13 +53,17 @@ def test_multitask_config_encourages_parallelism() -> None:
 
 
 def test_build_user_message_appends_directive_for_multitask() -> None:
-    resolved = resolve_cursor_mode("cursor-multitask", "do stuff", explicit_mode="multitask")
+    resolved = resolve_cursor_mode(
+        "cursor-multitask", "do stuff", explicit_mode="multitask"
+    )
     message = _build_user_message("do stuff", resolved, None)
     assert parallelism_directive() in message
 
 
 def test_build_user_message_appends_directive_when_detected_in_agent() -> None:
-    resolved = resolve_cursor_mode("edit_file", "implement API, write tests, update docs")
+    resolved = resolve_cursor_mode(
+        "edit_file", "implement API, write tests, update docs"
+    )
     message = _build_user_message(
         "implement API, write tests, update docs",
         resolved,
@@ -67,6 +73,8 @@ def test_build_user_message_appends_directive_when_detected_in_agent() -> None:
 
 
 def test_build_user_message_no_directive_for_simple_agent_prompt() -> None:
-    resolved = resolve_cursor_mode("edit_file", "fix the header typo", explicit_mode="agent")
+    resolved = resolve_cursor_mode(
+        "edit_file", "fix the header typo", explicit_mode="agent"
+    )
     message = _build_user_message("fix the header typo", resolved, None)
     assert "Parallelization directive" not in message

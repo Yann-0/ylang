@@ -18,7 +18,9 @@ PRECISION_TOOLS: frozenset[str] = frozenset(
     }
 )
 
-_CANONICAL_MODES: frozenset[str] = frozenset({"agent", "plan", "debug", "ask", "multitask"})
+_CANONICAL_MODES: frozenset[str] = frozenset(
+    {"agent", "plan", "debug", "ask", "multitask"}
+)
 
 _TOOL_ALIASES: dict[str, CursorMode] = {
     "agent": "agent",
@@ -55,10 +57,34 @@ _MCP_TOOL_DEFAULT_MODE: dict[str, CursorMode] = {
 }
 
 _PROMPT_MODE_PATTERNS: tuple[tuple[re.Pattern[str], CursorMode, int], ...] = (
-    (re.compile(r"\b(deep dive|backlog|roadmap|architecture|gap analysis|adr|product owner)\b", re.I), "plan", 4),
-    (re.compile(r"\b(debug|fix the bug|stack trace|reproduc|root cause|failing test)\b", re.I), "debug", 3),
-    (re.compile(r"\b(plan|roadmap|architecture|design approach|trade-?offs?)\b", re.I), "plan", 2),
-    (re.compile(r"\b(explain|what is|how does|why does|describe|clarify)\b", re.I), "ask", 2),
+    (
+        re.compile(
+            r"\b(deep dive|backlog|roadmap|architecture|gap analysis|adr|product owner)\b",
+            re.I,
+        ),
+        "plan",
+        4,
+    ),
+    (
+        re.compile(
+            r"\b(debug|fix the bug|stack trace|reproduc|root cause|failing test)\b",
+            re.I,
+        ),
+        "debug",
+        3,
+    ),
+    (
+        re.compile(
+            r"\b(plan|roadmap|architecture|design approach|trade-?offs?)\b", re.I
+        ),
+        "plan",
+        2,
+    ),
+    (
+        re.compile(r"\b(explain|what is|how does|why does|describe|clarify)\b", re.I),
+        "ask",
+        2,
+    ),
     (
         re.compile(
             r"\b(parallel|multitask|workstreams?|sub-?agents?|background agents?|"
@@ -68,7 +94,13 @@ _PROMPT_MODE_PATTERNS: tuple[tuple[re.Pattern[str], CursorMode, int], ...] = (
         "multitask",
         3,
     ),
-    (re.compile(r"\b(implement|refactor|add feature|build|write tests?|fix)\b", re.I), "agent", 2),
+    (
+        re.compile(
+            r"\b(implement|refactor|add feature|build|write tests?|fix)\b", re.I
+        ),
+        "agent",
+        2,
+    ),
 )
 
 # Signals that a request contains multiple independent deliverables worth
@@ -159,7 +191,9 @@ def detect_task_class(text: str) -> TaskClass:
         lowered,
     ):
         return "analysis"
-    if re.search(r"\b(implement|refactor|add feature|build|write tests?|fix bug)\b", lowered):
+    if re.search(
+        r"\b(implement|refactor|add feature|build|write tests?|fix bug)\b", lowered
+    ):
         return "implementation"
     return "structural"
 
@@ -187,7 +221,9 @@ def recommend_parallelism(text: str) -> bool:
         return True
     if len(_LIST_ITEM_RE.findall(text)) >= 2:
         return True
-    distinct_verbs = {match.group(0).lower() for match in _ACTION_VERB_RE.finditer(text)}
+    distinct_verbs = {
+        match.group(0).lower() for match in _ACTION_VERB_RE.finditer(text)
+    }
     return len(distinct_verbs) >= 3
 
 
@@ -220,7 +256,9 @@ def resolve_cursor_mode(
 
     tool_key = _normalize_key(tool)
     if tool_key in _TOOL_ALIASES:
-        return ResolvedCursorMode(mode=_TOOL_ALIASES[tool_key], source="tool", tool=tool)
+        return ResolvedCursorMode(
+            mode=_TOOL_ALIASES[tool_key], source="tool", tool=tool
+        )
     if tool_key in _MCP_TOOL_DEFAULT_MODE:
         return ResolvedCursorMode(
             mode=_MCP_TOOL_DEFAULT_MODE[tool_key],

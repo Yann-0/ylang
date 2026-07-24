@@ -124,7 +124,9 @@ class DailyUsageBucket:
     successes: int
 
 
-def daily_usage_buckets(store: UsageStore, window: UsageWindow) -> list[DailyUsageBucket]:
+def daily_usage_buckets(
+    store: UsageStore, window: UsageWindow
+) -> list[DailyUsageBucket]:
     """Return per-day request, cost, and success counts within a window."""
     rows = _cached_recall_usage(store, window)
     buckets: dict[str, DailyUsageBucket] = {}

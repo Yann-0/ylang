@@ -17,20 +17,22 @@ The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr
 |--------|------|------|-------------|
 | `POST` | `/v1/chat/completions` | Bearer | Chat completions (streaming and non-streaming) |
 | `GET` | `/v1/models` | Bearer | Virtual route model catalog |
-| `GET` | `/usage` | Bearer | Chart.js usage dashboard (last 7 days; 30s auto-refresh) |
+| `GET` | `/usage` | Bearer | Redirects to `/console/usage` |
+| `GET` | `/console` | Bearer | Admin console overview |
+| `GET` | `/console/usage` | Bearer | Chart.js usage dashboard (last 7 days; 30s auto-refresh) |
 | `GET` | `/health` | None | Service health and version JSON |
 
 All routes share the same HTTP server as MCP (`/mcp`). There is no separate gateway port or process.
 
 ## Authorization
 
-HTTP transport requires `YLANG_AUTH_TOKEN`. Bearer auth applies to **`/mcp`, `/v1/*`, and `/usage`**:
+HTTP transport requires `YLANG_AUTH_TOKEN`. Bearer auth applies to **`/mcp`, `/v1/*`, `/console`, and `/usage`**:
 
 | Item | Value |
 |------|-------|
 | Header | `Authorization: Bearer <YLANG_AUTH_TOKEN>` |
 | Env var | `YLANG_AUTH_TOKEN` (required when `YLANG_TRANSPORT=http`) |
-| Protected paths | `/mcp`, `/v1/chat/completions`, `/v1/models`, `/usage` |
+| Protected paths | `/mcp`, `/v1/chat/completions`, `/v1/models`, `/console`, `/usage` |
 | Exempt path | `GET /health` (no bearer token) |
 | Missing / wrong token | **401 Unauthorized** (plain text body) |
 | stdio transport | No auth — Cursor spawns a local subprocess |
@@ -208,6 +210,7 @@ sequenceDiagram
 - **Endpoint verification:** Cursor may verify custom endpoints **server-side**. A LAN hostname can fail verification even when the endpoint works from your machine. Try the host IP address if verification fails.
 - Tab/autocomplete typically stays on Cursor's built-in models; the gateway captures chat/agent requests you explicitly route.
 - MCP (`/mcp`) and the gateway (`/v1/*`) share auth and the same process.
+- **First-party Cursor models (Grok, Composer):** enabling OpenAI API Key / Override OpenAI Base URL (including this Ylang gateway) causes `Bad Request — This model does not support custom API keys`. Turn the override off (or `Ctrl+Shift+0`) before using Grok/Composer; see [cursor-integration.md — First-party models vs Ylang gateway](cursor-integration.md#first-party-models-vs-ylang-gateway).
 
 See also [cursor-integration.md](cursor-integration.md) for MCP and hook setup (complementary to gateway routing).
 
@@ -264,7 +267,7 @@ After a successful request, `usage_summary` should show a row with `surface=gate
 
 ### Usage dashboard
 
-When `YLANG_TRANSPORT=http`, open `GET /usage` (same bearer auth as gateway routes) for a Chart.js dashboard of the last 7 days: cost over time, requests by activity and model, daily success rate. The page auto-refreshes every 30 seconds.
+When `YLANG_TRANSPORT=http`, open `GET /console` or `GET /console/usage` (same bearer auth as gateway routes) for the admin console and Chart.js usage dashboard. Legacy `GET /usage` redirects to `/console/usage`.
 
 Alternatively, generate a standalone file:
 

@@ -70,7 +70,11 @@ def parse_csv_rows(csv_text: str) -> list[tuple[str, str]]:
     """Parse awesome-chatgpt-prompts CSV into (act, prompt) pairs."""
     csv.field_size_limit(sys.maxsize)
     reader = csv.DictReader(io.StringIO(csv_text))
-    if reader.fieldnames is None or "act" not in reader.fieldnames or "prompt" not in reader.fieldnames:
+    if (
+        reader.fieldnames is None
+        or "act" not in reader.fieldnames
+        or "prompt" not in reader.fieldnames
+    ):
         msg = "CSV must include act and prompt columns"
         raise ValueError(msg)
     rows: list[tuple[str, str]] = []

@@ -55,7 +55,9 @@ def _litellm_completion_response(
     return MagicMock(
         choices=[mock_choice],
         model=model,
-        usage=MagicMock(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
+        usage=MagicMock(
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+        ),
         _hidden_params={"response_cost": cost},
     )
 
@@ -79,7 +81,9 @@ def _stream_usage_chunk(
     chunk = MagicMock()
     chunk.choices = []
     chunk.model = model
-    chunk.usage = MagicMock(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens)
+    chunk.usage = MagicMock(
+        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens
+    )
     chunk._hidden_params = {"response_cost": cost}
     return chunk
 
@@ -91,7 +95,9 @@ def _usage_rows(store: object) -> list[object]:
 # --- Auth ---
 
 
-def test_chat_completions_requires_bearer_token(gateway_setup: tuple[TestClient, object, Engine, ModelRouter]) -> None:
+def test_chat_completions_requires_bearer_token(
+    gateway_setup: tuple[TestClient, object, Engine, ModelRouter],
+) -> None:
     client, _, _, _ = gateway_setup
     response = client.post(
         "/v1/chat/completions",
@@ -100,13 +106,17 @@ def test_chat_completions_requires_bearer_token(gateway_setup: tuple[TestClient,
     assert response.status_code == 401
 
 
-def test_usage_dashboard_requires_bearer_token(gateway_setup: tuple[TestClient, object, Engine, ModelRouter]) -> None:
+def test_usage_dashboard_requires_bearer_token(
+    gateway_setup: tuple[TestClient, object, Engine, ModelRouter],
+) -> None:
     client, _, _, _ = gateway_setup
     response = client.get("/usage")
     assert response.status_code == 401
 
 
-def test_chat_completions_accepts_bearer_token(gateway_setup: tuple[TestClient, object, Engine, ModelRouter]) -> None:
+def test_chat_completions_accepts_bearer_token(
+    gateway_setup: tuple[TestClient, object, Engine, ModelRouter],
+) -> None:
     client, _, _, _ = gateway_setup
     with patch(
         "ylang.core.engine.litellm.completion",
@@ -115,7 +125,10 @@ def test_chat_completions_accepts_bearer_token(gateway_setup: tuple[TestClient, 
         response = client.post(
             "/v1/chat/completions",
             headers=_AUTH_HEADERS,
-            json={"model": "route-code", "messages": [{"role": "user", "content": "hi"}]},
+            json={
+                "model": "route-code",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
         )
     assert response.status_code == 200
     body = response.json()
@@ -123,15 +136,18 @@ def test_chat_completions_accepts_bearer_token(gateway_setup: tuple[TestClient, 
     assert body["choices"][0]["message"]["content"] == "hello"
 
 
-def test_usage_dashboard_accepts_bearer_token(gateway_setup: tuple[TestClient, object, Engine, ModelRouter]) -> None:
+def test_usage_redirects_to_console(
+    gateway_setup: tuple[TestClient, object, Engine, ModelRouter],
+) -> None:
     client, _, _, _ = gateway_setup
-    response = client.get("/usage", headers=_AUTH_HEADERS)
-    assert response.status_code == 200
-    assert "text/html" in response.headers["content-type"]
-    assert "Ylang Usage Dashboard" in response.text
+    response = client.get("/usage", headers=_AUTH_HEADERS, follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "/console/usage"
 
 
-def test_health_is_unauthenticated(gateway_setup: tuple[TestClient, object, Engine, ModelRouter]) -> None:
+def test_health_is_unauthenticated(
+    gateway_setup: tuple[TestClient, object, Engine, ModelRouter],
+) -> None:
     client, _, _, _ = gateway_setup
     response = client.get("/health")
     assert response.status_code == 200
@@ -152,12 +168,17 @@ def test_route_code_resolves_through_router_and_logs_one_gateway_row(
             "ylang.core.engine.litellm.completion",
             return_value=_litellm_completion_response(model="openai/gpt-4o"),
         ) as completion_mock,
-        patch.object(ModelRouter, "build_attempt_chain", wraps=router.build_attempt_chain) as chain_mock,
+        patch.object(
+            ModelRouter, "build_attempt_chain", wraps=router.build_attempt_chain
+        ) as chain_mock,
     ):
         response = client.post(
             "/v1/chat/completions",
             headers=_AUTH_HEADERS,
-            json={"model": "route-code", "messages": [{"role": "user", "content": "write code"}]},
+            json={
+                "model": "route-code",
+                "messages": [{"role": "user", "content": "write code"}],
+            },
         )
 
     assert response.status_code == 200
@@ -180,7 +201,9 @@ def test_route_code_resolves_through_router_and_logs_one_gateway_row(
 # --- Passthrough ---
 
 
-def test_passthrough_model_is_honored(gateway_setup: tuple[TestClient, object, Engine, ModelRouter]) -> None:
+def test_passthrough_model_is_honored(
+    gateway_setup: tuple[TestClient, object, Engine, ModelRouter],
+) -> None:
     client, store, _, router = gateway_setup
     with (
         patch(
@@ -193,7 +216,9 @@ def test_passthrough_model_is_honored(gateway_setup: tuple[TestClient, object, E
                 cost=0.0,
             ),
         ) as completion_mock,
-        patch.object(ModelRouter, "build_attempt_chain", wraps=router.build_attempt_chain) as chain_mock,
+        patch.object(
+            ModelRouter, "build_attempt_chain", wraps=router.build_attempt_chain
+        ) as chain_mock,
     ):
         response = client.post(
             "/v1/chat/completions",
@@ -254,7 +279,10 @@ def test_stream_returns_openai_sse_and_logs_one_usage_row(
     assert '"delta":{"content":"hel"}' in text.replace(" ", "")
     assert '"delta":{"content":"lo"}' in text.replace(" ", "")
     compact = text.replace(" ", "")
-    assert '"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}' in compact
+    assert (
+        '"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}'
+        in compact
+    )
 
     rows = _usage_rows(store)
     assert len(rows) == 1

@@ -31,15 +31,17 @@ ylang/
 | Command | Purpose |
 |---------|---------|
 | `pytest` | Run all tests |
+| `pytest -m "not llm_e2e"` | Default CI path (skip live Ollama smoke) |
 | `pytest tests/test_engine.py -v` | Run a single test file |
 | `ruff check .` | Lint |
 | `ruff format .` | Format |
+| `pyright` | Static typecheck (`[tool.pyright]` in pyproject; CI non-blocking) |
 | `python -m ylang` | Start MCP server (stdio) |
 | `ylang` | Same as `python -m ylang` (console script from `pyproject.toml`) |
 
 There is no `--help` flag on the main entry point.
 
-There is no separate `typecheck` script — use your editor or `pyright` if desired. Ruff targets Python 3.12.
+Ruff and pyright target Python 3.12. Soft size limits: see [quality-charter.md](quality-charter.md).
 
 ## Testing
 

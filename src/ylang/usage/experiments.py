@@ -77,6 +77,45 @@ class ExperimentStore:
             for row in cursor.fetchall()
         ]
 
+    def list_all(self) -> list[ExperimentVariant]:
+        """Return all experiment variants."""
+        cursor = self._connection.execute(
+            """
+            SELECT experiment_id, variant_id, config_hash, traffic_pct, active
+            FROM prompt_experiments
+            ORDER BY experiment_id, variant_id
+            """
+        )
+        return [
+            ExperimentVariant(
+                experiment_id=str(row[0]),
+                variant_id=str(row[1]),
+                config_hash=str(row[2]),
+                traffic_pct=float(row[3]),
+                active=bool(row[4]),
+            )
+            for row in cursor.fetchall()
+        ]
+
+    def set_active(
+        self,
+        *,
+        experiment_id: str,
+        variant_id: str,
+        active: bool,
+    ) -> bool:
+        """Activate or deactivate a variant; return True when updated."""
+        cursor = self._connection.execute(
+            """
+            UPDATE prompt_experiments
+            SET active = ?
+            WHERE experiment_id = ? AND variant_id = ?
+            """,
+            (int(active), experiment_id, variant_id),
+        )
+        self._connection.commit()
+        return cursor.rowcount > 0
+
     def assign_variant(
         self,
         experiment_id: str,

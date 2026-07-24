@@ -43,7 +43,9 @@ def test_parse_chat_request_accepts_tools() -> None:
     body = {
         "model": "route-code",
         "messages": [{"role": "user", "content": "hi"}],
-        "tools": [{"type": "function", "function": {"name": "search", "parameters": {}}}],
+        "tools": [
+            {"type": "function", "function": {"name": "search", "parameters": {}}}
+        ],
         "tool_choice": "auto",
     }
     messages, model, stream, tools, tool_choice = parse_chat_request(body)
@@ -71,7 +73,9 @@ def test_chat_completion_payload_includes_tool_calls() -> None:
             }
         ],
     )
-    payload = chat_completion_payload(result, completion_id="id", request_model="route-code")
+    payload = chat_completion_payload(
+        result, completion_id="id", request_model="route-code"
+    )
     message = payload["choices"][0]["message"]
     assert message["tool_calls"][0]["function"]["name"] == "search"
     assert payload["choices"][0]["finish_reason"] == "tool_calls"
@@ -94,7 +98,9 @@ def test_gateway_forwards_tools_to_engine(gateway_client: TestClient) -> None:
             }
         ],
     )
-    tools = [{"type": "function", "function": {"name": "get_weather", "parameters": {}}}]
+    tools = [
+        {"type": "function", "function": {"name": "get_weather", "parameters": {}}}
+    ]
     with patch.object(Engine, "complete", return_value=mock_result) as complete_mock:
         response = gateway_client.post(
             "/v1/chat/completions",
@@ -109,7 +115,10 @@ def test_gateway_forwards_tools_to_engine(gateway_client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["choices"][0]["finish_reason"] == "tool_calls"
-    assert body["choices"][0]["message"]["tool_calls"][0]["function"]["name"] == "get_weather"
+    assert (
+        body["choices"][0]["message"]["tool_calls"][0]["function"]["name"]
+        == "get_weather"
+    )
     _, kwargs = complete_mock.call_args
     assert kwargs["tools"] == tools
     assert kwargs["tool_choice"] == "auto"
@@ -151,7 +160,9 @@ def test_engine_forwards_tools_to_litellm(tmp_path: object) -> None:
         _hidden_params={"response_cost": 0.0},
     )
 
-    with patch("ylang.core.engine.litellm.completion", return_value=mock_response) as completion_mock:
+    with patch(
+        "ylang.core.engine.litellm.completion", return_value=mock_response
+    ) as completion_mock:
         result = engine.complete(
             [{"role": "user", "content": "find docs"}],
             "code",

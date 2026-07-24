@@ -10,19 +10,21 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 | [Configuration](configuration.md) | Environment variables, **model prioritization**, routing, API keys |
 | [Architecture](architecture.md) | Module layout, data flow, design principles |
 | [MCP tools reference](mcp-tools.md) | Every tool: parameters, responses, examples |
-| [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement |
-| [Console](console.md) | **Full admin UI guide** — every `/console` page, workflows, APIs, and screenshots |
+| [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement, per-message `ylang-off` bypass |
+| [Console](console.md) | **Full admin UI** — Overview, **Operator Hub** (`/console/control`), **Parameters** (`/console/settings`), workflows, APIs |
 | [Gateway](gateway.md) | OpenAI-compatible HTTP face: `/v1/chat/completions`, `/v1/models`, `/console`, `/health`; virtual `route-*` models; bearer auth; Cursor custom-endpoint setup |
 | [Deployment](deployment.md) | HTTP transport, systemd, production setup |
 | [Development](development.md) | Tests, linting, scripts, project layout |
 | [Database schema](database-schema.md) | SQLite tables and relationships |
+| [Quality charter](quality-charter.md) | Soft limits, principles, config authority |
+| [Quality loop](quality-loop.md) | Before/after metrics per improvement wave |
 
 ## Internal / historical
 
 | Document | Description |
 |----------|-------------|
 | [CHANGELOG](../CHANGELOG.md) | Version history |
-| [Dead code audit](dead-code.md) | Unused exports and stub seams (audit only) |
+| [Dead code audit](dead-code.md) | Unused exports and stub seams (**historical** audit; see architecture for current) |
 | [Audit and roadmap](audit-and-roadmap.md) | **Historical** snapshot (2026-06-30) — superseded by current code |
 | [Open backlog](backlog.md) | Active backlog items (not yet shipped) |
 | [Backlog shipped](backlog-shipped.md) | Completed backlog items |
@@ -44,6 +46,6 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 ### Planned
 
 - Governed auto-apply from experiment/analytics winners (still propose-only today)
-- Scheduled local digest notifications
+- Email (remote) digest delivery — local CLI/cron + `notify-send` shipped
 
 Not in scope: optimizer with provenance, GitHub/KB sources, hosted team features.

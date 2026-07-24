@@ -67,6 +67,7 @@ def estimated_unit_cost(model: str) -> float:
     try:
         info = litellm.get_model_info(model=model)
     except Exception:
+        # LiteLLM raises provider-specific errors for unknown/local models.
         return 0.0
     input_cost = float(info.get("input_cost_per_token") or 0.0)
     output_cost = float(info.get("output_cost_per_token") or 0.0)
@@ -100,10 +101,14 @@ def apply_preference_order(
 ) -> list[str]:
     """Reorder candidates from usage feedback — boost models with high success counts.
 
-    For improver-routing buckets (``improve``, ``code``, ``reason``), uses
-    ``improver_accepted`` counts when any exist; otherwise falls back to LLM
-    ``success`` counts.
+    For improver-routing buckets (``code``, ``reason``), uses ``improver_accepted``
+    counts when any exist; otherwise falls back to LLM ``success`` counts.
+
+    The ``improve`` bucket keeps the configured ``models_improve`` order so runtime
+    and env lists stay authoritative for prompt-improvement cost control.
     """
+    if str(activity) == "improve":
+        return candidates
     if store is None or not candidates:
         return candidates
     from ylang.usage.aggregates import default_daily_window, summarize_usage
@@ -157,13 +162,41 @@ def is_litellm_routable(model: str) -> bool:
     return model.lower().startswith("ollama/")
 
 
+_AUTO_MODEL_SENTINELS: frozenset[str] = frozenset({"", "auto", "default", "route"})
+
+
+def resolve_improver_explicit_model(model: str) -> str | None:
+    """Resolve improver ``model`` kwargs; defer Cursor slugs to ``models_improve``.
+
+    Only direct LiteLLM strings (``provider/model``) are honored as explicit
+    overrides. Cursor slugs (``claude-sonnet-4-*``, ``composer``, etc.) and
+    ``auto`` defer to the configured ``models_improve`` activity chain.
+    """
+    stripped = model.strip()
+    if not stripped:
+        return None
+    if stripped.lower() in _AUTO_MODEL_SENTINELS:
+        return None
+    if is_litellm_routable(stripped):
+        return stripped
+    return None
+
+
 def resolve_explicit_model(model: str) -> str | None:
-    """Map a client model slug to LiteLLM form, or None to use activity routing."""
-    if is_litellm_routable(model):
-        return model
-    if mapped := _CURSOR_SLUG_ALIASES.get(model):
+    """Map a client model slug to LiteLLM form, or None to use activity routing.
+
+    Sentinels ``auto`` / ``default`` / ``route`` / empty string skip the explicit
+    model and let the activity bucket (``YLANG_MODELS_IMPROVE`` for improver)
+    choose.
+    """
+    stripped = model.strip()
+    if stripped.lower() in _AUTO_MODEL_SENTINELS:
+        return None
+    if is_litellm_routable(stripped):
+        return stripped
+    if mapped := _CURSOR_SLUG_ALIASES.get(stripped):
         return mapped
-    lowered = model.lower()
+    lowered = stripped.lower()
     if mapped := _CURSOR_SLUG_ALIASES.get(lowered):
         return mapped
     if lowered.startswith("claude-sonnet-4-"):
@@ -185,15 +218,6 @@ def normalize_model_list(models: list[str]) -> list[str]:
     return _dedupe_preserve_order(models)
 
 
-_IMPROVE_MODE_BUCKETS: dict[str, Activity] = {
-    "ask": "reason",
-    "plan": "reason",
-    "debug": "code",
-    "agent": "code",
-    "multitask": "code",
-}
-
-
 class ModelRouter:
     """Select and chain LiteLLM models by activity, availability, and quality band."""
 
@@ -209,17 +233,21 @@ class ModelRouter:
         daily_budget_usd: float | None = None,
     ) -> None:
         raw_lists = activity_model_lists or {
-            activity: list(models) for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
+            activity: list(models)
+            for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
         }
         self._activity_model_lists = {
-            activity: normalize_model_list(models) for activity, models in raw_lists.items()
+            activity: normalize_model_list(models)
+            for activity, models in raw_lists.items()
         }
         self._provider_keys = provider_keys or ProviderKeys()
         self._fallback_model = fallback_model
         self._quality_band = quality_band
         self._usage_store = usage_store
         self._daily_budget_usd = daily_budget_usd
-        self.cooldown = ProviderCooldownTracker(cooldown_seconds=provider_cooldown_seconds)
+        self.cooldown = ProviderCooldownTracker(
+            cooldown_seconds=provider_cooldown_seconds
+        )
 
     @classmethod
     def from_settings(
@@ -239,6 +267,16 @@ class ModelRouter:
             daily_budget_usd=settings.daily_budget_usd,
         )
 
+    def apply_settings(self, settings: Settings) -> None:
+        """Refresh hot-reloadable routing fields from effective settings."""
+        self._activity_model_lists = {
+            activity: normalize_model_list(models)
+            for activity, models in settings.activity_model_lists.items()
+        }
+        self._quality_band = settings.quality_band
+        self._fallback_model = settings.fallback_model
+        self._daily_budget_usd = settings.daily_budget_usd
+
     @property
     def provider_keys(self) -> ProviderKeys:
         """Configured cloud provider API keys."""
@@ -255,14 +293,14 @@ class ModelRouter:
         return self._quality_band
 
     def activity_for(self, activity: Activity | str) -> Activity:
-        """Map a runtime activity string to a configured routing bucket."""
+        """Map a runtime activity string to a configured routing bucket.
+
+        All ``improve:*`` activities use the dedicated ``improve`` list
+        (``YLANG_MODELS_IMPROVE`` / ``models_improve``), not code/reason.
+        """
         if activity in self._activity_model_lists:
             return activity  # type: ignore[return-value]
         if isinstance(activity, str) and activity.startswith("improve:"):
-            mode = activity.removeprefix("improve:")
-            bucket = _IMPROVE_MODE_BUCKETS.get(mode)
-            if bucket is not None:
-                return bucket
             return "improve"
         return "other"
 
@@ -322,8 +360,12 @@ class ModelRouter:
         chain: list[str] = []
         seen: set[str] = set()
 
+        bucket = self.activity_for(activity)
         if explicit_model is not None:
-            resolved_explicit = resolve_explicit_model(explicit_model)
+            if bucket == "improve":
+                resolved_explicit = resolve_improver_explicit_model(explicit_model)
+            else:
+                resolved_explicit = resolve_explicit_model(explicit_model)
             if resolved_explicit is not None:
                 chain.append(resolved_explicit)
                 seen.add(resolved_explicit)

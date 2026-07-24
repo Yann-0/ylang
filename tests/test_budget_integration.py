@@ -46,7 +46,9 @@ def _write_spend(store: object, *, cost: float, hours_ago: int = 1) -> None:
     )
 
 
-def test_budget_just_under_cap_keeps_cloud_models(budget_router: tuple[ModelRouter, object]) -> None:
+def test_budget_just_under_cap_keeps_cloud_models(
+    budget_router: tuple[ModelRouter, object],
+) -> None:
     router, store = budget_router
     _write_spend(store, cost=9.99)
     ordered = router.ordered_candidates("code")
@@ -54,14 +56,18 @@ def test_budget_just_under_cap_keeps_cloud_models(budget_router: tuple[ModelRout
     assert "anthropic/claude-3-5-sonnet-latest" in ordered
 
 
-def test_budget_at_cap_drops_cloud_models(budget_router: tuple[ModelRouter, object]) -> None:
+def test_budget_at_cap_drops_cloud_models(
+    budget_router: tuple[ModelRouter, object],
+) -> None:
     router, store = budget_router
     _write_spend(store, cost=10.0)
     ordered = router.ordered_candidates("code")
     assert ordered == []
 
 
-def test_budget_over_cap_drops_cloud_models(budget_router: tuple[ModelRouter, object]) -> None:
+def test_budget_over_cap_drops_cloud_models(
+    budget_router: tuple[ModelRouter, object],
+) -> None:
     router, store = budget_router
     _write_spend(store, cost=12.0)
     ordered = router.ordered_candidates("code")

@@ -32,6 +32,7 @@ See [docs/development.md](docs/development.md) for the full workflow (135 tests,
 - Python 3.12+, type hints on public APIs.
 - Ruff for linting (`ruff check .`, `ruff format .`).
 - Prefer small, focused diffs over broad refactors.
+- Soft limits: functions ~80 LOC, files ~500 LOC (justify larger); see [docs/quality-charter.md](docs/quality-charter.md).
 - No new runtime dependencies without discussion in the issue/PR.
 
 ## Commit messages

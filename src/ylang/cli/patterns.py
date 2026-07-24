@@ -6,7 +6,10 @@ import argparse
 import sys
 
 from ylang.core.stores import open_stores
-from ylang.library.pattern_detector import UsagePatternDetector, propose_template_from_pattern
+from ylang.library.pattern_detector import (
+    UsagePatternDetector,
+    propose_template_from_pattern,
+)
 from ylang.library.patterns import DetectedPattern, TemplateProposal
 from ylang.library.store import save_learned_template
 from ylang.settings import Settings
@@ -14,10 +17,14 @@ from ylang.settings import Settings
 
 def build_patterns_parser() -> argparse.ArgumentParser:
     """Build the ``ylang patterns`` subcommand parser."""
-    parser = argparse.ArgumentParser(prog="ylang patterns", description="Pattern detection")
+    parser = argparse.ArgumentParser(
+        prog="ylang patterns", description="Pattern detection"
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    suggest = subparsers.add_parser("suggest", help="Show learned template proposals from usage")
+    suggest = subparsers.add_parser(
+        "suggest", help="Show learned template proposals from usage"
+    )
     suggest.add_argument(
         "--window-days",
         type=int,
@@ -64,7 +71,9 @@ def collect_pattern_proposals(
     return proposals
 
 
-def print_pattern_proposals(proposals: list[tuple[DetectedPattern, TemplateProposal]]) -> None:
+def print_pattern_proposals(
+    proposals: list[tuple[DetectedPattern, TemplateProposal]],
+) -> None:
     """Pretty-print detected patterns and template proposals to stdout."""
     if not proposals:
         print("No patterns detected (need ≥3 similar improver prompts in the window).")
@@ -140,7 +149,9 @@ def run_patterns_cli(argv: list[str] | None = None) -> int:
                 window_days=args.window_days,
             )
             if not proposals:
-                print("No patterns detected (need ≥3 similar improver prompts in the window).")
+                print(
+                    "No patterns detected (need ≥3 similar improver prompts in the window)."
+                )
                 return 1
 
             index = args.index
@@ -156,7 +167,9 @@ def run_patterns_cli(argv: list[str] | None = None) -> int:
 
             _, proposal = proposals[index - 1]
             if not args.yes:
-                answer = input(f"Save template {proposal.suggested_template_id!r}? [y/N]: ").strip()
+                answer = input(
+                    f"Save template {proposal.suggested_template_id!r}? [y/N]: "
+                ).strip()
                 if answer.lower() not in {"y", "yes"}:
                     print("Cancelled.")
                     return 1

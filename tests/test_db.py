@@ -18,6 +18,11 @@ def test_verify_storage_writable_allows_new_database(tmp_path: Path) -> None:
     verify_storage_writable(db_path)
 
 
+def test_verify_storage_writable_allows_missing_parent(tmp_path: Path) -> None:
+    db_path = tmp_path / "nested" / "ylang.db"
+    verify_storage_writable(db_path)
+
+
 def test_verify_storage_writable_rejects_readonly_file(tmp_path: Path) -> None:
     db_path = tmp_path / "ylang.db"
     db_path.write_text("")

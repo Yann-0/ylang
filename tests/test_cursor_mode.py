@@ -10,7 +10,9 @@ from ylang.improver.registry import (
 
 
 def test_resolve_mode_from_explicit() -> None:
-    resolved = resolve_cursor_mode("edit_file", "implement feature", explicit_mode="plan")
+    resolved = resolve_cursor_mode(
+        "edit_file", "implement feature", explicit_mode="plan"
+    )
     assert resolved.mode == "plan"
     assert resolved.source == "explicit"
 
@@ -28,7 +30,9 @@ def test_resolve_mode_from_mcp_tool_default() -> None:
 
 
 def test_resolve_mode_from_prompt_debug() -> None:
-    resolved = resolve_cursor_mode("generic", "debug this failing test and find root cause")
+    resolved = resolve_cursor_mode(
+        "generic", "debug this failing test and find root cause"
+    )
     assert resolved.mode == "debug"
     assert resolved.source == "prompt"
 

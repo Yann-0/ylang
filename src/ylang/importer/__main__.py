@@ -14,7 +14,9 @@ from ylang.importer import DEFAULT_PROMPTS_URL, import_into_library
 
 def main() -> None:
     """Import a public prompt CSV into a local library database."""
-    parser = argparse.ArgumentParser(description="Import public prompts into Ylang library")
+    parser = argparse.ArgumentParser(
+        description="Import public prompts into Ylang library"
+    )
     parser.add_argument(
         "--db",
         type=Path,

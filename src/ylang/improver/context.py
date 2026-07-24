@@ -7,8 +7,14 @@ from dataclasses import dataclass
 from typing import Any
 
 from ylang.core.memory import MemoryStore
+from ylang.core.runtime_settings import RuntimeSettingsStore, effective_int_setting
 from ylang.improver.block_assembler import select_blocks
-from ylang.improver.mode_optimizer import get_mode_config, handle_mode_switch
+from ylang.improver.mode_optimizer import (
+    apply_fast_path_config,
+    get_mode_config,
+    handle_mode_switch,
+    improver_timeout_sec,
+)
 from ylang.improver.registry import resolve_cursor_mode
 from ylang.library.effectiveness import build_effectiveness_scores
 from ylang.library.retrieval import select_learned_templates, select_reference_prompts
@@ -16,7 +22,6 @@ from ylang.library.store import Library
 from ylang.usage.store import UsageStore
 
 _EMPTY_CONVERSATION = "(No prior conversation provided.)"
-_DEFAULT_LEARNED_TEMPLATE_LIMIT = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,15 +46,20 @@ class ImproveContext:
         )
 
 
-def _learned_template_limit(default: int) -> int:
-    """Return max learned templates to inject; override via ``YLANG_LEARNED_TEMPLATE_LIMIT``."""
-    raw = os.environ.get("YLANG_LEARNED_TEMPLATE_LIMIT")
-    if raw is None:
-        return default
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return default
+def _learned_template_limit(default: int, store: UsageStore | None = None) -> int:
+    """Return max learned templates to inject from runtime, env, or mode default."""
+    overrides: dict[str, str] | None = None
+    if store is not None:
+        overrides = RuntimeSettingsStore(store._connection).as_dict()
+    return max(
+        0,
+        effective_int_setting(
+            "learned_template_limit",
+            env_var="YLANG_LEARNED_TEMPLATE_LIMIT",
+            default=default,
+            overrides=overrides,
+        ),
+    )
 
 
 def _effectiveness_weight() -> float:
@@ -58,6 +68,23 @@ def _effectiveness_weight() -> float:
         return min(1.0, max(0.0, float(raw)))
     except ValueError:
         return 0.5
+
+
+def _preferred_template_ids(store: UsageStore | None = None) -> frozenset[str]:
+    """Return operator-preferred template ids for retrieval boost."""
+    raw = ""
+    if store is not None:
+        raw = (
+            RuntimeSettingsStore(store._connection).get(  # type: ignore[attr-defined]
+                "retrieval_preferred_template_ids"
+            )
+            or ""
+        )
+    if not raw.strip():
+        raw = os.environ.get("YLANG_RETRIEVAL_PREFERRED_TEMPLATE_IDS", "")
+    return frozenset(
+        part.strip() for part in raw.split(",") if part.strip()
+    )
 
 
 def build_improve_context(
@@ -72,7 +99,10 @@ def build_improve_context(
 ) -> ImproveContext:
     """Assemble capped context blocks from conversation, facts, and library prompts."""
     resolved = resolve_cursor_mode(tool, text, explicit_mode=mode)
-    mode_config = get_mode_config(resolved.mode)
+    mode_config = apply_fast_path_config(
+        get_mode_config(resolved.mode),
+        timeout_sec=improver_timeout_sec(store),
+    )
     handoff = handle_mode_switch(resolved.mode)
     effectiveness = build_effectiveness_scores(store) if store is not None else {}
     weight = _effectiveness_weight()
@@ -85,6 +115,7 @@ def build_improve_context(
         mode_config=mode_config,
         effectiveness=effectiveness,
         weight=weight,
+        store=store,
     )
     blocks_block, block_ids = select_blocks(
         library,
@@ -168,16 +199,18 @@ def _build_reference_prompts_block(
     mode_config: object,
     effectiveness: dict[str, float],
     weight: float,
+    store: UsageStore | None = None,
 ) -> tuple[str | None, tuple[str, ...]]:
     from ylang.improver.mode_optimizer import ModeOptimizerConfig
 
     assert isinstance(mode_config, ModeOptimizerConfig)
     learned = select_learned_templates(
         library,
-        limit=_learned_template_limit(mode_config.learned_template_limit),
+        limit=_learned_template_limit(mode_config.learned_template_limit, store),
         max_chars=mode_config.reference_prompt_char_limit,
         effectiveness=effectiveness,
         weight=weight,
+        store=store,
     )
     summaries = select_reference_prompts(
         library,
@@ -188,6 +221,8 @@ def _build_reference_prompts_block(
         max_chars=mode_config.reference_prompt_char_limit,
         effectiveness=effectiveness,
         weight=weight,
+        store=store,
+        preferred_ids=_preferred_template_ids(store),
     )
     seen: set[str] = set()
     ordered: list[object] = []
@@ -211,7 +246,10 @@ def _build_reference_prompts_block(
             f"tags: {', '.join(summary.tags) or 'none'}\n"
             f"{template.body}"
         )
-        if used + len(section) + 2 > mode_config.reference_prompt_char_limit and sections:
+        if (
+            used + len(section) + 2 > mode_config.reference_prompt_char_limit
+            and sections
+        ):
             break
         sections.append(section)
         used += len(section) + 2

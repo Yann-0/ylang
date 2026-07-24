@@ -2,9 +2,15 @@
 
 Audit of `src/ylang/` for unused exports, stub seams, and wiring gaps. **Nothing listed here should be deleted without an explicit decision** — this document flags items only.
 
-Last updated: 2026-07-04 (Phase 4 / v0.2.0).
+**Last full audit:** 2026-07-04 (Phase 4 / v0.2.0).  
+**Pointers refreshed:** 2026-07-20 for v0.5.2 — treat sections below as a **historical seam list**, not a live inventory. For current package layout see [architecture.md](architecture.md); for quality policy see [quality-charter.md](quality-charter.md).
 
-Method: read modules under `src/ylang/`, grep for imports and call sites across the repo.
+Method (original): read modules under `src/ylang/`, grep for imports and call sites across the repo.
+
+### Known-live since the audit (do not treat as dead)
+
+- Gateway, pattern detection, improver registry `default_auto_apply`, console Operator Hub, runtime settings, experiments, and MCP tools listed in [mcp-tools.md](mcp-tools.md) are **wired and shipping**.
+- `MemoryStore.recall` is exposed via MCP (`recall_facts` / related tools — see mcp-tools.md).
 
 ---
 

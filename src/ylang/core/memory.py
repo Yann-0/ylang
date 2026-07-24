@@ -9,6 +9,12 @@ from pathlib import Path
 from typing import Literal, Self
 
 from ylang.core.db import open_connection
+from ylang.core.sqlite_rows import (
+    SqliteRow,
+    cell_int,
+    cell_str,
+    cell_optional_str,
+)
 
 FactScope = Literal["private", "shareable"]
 
@@ -129,6 +135,51 @@ class MemoryStore:
             created_at=created_at,
         )
 
+    def forget(self, fact_id: int) -> bool:
+        """Delete one fact by id; return True when a row was removed."""
+        cursor = self._connection.execute(
+            "DELETE FROM facts WHERE id = ?",
+            (fact_id,),
+        )
+        self._connection.commit()
+        return cursor.rowcount > 0
+
+    def update(
+        self,
+        fact_id: int,
+        *,
+        fact: str,
+        scope: str,
+        workspace: str = "",
+    ) -> Fact | None:
+        """Update an existing fact; return the row or ``None`` when missing."""
+        existing = self._connection.execute(
+            "SELECT id FROM facts WHERE id = ?",
+            (fact_id,),
+        ).fetchone()
+        if existing is None:
+            return None
+        validated_fact = _validate_fact(fact)
+        validated_scope = _validate_scope(scope)
+        validated_workspace = workspace.strip()
+        self._connection.execute(
+            """
+            UPDATE facts
+            SET fact = ?, scope = ?, workspace = ?
+            WHERE id = ?
+            """,
+            (validated_fact, validated_scope, validated_workspace, fact_id),
+        )
+        self._connection.commit()
+        row = self._connection.execute(
+            """
+            SELECT id, fact, scope, created_at, COALESCE(workspace, '')
+            FROM facts WHERE id = ?
+            """,
+            (fact_id,),
+        ).fetchone()
+        return _row_to_fact(row) if row is not None else None
+
     def recall(
         self,
         *,
@@ -161,13 +212,13 @@ class MemoryStore:
         return [_row_to_fact(row) for row in cursor.fetchall()]
 
 
-def _row_to_fact(row: tuple[object, ...]) -> Fact:
-    workspace = str(row[4]) if len(row) > 4 else ""
+def _row_to_fact(row: SqliteRow) -> Fact:
+    workspace = cell_optional_str(row, 4) or ""
     return Fact(
-        id=int(row[0]),
-        fact=str(row[1]),
-        scope=str(row[2]),  # type: ignore[arg-type]
-        created_at=_from_iso(str(row[3])),
+        id=cell_int(row, 0),
+        fact=cell_str(row, 1),
+        scope=cell_str(row, 2),  # type: ignore[arg-type]
+        created_at=_from_iso(cell_str(row, 3)),
         workspace=workspace,
     )
 

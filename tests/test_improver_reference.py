@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from ylang.improver.reference import is_reference_only_prompt, scrub_file_reference_numbers
+from ylang.improver.reference import (
+    is_reference_only_prompt,
+    scrub_file_reference_numbers,
+)
 
 
 def test_reference_only_terminal_pointer() -> None:
@@ -15,7 +18,9 @@ def test_reference_only_markdown_range() -> None:
 
 
 def test_task_verb_is_not_reference_only() -> None:
-    assert is_reference_only_prompt("fix this : @ylang-improved-prompt.md (1-20)") is False
+    assert (
+        is_reference_only_prompt("fix this : @ylang-improved-prompt.md (1-20)") is False
+    )
 
 
 def test_scrub_file_reference_numbers() -> None:

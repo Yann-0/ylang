@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -38,12 +40,12 @@ def test_validate_accepts_clean_improvement() -> None:
 def test_validate_accepts_improved_when_changes_incomplete() -> None:
     """Accept improved text when model omits some fixes from changes[] (replay mismatch)."""
     original = "build all remaining backlog items. itterate untill all of them are done and green"
-    improved = (
-        "Build all remaining backlog items. Iterate until all of them are done and green."
-    )
+    improved = "Build all remaining backlog items. Iterate until all of them are done and green."
     changes = [
         Change(kind="clarity", description="capitalize", before="build", after="Build"),
-        Change(kind="clarity", description="spelling", before="itterate", after="Iterate"),
+        Change(
+            kind="clarity", description="spelling", before="itterate", after="Iterate"
+        ),
     ]
     result, ok = _validate(original, improved, changes, True, resolved=_AGENT)
     assert ok is True
@@ -198,9 +200,7 @@ def test_validate_salvage_accepts_restructured_spec() -> None:
 def test_validate_accepts_comma_formatted_test_count() -> None:
     original = "1001 unit tests passing after Wave 18."
     improved = (
-        "## Test plan\n"
-        "- Run 1,001 unit tests (baseline)\n"
-        "- Wave 18 migration complete"
+        "## Test plan\n- Run 1,001 unit tests (baseline)\n- Wave 18 migration complete"
     )
     changes = [
         Change(
@@ -214,13 +214,71 @@ def test_validate_accepts_comma_formatted_test_count() -> None:
     assert ok is True
 
 
-def test_validate_rejects_improved_without_changes() -> None:
+def test_validate_salvages_numbers_changed_list_renumbering() -> None:
+    """Restructuring that drops list-marker indices must not fail numbers changed."""
+    original = (
+        "my answers\n"
+        "1. I do not understand what is the purpose. explain\n"
+        "2. 5\n"
+        "3. both\n"
+        "4. per party"
+    )
+    improved = (
+        "## Goal\nClarify quiz answers including the value 5.\n\n"
+        "## Deliverables\n"
+        "- Explain the purpose\n"
+        "- Confirm answer 5, both, and per party"
+    )
+    changes = [
+        Change(
+            kind="format",
+            description="Restructure answers into spec",
+            before=original,
+            after=improved,
+        ),
+    ]
+    result, ok = _validate(original, improved, changes, True, resolved=_AGENT)
+    assert ok is True
+    assert result.validated is True
+
+
+def test_try_salvage_validation_failure_numbers_changed() -> None:
+    from ylang.improver.improver import _try_salvage_validation_failure
+
+    original = "Wave 18 follow-up:\n1. Run tests\n2. Deploy"
+    improved = (
+        "## Goal\nComplete Wave 18 follow-up.\n\n"
+        "## Workstreams\n- Run tests\n- Deploy"
+    )
+    changes = [
+        Change(
+            kind="format",
+            description="Restructure",
+            before=original,
+            after=improved,
+        ),
+    ]
+    salvaged = _try_salvage_validation_failure(
+        original,
+        improved,
+        changes,
+        True,
+        resolved=_AGENT,
+        rejection_reason="numbers changed",
+    )
+    assert salvaged is not None
+    assert salvaged.validated is True
+    assert salvaged.improved == improved
+
+
+def test_validate_salvages_minor_clarity_without_changes() -> None:
     original = "fix teh bug"
     improved = "fix the bug"
     result, ok = _validate(original, improved, [], False, resolved=_AGENT)
-    assert ok is False
-    assert result.improved == original
-    assert result.rejection_reason == "improved text changed but changes[] is empty"
+    assert ok is True
+    assert result.improved == improved
+    assert result.validated is True
+    assert len(result.changes) == 1
 
 
 def test_validate_salvages_restructured_spec_with_omitted_changes() -> None:
@@ -391,6 +449,90 @@ def test_validate_rejects_before_not_in_original() -> None:
     assert ok is False
 
 
+def test_validate_accepts_whitespace_normalized_before() -> None:
+    original = "fix the  bug\nin main.py"
+    improved = "fix the bug in main.py"
+    changes = [
+        Change(
+            kind="clarity",
+            description="collapse whitespace",
+            before="fix the  bug\nin main.py",
+            after="fix the bug in main.py",
+        ),
+    ]
+    result, ok = _validate(original, improved, changes, True, resolved=_AGENT)
+    assert ok is True
+    assert result.improved == improved
+
+
+def test_validate_accepts_scope_with_paraphrased_before() -> None:
+    original = "do a full commit of the remaining work"
+    improved = (
+        "## Goal\ndo a full commit of the remaining work\n\n"
+        "## Deliverables\n- Stage, commit, and push remaining changes\n\n"
+        "## Definition of done\n- Clean git status"
+    )
+    changes = [
+        Change(
+            kind="scope",
+            description="Expand into commit checklist",
+            before="full commit of remaining work",
+            after=improved,
+        ),
+    ]
+    result, ok = _validate(original, improved, changes, True, resolved=_AGENT)
+    assert ok is True
+    assert result.validated is True
+
+
+def test_numbers_ignore_ordered_list_markers() -> None:
+    from ylang.improver.improver import _numbers_preserved
+
+    original = (
+        "my answers\n"
+        "1. I do not understand what is the purpose. explain\n"
+        "2. 5\n"
+        "3. both\n"
+        "4. per party"
+    )
+    improved = (
+        "## Goal\nClarify quiz answers including the value 5.\n\n"
+        "## Deliverables\n"
+        "- Explain the purpose\n"
+        "- Confirm answer 5, both, and per party"
+    )
+    assert _numbers_preserved(original, improved) is True
+
+
+def test_validate_salvages_anchor_failure_via_omitted_path() -> None:
+    """When before anchors fail but improved is a safe restructure, salvage it."""
+    from ylang.improver.improver import _try_salvage, _salvage_omitted_changes
+
+    original = "what is the purpose of this screen ?"
+    improved = (
+        "## Goal\nExplain the purpose of this screen.\n\n"
+        "## Deliverables\n- Clear description of screen intent and audience\n\n"
+        "## Definition of done\n- Answer ready for the user"
+    )
+    changes = [
+        Change(
+            kind="clarity",
+            description="bad anchor",
+            before="qwerty-unrelated-anchor-zzz",
+            after="purpose of this screen",
+        ),
+    ]
+    result, ok = _validate(original, improved, changes, True, resolved=_AGENT)
+    assert ok is False
+    assert result.rejection_reason == "change.before not anchored to original"
+    salvaged = _try_salvage(original, improved, True, resolved=_AGENT)
+    if salvaged is None:
+        salvaged = _salvage_omitted_changes(original, improved, True, resolved=_AGENT)
+    assert salvaged is not None
+    assert salvaged.validated is True
+    assert salvaged.improved == improved
+
+
 def test_validate_rejects_excessive_length_change() -> None:
     original = "short prompt"
     improved = "short prompt" + (" extra" * 400)
@@ -421,23 +563,33 @@ def test_validate_accepts_short_clarity_condensation() -> None:
 
 
 def test_fallback_short_prompt_expansion_multitask() -> None:
-    from ylang.improver.improver import _fallback_short_prompt_expansion, _is_vague_short_prompt
+    from ylang.improver.improver import (
+        _fallback_short_prompt_expansion,
+        _is_vague_short_prompt,
+    )
 
     original = "let's do all"
     assert _is_vague_short_prompt(original) is True
-    resolved = resolve_cursor_mode("cursor-multitask", original, explicit_mode="multitask")
-    result = _fallback_short_prompt_expansion(original, True, resolved=resolved, require_vague=True)
+    resolved = resolve_cursor_mode(
+        "cursor-multitask", original, explicit_mode="multitask"
+    )
+    result = _fallback_short_prompt_expansion(
+        original, True, resolved=resolved, require_vague=True
+    )
     assert result is not None
     assert result.validated is True
     assert result.improved.startswith("## Goal")
     assert "let's do all" in result.improved
     assert "## Workstreams" in result.improved
-    assert _fallback_short_prompt_expansion(
-        "process 42 items",
-        True,
-        resolved=resolved,
-        require_vague=True,
-    ) is None
+    assert (
+        _fallback_short_prompt_expansion(
+            "process 42 items",
+            True,
+            resolved=resolved,
+            require_vague=True,
+        )
+        is None
+    )
 
 
 def test_validate_accepts_short_prompt_spec_expansion() -> None:
@@ -524,9 +676,7 @@ def test_improver_expands_unchanged_short_prompt(improver: Improver) -> None:
     original = "let's do all"
     payload = {"improved": original, "changes": []}
     mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps(payload)))
-    ]
+    mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(payload)))]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
     mock_response._hidden_params = {"response_cost": 0.0}
@@ -559,9 +709,7 @@ def test_improver_fallback_after_validation_rejection(improver: Improver) -> Non
         ],
     }
     mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps(payload)))
-    ]
+    mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(payload)))]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
     mock_response._hidden_params = {"response_cost": 0.0}
@@ -581,7 +729,9 @@ def test_improver_fallback_after_validation_rejection(improver: Improver) -> Non
 
 
 def test_improver_llm_failure_returns_safe_result(improver: Improver) -> None:
-    with patch("ylang.core.engine.litellm.completion", side_effect=RuntimeError("down")):
+    with patch(
+        "ylang.core.engine.litellm.completion", side_effect=RuntimeError("down")
+    ):
         result = improver.improve("hello", "edit_file", model="openai/gpt-4o")
     assert result.original == "hello"
     assert result.improved == "hello"
@@ -625,7 +775,9 @@ def test_improver_validation_rejection_returns_safe_result(improver: Improver) -
 def test_auto_apply_false_for_precision_tools(improver: Improver) -> None:
     mock_response = MagicMock()
     mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps({"improved": "ok", "changes": []})))
+        MagicMock(
+            message=MagicMock(content=json.dumps({"improved": "ok", "changes": []}))
+        )
     ]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
@@ -639,7 +791,9 @@ def test_auto_apply_false_for_precision_tools(improver: Improver) -> None:
 def test_auto_apply_true_for_non_precision_tools(improver: Improver) -> None:
     mock_response = MagicMock()
     mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps({"improved": "ok", "changes": []})))
+        MagicMock(
+            message=MagicMock(content=json.dumps({"improved": "ok", "changes": []}))
+        )
     ]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
@@ -650,7 +804,9 @@ def test_auto_apply_true_for_non_precision_tools(improver: Improver) -> None:
     assert result.auto_apply_default is True
 
 
-def test_improver_salvages_structured_output_with_empty_changes(improver: Improver) -> None:
+def test_improver_salvages_structured_output_with_empty_changes(
+    improver: Improver,
+) -> None:
     original = (
         "we need to use AI to generate real possible answers (even false) and do not take "
         "answers totaly out of the context of the question. each question can allow "
@@ -665,15 +821,15 @@ def test_improver_salvages_structured_output_with_empty_changes(improver: Improv
     )
     payload = {"improved": improved, "changes": []}
     mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps(payload)))
-    ]
+    mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(payload)))]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
     mock_response._hidden_params = {"response_cost": 0.0}
 
     with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
-        result = improver.improve(original, "cursor-agent", model="test-model", mode="agent")
+        result = improver.improve(
+            original, "cursor-agent", model="test-model", mode="agent"
+        )
 
     assert result.validated is True
     assert result.rejection_reason is None
@@ -681,7 +837,9 @@ def test_improver_salvages_structured_output_with_empty_changes(improver: Improv
     assert len(result.changes) == 1
 
 
-def test_improver_records_accepted_when_validated_and_changed(improver: Improver) -> None:
+def test_improver_records_accepted_when_validated_and_changed(
+    improver: Improver,
+) -> None:
     original = "fix teh bug"
     payload = {
         "improved": "fix the bug",
@@ -695,9 +853,7 @@ def test_improver_records_accepted_when_validated_and_changed(improver: Improver
         ],
     }
     mock_response = MagicMock()
-    mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps(payload)))
-    ]
+    mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(payload)))]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
     mock_response._hidden_params = {"response_cost": 0.0}
@@ -716,7 +872,9 @@ def test_improver_records_accepted_when_validated_and_changed(improver: Improver
 def test_improver_accepted_param_logged_on_complete(improver: Improver) -> None:
     mock_response = MagicMock()
     mock_response.choices = [
-        MagicMock(message=MagicMock(content=json.dumps({"improved": "hello", "changes": []})))
+        MagicMock(
+            message=MagicMock(content=json.dumps({"improved": "hello", "changes": []}))
+        )
     ]
     mock_response.model = "test-model"
     mock_response.usage = MagicMock(prompt_tokens=1)
@@ -729,3 +887,288 @@ def test_improver_accepted_param_logged_on_complete(improver: Improver) -> None:
 
     rows = improver._engine.store.recall_usage(UsageWindow.last_hours(1))
     assert rows[0].improver_accepted is True
+
+
+def test_improver_timeout_returns_safe_result(
+    improver: Improver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Long prompts past the timeout fallback budget still hard-reject."""
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "0.05")
+    long_prompt = "please analyze " + ("the architecture and performance " * 20)
+
+    def slow_complete(*_args: object, **_kwargs: object) -> object:
+        import time
+
+        time.sleep(1.0)
+        raise AssertionError("should have timed out")
+
+    with patch("ylang.core.engine.litellm.completion", side_effect=slow_complete):
+        result = improver.improve(long_prompt, "cursor-agent", model="auto")
+
+    assert result.improved == long_prompt
+    assert result.validated is False
+    assert result.rejection_reason == "improver timeout"
+
+
+def test_improver_timeout_salvages_medium_prompt(
+    improver: Improver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "0.05")
+
+    def slow_complete(*_args: object, **_kwargs: object) -> object:
+        import time
+
+        time.sleep(1.0)
+        raise AssertionError("should have timed out")
+
+    with patch("ylang.core.engine.litellm.completion", side_effect=slow_complete):
+        result = improver.improve("hello world", "cursor-agent", model="auto")
+
+    assert result.validated is True
+    assert "## Goal" in result.improved
+    assert "hello world" in result.improved
+
+
+def test_improver_timeout_salvages_short_prompt(
+    improver: Improver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "0.05")
+
+    def slow_complete(*_args: object, **_kwargs: object) -> object:
+        import time
+
+        time.sleep(1.0)
+        raise AssertionError("should have timed out")
+
+    with patch("ylang.core.engine.litellm.completion", side_effect=slow_complete):
+        result = improver.improve("go", "cursor-agent", model="auto")
+
+    assert result.validated is True
+    assert result.improved != "go"
+    assert "## Goal" in result.improved
+
+    from ylang.usage.store import UsageWindow
+
+    rows = improver._engine.store.recall_usage(UsageWindow.last_hours(1))
+    assert len(rows) == 1
+    assert rows[0].success is False
+    assert rows[0].improver_fired is True
+    assert rows[0].improver_validated is True
+    assert rows[0].improver_changed is True
+    assert rows[0].improver_rejection_reason is None
+
+
+def test_improver_timeout_returns_safe_result_usage_row(
+    improver: Improver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "0.05")
+    long_prompt = "please analyze " + ("the architecture and performance " * 20)
+
+    def slow_complete(*_args: object, **_kwargs: object) -> object:
+        import time
+
+        time.sleep(1.0)
+        raise AssertionError("should have timed out")
+
+    with patch("ylang.core.engine.litellm.completion", side_effect=slow_complete):
+        improver.improve(long_prompt, "cursor-agent", model="auto")
+
+    from ylang.usage.store import UsageWindow
+
+    rows = improver._engine.store.recall_usage(UsageWindow.last_hours(1))
+    assert len(rows) == 1
+    assert rows[0].success is False
+    assert rows[0].improver_fired is True
+    assert rows[0].improver_rejection_reason == "improver timeout"
+    assert rows[0].improver_validated is False
+
+
+def test_improver_timeout_scrubs_late_success_orphan(
+    improver: Improver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Late engine.complete after timeout must not leave a normal success row."""
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "0.05")
+    long_prompt = "please analyze " + ("the architecture and performance " * 20)
+    release = threading.Event()
+
+    def blocked_then_ok(*_args: object, **_kwargs: object) -> object:
+        release.wait(timeout=2.0)
+        mock_response = MagicMock()
+        mock_response.choices = [
+            MagicMock(
+                message=MagicMock(
+                    content=json.dumps({"improved": long_prompt, "changes": []})
+                )
+            )
+        ]
+        mock_response.model = "test-model"
+        mock_response.usage = MagicMock(prompt_tokens=3, completion_tokens=1)
+        mock_response._hidden_params = {"response_cost": 0.01}
+        return mock_response
+
+    with patch("ylang.core.engine.litellm.completion", side_effect=blocked_then_ok):
+        result = improver.improve(long_prompt, "cursor-agent", model="auto")
+        release.set()
+        time.sleep(0.3)
+
+    assert result.rejection_reason == "improver timeout"
+
+    from ylang.usage.improver_analytics import summarize_improver
+    from ylang.usage.store import UsageWindow
+
+    window = UsageWindow.last_hours(1)
+    rows = improver._engine.store.recall_usage(window)
+    success_improver = [
+        row
+        for row in rows
+        if row.success and row.improver_fired and row.improver_rejection_reason is None
+    ]
+    assert success_improver == []
+    timeout_rows = [
+        row for row in rows if row.improver_rejection_reason == "improver timeout"
+    ]
+    assert len(timeout_rows) == 1
+    funnel = summarize_improver(improver._engine.store, window)
+    assert funnel.total_fired == 1
+    assert funnel.top_rejection_reasons.get("improver timeout") == 1
+
+
+def test_improver_skips_critique_near_timeout_budget(
+    improver: Improver, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "12")
+    monkeypatch.setenv("YLANG_IMPROVER_CRITIQUE", "1")
+    original = "fix teh bug"
+    improved = "fix the bug"
+    payload = {
+        "improved": improved,
+        "changes": [
+            {
+                "kind": "clarity",
+                "description": "spelling",
+                "before": "teh",
+                "after": "the",
+            }
+        ],
+    }
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(payload)))]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1, completion_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    calls: list[object] = []
+
+    def tracking_complete(*args: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return mock_response
+
+    # First-pass nearly exhausts the budget so critique should be skipped.
+    # 1) deadline = monotonic + 12 → 112; 2–3) critique remaining check + log.
+    monotonic_values = iter([100.0, 111.5, 111.5])
+
+    with (
+        patch("ylang.core.engine.litellm.completion", side_effect=tracking_complete),
+        patch(
+            "ylang.improver.improver.time.monotonic",
+            side_effect=lambda: next(monotonic_values, 111.5),
+        ),
+    ):
+        result = improver.improve(original, "edit_file", model="test-model")
+
+    assert result.improved == improved
+    assert len(calls) == 1
+
+
+def test_improver_salvages_bad_before_anchor(improver: Improver) -> None:
+    original = "do the follow-up check list and fix any issues"
+    improved = (
+        "## Goal\nComplete the follow-up checklist and fix issues.\n\n"
+        "## Deliverables\n- Work through each checklist item\n"
+        "- Fix failures found during verification\n\n"
+        "## Definition of done\n- Checklist complete with evidence"
+    )
+    payload = {
+        "improved": improved,
+        "changes": [
+            {
+                "kind": "clarity",
+                "description": "typo",
+                "before": "follow up checklist XYZ",
+                "after": "follow-up check list",
+            }
+        ],
+    }
+    mock_response = MagicMock()
+    mock_response.choices = [MagicMock(message=MagicMock(content=json.dumps(payload)))]
+    mock_response.model = "test-model"
+    mock_response.usage = MagicMock(prompt_tokens=1)
+    mock_response._hidden_params = {"response_cost": 0.0}
+
+    with patch("ylang.core.engine.litellm.completion", return_value=mock_response):
+        result = improver.improve(original, "cursor-agent", model="auto", mode="agent")
+
+    assert result.validated is True
+    assert result.rejection_reason is None
+    assert result.improved == improved
+    assert len(result.changes) == 1
+    assert result.changes[0].kind == "scope"
+
+
+def test_change_before_accepts_fuzzy_anchor() -> None:
+    from ylang.improver.improver import _change_before_valid
+
+    original = "fix the authentication middleware timeout bug"
+    change = Change(
+        kind="clarity",
+        description="rephrase",
+        before="authentication middleware timeout",
+        after="auth middleware timeout",
+    )
+    assert _change_before_valid(original, change) is True
+
+
+def test_change_before_accepts_case_insensitive_medium_span() -> None:
+    from ylang.improver.improver import _change_before_valid
+
+    original = "Please Fix The Authentication Middleware Timeout In Login"
+    change = Change(
+        kind="clarity",
+        description="normalize casing",
+        before="fix the authentication middleware timeout",
+        after="fix the authentication middleware timeout",
+    )
+    assert _change_before_valid(original, change) is True
+
+
+def test_change_before_medium_fuzzy_salvage_still_rejects_number_edits() -> None:
+    from ylang.improver.improver import _validate
+
+    original = "retry the request 3 times then fail"
+    improved = "retry the request 5 times then fail"
+    changes = [
+        Change(
+            kind="clarity",
+            description="paraphrase with bad number",
+            before="Retry The Request 3 Times",
+            after="retry the request 5 times",
+        ),
+    ]
+    result, ok = _validate(original, improved, changes, True, resolved=_AGENT)
+    assert ok is False
+    assert result.rejection_reason == "numbers changed"
+
+
+def test_empty_changes_salvages_single_heading_expansion() -> None:
+    from ylang.improver.improver import _validate
+
+    original = "add dark mode toggle to settings"
+    improved = (
+        "## Goal\nAdd a dark mode toggle to settings.\n\n"
+        "- Persist preference\n"
+        "- Update UI chrome"
+    )
+    result, ok = _validate(original, improved, [], True, resolved=_AGENT)
+    assert ok is True
+    assert result.validated is True
+    assert result.improved == improved

@@ -11,13 +11,13 @@ from mcp.server.fastmcp import FastMCP
 from ylang.core import Engine
 from ylang.core.stores import open_stores
 from ylang.improver import Improver
-from ylang.library.patterns import register_pattern_detector
-from ylang.library.semantic_pattern_detector import create_pattern_detector
+from ylang.library.patterns import ensure_pattern_detector, register_pattern_detector_store
+from ylang.console.routes import register_console_routes
 from ylang.gateway import VIRTUAL_MODEL_NAMES, register_gateway_routes
 from ylang.gateway.routes import register_health_route
 from ylang.mcp.auth import BearerTokenMiddleware
 from ylang.mcp.deps import YlangDeps
-from ylang.mcp.rate_limit import maybe_rate_limit_middleware
+from ylang.mcp.rate_limit import maybe_rate_limit_middleware, register_rate_limit_store
 from ylang.mcp.tools import register_tools
 from ylang.core.logging_config import configure_logging
 from ylang.settings import Settings
@@ -40,6 +40,7 @@ _TOOL_NAMES = (
     "template_effectiveness_report",
     "optimization_suggestions",
     "record_prompt_edit",
+    "create_experiment_variant",
 )
 
 
@@ -64,6 +65,9 @@ def create_server(
         )
         if gateway_engine is not None:
             register_gateway_routes(server, gateway_engine)
+            register_console_routes(
+                server, deps, settings, gateway_engine=gateway_engine
+            )
         else:
             register_health_route(server)
     else:
@@ -85,7 +89,10 @@ def _print_connection_details(settings: Settings) -> None:
         print(f"  listen: {settings.host}:{settings.port}/mcp", file=sys.stderr)
         print("  auth: Bearer token required", file=sys.stderr)
         print("  gateway: enabled", file=sys.stderr)
-        print("  gateway routes: POST /v1/chat/completions, GET /v1/models, GET /usage, GET /health", file=sys.stderr)
+        print(
+            "  gateway routes: POST /v1/chat/completions, GET /v1/models, GET /console, GET /health",
+            file=sys.stderr,
+        )
         print(
             f"  virtual models: {', '.join(VIRTUAL_MODEL_NAMES)}",
             file=sys.stderr,
@@ -99,7 +106,11 @@ async def _run_http_async(server: FastMCP, settings: Settings) -> None:
     import uvicorn
 
     base_app = server.streamable_http_app()
-    app = BearerTokenMiddleware(base_app, settings.auth_token or "")
+    app = BearerTokenMiddleware(
+        base_app,
+        settings.auth_token or "",
+        previous_token=settings.auth_token_previous,
+    )
     app = maybe_rate_limit_middleware(app)
     config = uvicorn.Config(
         app,
@@ -134,8 +145,9 @@ def run_server() -> None:
     settings = Settings.load()
     path = settings.resolved_storage_path()
     stores = open_stores(path)
-    pattern_mode = os.environ.get("YLANG_PATTERN_DETECTOR", "lexical").strip().lower()
-    register_pattern_detector(create_pattern_detector(stores.store, mode=pattern_mode))
+    register_pattern_detector_store(stores.store)
+    register_rate_limit_store(stores.store)
+    ensure_pattern_detector()
     engine = Engine.from_settings(stores.store, surface="mcp", settings=settings)
     gateway_engine = (
         Engine.from_settings(stores.store, surface="gateway", settings=settings)

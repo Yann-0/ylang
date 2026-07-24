@@ -50,7 +50,12 @@ def load_cursor_slug_aliases(path: Path | None = None) -> dict[str, str]:
         logger.warning("Model aliases file must be a JSON object: %s", config_path)
         return aliases
     for key, value in payload.items():
-        if isinstance(key, str) and isinstance(value, str) and key.strip() and value.strip():
+        if (
+            isinstance(key, str)
+            and isinstance(value, str)
+            and key.strip()
+            and value.strip()
+        ):
             aliases[key.strip()] = value.strip()
             aliases[key.strip().lower()] = value.strip()
     return aliases

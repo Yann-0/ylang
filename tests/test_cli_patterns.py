@@ -8,10 +8,48 @@ import pytest
 
 from ylang.cli.patterns import run_patterns_cli
 from ylang.core.stores import open_stores
+from ylang.library.patterns import DetectedPattern, TemplateProposal
+from ylang.library.types import TemplateParam
 from ylang.usage.store import open_store
 
 
-def test_patterns_suggest_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def _valid_proposal_for(pattern: DetectedPattern) -> TemplateProposal:
+    return TemplateProposal(
+        suggested_template_id=f"learned-{pattern.pattern_id}",
+        name=f"Learned: {pattern.pattern_id}",
+        body=(
+            "Refactor the {module} routes for async sqlite access "
+            "and add {test_scope} tests."
+        ),
+        params=[
+            TemplateParam(name="module", description="Module", default="gateway"),
+            TemplateParam(name="test_scope", description="Scope", default="unit"),
+        ],
+        rationale="Detected repeated prompts.",
+    )
+
+
+def _mock_valid_proposals(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _outcome(pattern: DetectedPattern, *, engine: object | None = None) -> object:
+        from ylang.library.patterns import PatternProposalOutcome
+
+        return PatternProposalOutcome(proposal=_valid_proposal_for(pattern))
+
+    monkeypatch.setattr(
+        "ylang.cli.patterns.propose_template_from_pattern",
+        lambda pattern: _valid_proposal_for(pattern),
+    )
+    monkeypatch.setattr(
+        "ylang.library.pattern_detector.propose_template_from_pattern_outcome",
+        _outcome,
+    )
+
+
+def test_patterns_suggest_cli(
+    tmp_path: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     db_path = tmp_path / "patterns.db"  # type: ignore[operator]
     store = open_store(db_path)
     now = datetime.now(timezone.utc)
@@ -33,6 +71,7 @@ def test_patterns_suggest_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch,
     store.close()
 
     monkeypatch.setenv("YLANG_STORAGE_PATH", str(db_path))
+    _mock_valid_proposals(monkeypatch)
     exit_code = run_patterns_cli(["suggest", "--window-days", "30"])
     assert exit_code == 0
     captured = capsys.readouterr()
@@ -40,7 +79,11 @@ def test_patterns_suggest_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch,
     assert "learned-" in captured.out
 
 
-def test_patterns_suggest_empty(tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_patterns_suggest_empty(
+    tmp_path: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     db_path = tmp_path / "empty-patterns.db"  # type: ignore[operator]
     store = open_store(db_path)
     store.close()
@@ -52,7 +95,11 @@ def test_patterns_suggest_empty(tmp_path: object, monkeypatch: pytest.MonkeyPatc
     assert "No patterns detected" in captured.out
 
 
-def test_patterns_apply_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+def test_patterns_apply_cli(
+    tmp_path: object,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     db_path = tmp_path / "apply-patterns.db"  # type: ignore[operator]
     store = open_store(db_path)
     now = datetime.now(timezone.utc)
@@ -74,6 +121,7 @@ def test_patterns_apply_cli(tmp_path: object, monkeypatch: pytest.MonkeyPatch, c
     store.close()
 
     monkeypatch.setenv("YLANG_STORAGE_PATH", str(db_path))
+    _mock_valid_proposals(monkeypatch)
     exit_code = run_patterns_cli(["apply", "--index", "1", "--yes"])
     assert exit_code == 0
     captured = capsys.readouterr()

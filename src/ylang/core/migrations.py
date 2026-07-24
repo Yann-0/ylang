@@ -110,6 +110,51 @@ def _migrate_feedback_events(connection: sqlite3.Connection) -> None:
     )
 
 
+@migration(7, "runtime_settings")
+def _migrate_runtime_settings(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runtime_settings (
+            key         TEXT PRIMARY KEY,
+            value       TEXT NOT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+
+
+@migration(8, "improver_cache")
+def _migrate_improver_cache(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS improver_cache (
+            cache_key    TEXT PRIMARY KEY,
+            result_json  TEXT NOT NULL,
+            expires_at   REAL NOT NULL
+        )
+        """
+    )
+
+
+@migration(9, "apply_audit_log")
+def _migrate_apply_audit_log(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS apply_audit_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp       TEXT NOT NULL,
+            actor           TEXT NOT NULL,
+            proposal_id     TEXT NOT NULL,
+            action_type     TEXT NOT NULL,
+            detail          TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_apply_audit_timestamp ON apply_audit_log (timestamp)"
+    )
+
+
 @migration(6, "prompt_experiments")
 def _migrate_prompt_experiments(connection: sqlite3.Connection) -> None:
     connection.execute(
@@ -128,6 +173,35 @@ def _migrate_prompt_experiments(connection: sqlite3.Connection) -> None:
     )
 
 
+@migration(10, "templates_visibility_archived")
+def _migrate_templates_visibility_archived(connection: sqlite3.Connection) -> None:
+    if not _table_exists(connection, "templates"):
+        return
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='templates'"
+    ).fetchone()
+    if row is None or "'archived'" in str(row[0]):
+        return
+    connection.executescript(
+        """
+        CREATE TABLE templates_new (
+            template_id    TEXT PRIMARY KEY,
+            name           TEXT    NOT NULL,
+            latest_version INTEGER NOT NULL DEFAULT 0,
+            updated_at     TEXT    NOT NULL,
+            visibility     TEXT    NOT NULL DEFAULT 'private'
+                CHECK (visibility IN ('public', 'private', 'archived')),
+            tags_json      TEXT    NOT NULL DEFAULT '[]'
+        );
+        INSERT INTO templates_new
+            SELECT template_id, name, latest_version, updated_at, visibility, tags_json
+            FROM templates;
+        DROP TABLE templates;
+        ALTER TABLE templates_new RENAME TO templates;
+        """
+    )
+
+
 def run_migrations(connection: sqlite3.Connection) -> int:
     """Apply pending migrations; return count applied."""
     connection.execute(
@@ -139,7 +213,9 @@ def run_migrations(connection: sqlite3.Connection) -> int:
         )
         """
     )
-    cursor = connection.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
+    cursor = connection.execute(
+        "SELECT COALESCE(MAX(version), 0) FROM schema_migrations"
+    )
     current = int(cursor.fetchone()[0])
     applied = 0
     for version, name, fn in _MIGRATIONS:

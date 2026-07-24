@@ -15,6 +15,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from ylang.core.env_file import load_discovered_env_file
 from ylang.core.types import Activity
 
 logger = logging.getLogger(__name__)
@@ -51,9 +52,10 @@ DEFAULT_ACTIVITY_MODEL_LISTS: dict[Activity, list[str]] = {
         "openai/gpt-4o",
     ],
     "improve": [
-        "anthropic/claude-3-5-sonnet-latest",
-        "openai/gpt-4o",
         "mistral/mistral-small-latest",
+        "openai/gpt-4o-mini",
+        "openai/gpt-4o",
+        "anthropic/claude-3-5-sonnet-latest",
     ],
     "other": [
         "mistral/mistral-small-latest",
@@ -174,13 +176,18 @@ class Settings(BaseModel):
         default=None,
         description="Bearer token required for http transport.",
     )
+    auth_token_previous: str | None = Field(
+        default=None,
+        description="Previous bearer token accepted during rotation grace period.",
+    )
     provider_keys: ProviderKeys = Field(
         default_factory=ProviderKeys,
         description="Optional LLM provider API keys.",
     )
     activity_model_lists: dict[Activity, list[str]] = Field(
         default_factory=lambda: {
-            activity: list(models) for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
+            activity: list(models)
+            for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
         },
         description="Activity to quality-ordered LiteLLM model candidate lists.",
     )
@@ -207,6 +214,7 @@ class Settings(BaseModel):
     @classmethod
     def load(cls) -> Settings:
         """Build settings from environment variables and defaults."""
+        load_discovered_env_file()
         kwargs: dict[str, object] = {}
 
         raw_path = os.environ.get("YLANG_STORAGE_PATH")
@@ -224,6 +232,9 @@ class Settings(BaseModel):
 
         if raw_token := os.environ.get("YLANG_AUTH_TOKEN"):
             kwargs["auth_token"] = raw_token
+
+        if raw_previous := os.environ.get("YLANG_AUTH_TOKEN_PREVIOUS"):
+            kwargs["auth_token_previous"] = raw_previous
 
         provider_keys = _load_provider_keys()
         kwargs["provider_keys"] = provider_keys
@@ -275,11 +286,9 @@ def _read_optional_env(name: str) -> str | None:
 
 
 def _parse_model_list(raw: str) -> list[str]:
-    models = [part.strip() for part in raw.split(",") if part.strip()]
-    if not models:
-        msg = "model list env var must contain at least one model"
-        raise ValueError(msg)
-    return models
+    from ylang.core.config_parsers import parse_model_list
+
+    return parse_model_list(raw, require_non_empty=True)
 
 
 def _load_provider_keys() -> ProviderKeys:
@@ -295,7 +304,8 @@ def _load_activity_model_lists() -> dict[Activity, list[str]]:
     from ylang.core.model_router import normalize_model_list
 
     lists = {
-        activity: list(models) for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
+        activity: list(models)
+        for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
     }
     for activity, env_var in _ACTIVITY_MODEL_LIST_ENV_VARS.items():
         if override := _read_optional_env(env_var):
@@ -310,7 +320,9 @@ def _load_activity_model_lists() -> dict[Activity, list[str]]:
                 _ACTIVITY_MODEL_LIST_ENV_VARS[activity],
             )
             lists[activity] = [override]
-    return {activity: normalize_model_list(models) for activity, models in lists.items()}
+    return {
+        activity: normalize_model_list(models) for activity, models in lists.items()
+    }
 
 
 def _warn_missing_provider_keys(provider_keys: ProviderKeys) -> None:

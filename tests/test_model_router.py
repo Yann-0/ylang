@@ -6,7 +6,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from ylang.core.model_router import ModelRouter, resolve_explicit_model
+from ylang.core.model_router import (
+    ModelRouter,
+    resolve_explicit_model,
+    resolve_improver_explicit_model,
+)
 from ylang.settings import ProviderKeys
 from ylang.usage.store import open_store
 
@@ -27,13 +31,21 @@ def router() -> ModelRouter:
 
 
 def test_activity_for_improve_prefix(router: ModelRouter) -> None:
-    assert router.activity_for("improve:agent") == "code"
-    assert router.activity_for("improve:ask") == "reason"
-    assert router.activity_for("improve:plan") == "reason"
-    assert router.activity_for("improve:debug") == "code"
+    assert router.activity_for("improve:agent") == "improve"
+    assert router.activity_for("improve:ask") == "improve"
+    assert router.activity_for("improve:plan") == "improve"
+    assert router.activity_for("improve:debug") == "improve"
+    assert router.activity_for("improve:multitask") == "improve"
     assert router.activity_for("improve:edit_file") == "improve"
     assert router.activity_for("code") == "code"
     assert router.activity_for("unknown") == "other"
+
+
+def test_resolve_auto_sentinel_uses_activity_routing() -> None:
+    assert resolve_explicit_model("auto") is None
+    assert resolve_explicit_model("default") is None
+    assert resolve_explicit_model("") is None
+    assert resolve_explicit_model("  route  ") is None
 
 
 def test_resolve_cursor_slug_alias() -> None:
@@ -43,11 +55,23 @@ def test_resolve_cursor_slug_alias() -> None:
     assert resolve_explicit_model("claude-sonnet-4-5") == "anthropic/claude-sonnet-4-6"
 
 
+def test_resolve_improver_fast_slug_defers_to_activity_routing() -> None:
+    assert resolve_improver_explicit_model("auto") is None
+    assert resolve_improver_explicit_model("composer-2.5-fast") is None
+    assert resolve_improver_explicit_model("gpt-5.3-codex-high-fast") is None
+    assert resolve_improver_explicit_model("claude-sonnet-4-5") is None
+    assert resolve_improver_explicit_model("anthropic/claude-3-5-sonnet-latest") == (
+        "anthropic/claude-3-5-sonnet-latest"
+    )
+
+
 def test_resolve_unknown_slug_returns_none() -> None:
     assert resolve_explicit_model("not-a-real-model-slug-xyz") is None
 
 
-def test_build_attempt_chain_includes_explicit_and_fallback(router: ModelRouter) -> None:
+def test_build_attempt_chain_includes_explicit_and_fallback(
+    router: ModelRouter,
+) -> None:
     chain = router.build_attempt_chain("code", explicit_model="openai/gpt-4o")
     assert chain[0] == "openai/gpt-4o"
     assert "ollama/qwen2.5" in chain
@@ -126,7 +150,10 @@ def test_preference_order_boosts_successful_models(tmp_path: object) -> None:
     assert ordered[0] == "anthropic/claude-3-5-sonnet-latest"
 
 
-def test_preference_order_uses_improver_accepted_for_improve_bucket(tmp_path: object) -> None:
+
+def test_preference_order_uses_improver_accepted_for_improve_bucket(
+    tmp_path: object,
+) -> None:
     store = open_store(tmp_path / "improve-pref.db")  # type: ignore[operator]
     now = datetime.now(timezone.utc)
     for _ in range(4):
@@ -167,10 +194,31 @@ def test_preference_order_uses_improver_accepted_for_improve_bucket(tmp_path: ob
         usage_store=store,
     )
     ordered = router.ordered_candidates("improve")
-    assert ordered[0] == "openai/gpt-4o"
+    assert ordered[0] == "anthropic/claude-3-5-sonnet-latest"
 
 
-def test_attempt_chain_boosts_improver_accepted_model(tmp_path: object) -> None:
+def test_attempt_chain_improve_ignores_cursor_slug_explicit(
+    router: ModelRouter,
+) -> None:
+    chain = router.build_attempt_chain(
+        "improve:agent",
+        explicit_model="claude-sonnet-4-5",
+    )
+    assert chain[0] == "anthropic/claude-3-5-sonnet-latest"
+    assert "anthropic/claude-sonnet-4-6" not in chain
+
+
+def test_attempt_chain_improve_honors_litellm_explicit(router: ModelRouter) -> None:
+    chain = router.build_attempt_chain(
+        "improve:agent",
+        explicit_model="openai/gpt-4o",
+    )
+    assert chain[0] == "openai/gpt-4o"
+
+
+def test_attempt_chain_boosts_improver_accepted_model_for_code_not_improve(
+    tmp_path: object,
+) -> None:
     store = open_store(tmp_path / "chain-pref.db")  # type: ignore[operator]
     now = datetime.now(timezone.utc)
     for _ in range(3):
@@ -198,6 +246,6 @@ def test_attempt_chain_boosts_improver_accepted_model(tmp_path: object) -> None:
         fallback_model="ollama/qwen2.5",
         usage_store=store,
     )
-    chain = router.build_attempt_chain("improve")
+    chain = router.build_attempt_chain("code")
     assert chain[0] == "openai/gpt-4o"
     assert "anthropic/claude-3-5-sonnet-latest" in chain

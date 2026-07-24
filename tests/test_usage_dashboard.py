@@ -28,7 +28,7 @@ def test_dashboard_includes_chart_sections() -> None:
         daily_buckets=buckets,
         live=True,
     )
-    assert "chart.js" in html.lower()
+    assert "chart.umd.min.js" in html
     assert "costChart" in html
     assert "activityChart" in html
     assert "modelChart" in html

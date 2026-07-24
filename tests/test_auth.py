@@ -8,7 +8,7 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from ylang.mcp.auth import BearerTokenMiddleware
+from ylang.mcp.auth import BearerTokenMiddleware, session_cookie_kwargs
 
 
 async def _ok(_request: object) -> PlainTextResponse:
@@ -20,6 +20,14 @@ def client() -> TestClient:
     app = Starlette(routes=[Route("/", _ok)])
     wrapped = BearerTokenMiddleware(app, "secret-token")
     return TestClient(wrapped)
+
+
+def test_session_cookie_kwargs_lan_safe() -> None:
+    params = session_cookie_kwargs()
+    assert params["path"] == "/"
+    assert params["samesite"] == "lax"
+    assert params["httponly"] is True
+    assert params["secure"] is False
 
 
 def test_bearer_auth_rejects_missing_token(client: TestClient) -> None:

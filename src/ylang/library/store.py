@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Self
 
 from ylang.core.db import open_connection
-from ylang.library.search import index_template, search_templates
+from ylang.library.search import index_template, search_templates_hybrid
 from ylang.library.seeds import ensure_seeds
 from ylang.library.types import (
     Template,
@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS templates (
     latest_version INTEGER NOT NULL DEFAULT 0,
     updated_at     TEXT    NOT NULL,
     visibility     TEXT    NOT NULL DEFAULT 'private'
-        CHECK (visibility IN ('public', 'private')),
+        CHECK (visibility IN ('public', 'private', 'archived')),
     tags_json      TEXT    NOT NULL DEFAULT '[]'
 );
 
@@ -45,11 +45,45 @@ CREATE INDEX IF NOT EXISTS idx_template_versions_source
     ON template_versions (source);
 """
 
+
+def _templates_check_allows_archived(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='templates'"
+    ).fetchone()
+    if row is None:
+        return True
+    return "'archived'" in str(row[0])
+
+
+def _rebuild_templates_visibility_check(connection: sqlite3.Connection) -> None:
+    """Rebuild ``templates`` so visibility CHECK includes ``archived``."""
+    connection.executescript(
+        """
+        CREATE TABLE templates_new (
+            template_id    TEXT PRIMARY KEY,
+            name           TEXT    NOT NULL,
+            latest_version INTEGER NOT NULL DEFAULT 0,
+            updated_at     TEXT    NOT NULL,
+            visibility     TEXT    NOT NULL DEFAULT 'private'
+                CHECK (visibility IN ('public', 'private', 'archived')),
+            tags_json      TEXT    NOT NULL DEFAULT '[]'
+        );
+        INSERT INTO templates_new
+            SELECT template_id, name, latest_version, updated_at, visibility, tags_json
+            FROM templates;
+        DROP TABLE templates;
+        ALTER TABLE templates_new RENAME TO templates;
+        """
+    )
+
+
 def _open_connection(db_path: Path) -> sqlite3.Connection:
     return open_connection(db_path)
 
 
-def from_connection(connection: sqlite3.Connection, *, ensure_seed_data: bool = True) -> Library:
+def from_connection(
+    connection: sqlite3.Connection, *, ensure_seed_data: bool = True
+) -> Library:
     """Attach a library store to an existing SQLite connection."""
     library = Library(connection)
     library._ensure_schema()
@@ -123,7 +157,14 @@ class Library:
     def __init__(self, connection: sqlite3.Connection) -> None:
         """Attach to an open SQLite connection; ``list_templates`` results are cached."""
         self._connection = connection
-        self._list_cache: dict[tuple[TemplateSource | None, TemplateVisibility | None], list[TemplateSummary]] = {}
+        self._list_cache: dict[
+            tuple[
+                TemplateSource | None,
+                TemplateVisibility | None,
+                bool,
+            ],
+            list[TemplateSummary],
+        ] = {}
 
     def clear_list_cache(self) -> None:
         """Clear the in-memory template list cache (primarily for tests)."""
@@ -146,21 +187,46 @@ class Library:
     def _ensure_schema(self) -> None:
         self._connection.executescript(_SCHEMA_SQL)
         columns = {
-            row[1] for row in self._connection.execute("PRAGMA table_info(templates)").fetchall()
+            row[1]
+            for row in self._connection.execute(
+                "PRAGMA table_info(templates)"
+            ).fetchall()
         }
         if "visibility" not in columns:
             self._connection.execute(
                 """
                 ALTER TABLE templates
                 ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private'
-                    CHECK (visibility IN ('public', 'private'))
+                    CHECK (visibility IN ('public', 'private', 'archived'))
                 """
             )
+        elif not _templates_check_allows_archived(self._connection):
+            _rebuild_templates_visibility_check(self._connection)
         if "tags_json" not in columns:
             self._connection.execute(
                 "ALTER TABLE templates ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"
             )
         self._connection.commit()
+
+    def set_visibility(
+        self,
+        template_id: str,
+        visibility: TemplateVisibility,
+    ) -> bool:
+        """Update template visibility without creating a new version."""
+        template = self.recall(template_id)
+        if template is None:
+            return False
+        if template.source == "seed" and visibility != "public":
+            msg = "seed templates must remain public"
+            raise ValueError(msg)
+        cursor = self._connection.execute(
+            "UPDATE templates SET visibility = ? WHERE template_id = ?",
+            (visibility, template_id),
+        )
+        self._connection.commit()
+        self._list_cache.clear()
+        return cursor.rowcount > 0
 
     def save(
         self,
@@ -188,13 +254,17 @@ class Library:
         ).fetchone()
         version = 1 if row is None else int(row[0]) + 1
         if row is None:
-            resolved_visibility = visibility if visibility is not None else _default_visibility(source)
+            resolved_visibility = (
+                visibility if visibility is not None else _default_visibility(source)
+            )
             resolved_tags = list(tags) if tags is not None else []
         else:
             resolved_visibility = (
                 visibility if visibility is not None else row[1]  # type: ignore[arg-type]
             )
-            resolved_tags = list(tags) if tags is not None else list(_tags_from_json(str(row[2])))
+            resolved_tags = (
+                list(tags) if tags is not None else list(_tags_from_json(str(row[2])))
+            )
         params_json = _params_to_json(params)
         tags_json = _tags_to_json(resolved_tags)
         self._connection.execute(
@@ -229,7 +299,14 @@ class Library:
                     visibility = ?, tags_json = ?
                 WHERE template_id = ?
                 """,
-                (name, version, _to_iso(now), resolved_visibility, tags_json, template_id),
+                (
+                    name,
+                    version,
+                    _to_iso(now),
+                    resolved_visibility,
+                    tags_json,
+                    template_id,
+                ),
             )
         self._connection.commit()
         self._list_cache.clear()
@@ -303,14 +380,28 @@ class Library:
         *,
         source: TemplateSource | None = None,
         visibility: TemplateVisibility | None = None,
+        include_archived: bool = False,
     ) -> list[TemplateSummary]:
-        """Return latest-version metadata for each template."""
-        cache_key = (source, visibility)
+        """Return latest-version metadata for each template.
+
+        By default excludes ``archived`` templates. Pass ``visibility='archived'``
+        or ``include_archived=True`` to include them.
+        """
+        cache_key = (source, visibility, include_archived)
         cached = self._list_cache.get(cache_key)
         if cached is not None:
             return cached
+        if visibility is not None:
+            visibility_clause = "AND t.visibility = ?"
+            visibility_params: tuple[object, ...] = (visibility,)
+        elif include_archived:
+            visibility_clause = ""
+            visibility_params = ()
+        else:
+            visibility_clause = "AND t.visibility IN ('public', 'private')"
+            visibility_params = ()
         rows = self._connection.execute(
-            """
+            f"""
             SELECT
                 t.template_id,
                 t.name,
@@ -324,10 +415,10 @@ class Library:
             JOIN template_versions tv
                 ON t.template_id = tv.template_id AND t.latest_version = tv.version
             WHERE (? IS NULL OR tv.source = ?)
-              AND (? IS NULL OR t.visibility = ?)
+              {visibility_clause}
             ORDER BY t.template_id
             """,
-            (source, source, visibility, visibility),
+            (source, source, *visibility_params),
         ).fetchall()
         summaries: list[TemplateSummary] = []
         for row in rows:
@@ -348,17 +439,61 @@ class Library:
         return summaries
 
     def search(self, query: str, *, limit: int = 20) -> list[TemplateSummary]:
-        """Return templates ranked by FTS match for ``query``."""
-        hits = search_templates(self._connection, query, limit=limit)
+        """Return templates ranked by FTS or TF-IDF fallback for ``query``."""
+        summaries = self.list()
+        hits = search_templates_hybrid(
+            self._connection,
+            query,
+            summaries=summaries,
+            recall_body=self.recall,
+            limit=limit,
+        )
         if not hits:
             return []
-        by_id = {item.template_id: item for item in self.list()}
+        by_id = {item.template_id: item for item in summaries}
         results: list[TemplateSummary] = []
         for template_id, _rank in hits:
             summary = by_id.get(template_id)
             if summary is not None:
                 results.append(summary)
         return results
+
+    def delete(self, template_id: str) -> bool:
+        """Delete a template and all versions. Seed templates cannot be deleted."""
+        latest = self.recall(template_id)
+        if latest is None:
+            return False
+        if latest.source == "seed":
+            msg = "seed templates cannot be deleted"
+            raise ValueError(msg)
+        self._connection.execute(
+            "DELETE FROM templates_fts WHERE template_id = ?",
+            (template_id,),
+        )
+        self._connection.execute(
+            "DELETE FROM template_versions WHERE template_id = ?",
+            (template_id,),
+        )
+        cursor = self._connection.execute(
+            "DELETE FROM templates WHERE template_id = ?",
+            (template_id,),
+        )
+        self._connection.commit()
+        self._list_cache.clear()
+        return cursor.rowcount > 0
+
+    def list_versions(self, template_id: str) -> list[tuple[int, str, str]]:
+        """Return ``(version, source, created_at)`` rows newest first."""
+        cursor = self._connection.execute(
+            """
+            SELECT version, source, created_at
+            FROM template_versions
+            WHERE template_id = ?
+            ORDER BY version DESC
+            """,
+            (template_id,),
+        )
+        return [(int(row[0]), str(row[1]), str(row[2])) for row in cursor.fetchall()]
 
     def render(
         self,
@@ -398,6 +533,12 @@ def save_learned_template(
     params: list[TemplateParam],
 ) -> Template:
     """Save a learned template from the pattern-detection pipeline."""
+    from ylang.library.pattern_detector import evaluate_learned_template_quality
+
+    ok, skip_reason = evaluate_learned_template_quality(body, params=params)
+    if not ok:
+        msg = skip_reason or "learned template quality check failed"
+        raise ValueError(msg)
     return library.save(
         template_id,
         name=name,

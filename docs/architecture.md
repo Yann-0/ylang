@@ -2,12 +2,15 @@
 
 Ylang follows a **single core engine, multiple thin faces** design. Business logic lives in `src/ylang/core` and domain packages; face adapters only translate I/O.
 
-**Two live faces** share one core when running on HTTP transport (`YLANG_TRANSPORT=http`):
+**Three live faces** share one core when running on HTTP transport (`YLANG_TRANSPORT=http`):
 
 1. **MCP server** — stdio (local Cursor subprocess) or HTTP (`/mcp`); improver, templates, facts, usage analytics, pattern tools.
 2. **OpenAI-compatible gateway** — on the same HTTP process: `POST /v1/chat/completions`, `GET /v1/models`, `GET /usage`, `GET /health`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` map to activity-based routing; other model strings passthrough to named providers.
+3. **Admin console** — `/console/*` (session cookie or Bearer); Operator Hub (`/console/control`) includes the **Optimize Ylang** wizard; Parameters, Templates, Feedback, and governed proposals. See [console.md](console.md).
 
-Stdio transport runs MCP only (no `/v1/*` routes). See [gateway.md](gateway.md) for Cursor custom-endpoint setup.
+Stdio transport runs MCP only (no `/v1/*` or `/console/*` routes). See [gateway.md](gateway.md) for Cursor custom-endpoint setup.
+
+**Edit feedback dual gate:** console runtime `edit_feedback` gates Feedback nav/UI; Cursor hook capture requires `YLANG_CAPTURE_EDIT_FEEDBACK=1` (alias `YLANG_EDIT_FEEDBACK`; `sessionStart` defaults to `1`). Both must be on for polish-ratio samples.
 
 ## High-level diagram
 
@@ -16,6 +19,7 @@ flowchart TB
     subgraph faces["Faces (adapters)"]
         MCP["MCP server<br/>stdio / HTTP /mcp"]
         GW["OpenAI gateway<br/>/v1/* /usage /health"]
+        CON["Admin console<br/>/console/*"]
         CLI["CLI<br/>ylang usage / patterns"]
     end
 
@@ -40,6 +44,10 @@ flowchart TB
     MCP --> LIB
     MCP --> USG
     MCP --> MEM
+    CON --> IMP
+    CON --> LIB
+    CON --> USG
+    CON --> MEM
     GW --> ENG
     IMP --> ENG
     ENG --> RTR
@@ -56,7 +64,7 @@ flowchart TB
 2. **Propose-only improver** — `improve_prompt` returns suggestions; it does not auto-apply edits to files or commands.
 3. **Local-first** — SQLite at a configurable path; no Ylang cloud storage.
 4. **Usage from day one** — Every completion writes a row to the `usage` table.
-5. **Thin adapters** — MCP, gateway, and CLI subcommands serialize I/O; they do not embed routing or provider logic.
+5. **Thin adapters** — MCP, gateway, admin console, and CLI subcommands serialize I/O; they do not embed routing or provider logic.
 
 ## Package layout
 
@@ -70,12 +78,18 @@ src/ylang/
 ├── core/
 │   ├── engine.py        # LiteLLM completion + usage logging (stream + tools)
 │   ├── model_router.py  # Activity-based model selection, fallback chain
+│   ├── config_parsers.py # Shared parse_model_list / parse_bool_flag
+│   ├── sqlite_rows.py   # SqliteRow + cell_* converters for typed rows
+│   ├── runtime_settings.py  # SQLite overrides + merge_settings
 │   ├── db.py            # Shared SQLite connection (WAL, busy timeout)
 │   ├── stores.py        # open_stores() — one connection, three stores
 │   ├── memory.py        # Scoped facts (remember / recall)
 │   └── types.py         # Activity, Message, CompletionResult
 ├── improver/
-│   ├── improver.py      # Propose-only prompt improvement
+│   ├── improver.py      # Improver class + cache / orchestration
+│   ├── parse.py         # LLM JSON/prose payload parsing
+│   ├── validate.py      # Safety validation (anchors, numbers, replay)
+│   ├── salvage.py       # Salvage / short-prompt fallback paths
 │   ├── context.py       # Conversation, facts, reference prompts
 │   ├── reference.py     # Reference-only prompt pass-through (no LLM)
 │   ├── registry.py      # Cursor mode resolution, auto-apply defaults
@@ -92,7 +106,16 @@ src/ylang/
 │   ├── activity.py      # Canonical activity labels at write time
 │   ├── aggregates.py    # Summaries by activity, model, cost (TTL cache)
 │   ├── dashboard.py     # Chart.js HTML for GET /usage and CLI export
+│   ├── optimizer.py     # Optimization suggestions by family
 │   └── async_ops.py     # run_store_sync for non-blocking HTTP handlers
+├── console/
+│   ├── routes.py        # register_console_routes orchestrator
+│   ├── context.py       # ConsoleContext shared by route modules
+│   ├── route_modules/   # Domain HTTP handlers (templates, facts, ops, …)
+│   ├── pages.py         # Re-exports screen renderers
+│   ├── page_modules/    # Per-screen HTML builders
+│   ├── layout.py        # Shared chrome / nav
+│   └── static/          # Chart.js + extracted page CSS/JS
 ├── gateway/
 │   ├── routes.py        # /v1/chat/completions, /v1/models, /usage, /health
 │   ├── mapping.py       # Virtual route-* model resolution
@@ -100,7 +123,9 @@ src/ylang/
 ├── importer/            # CSV public-prompt import (CLI + MCP tool)
 └── mcp/
     ├── server.py        # FastMCP wiring and transport
-    ├── tools.py         # MCP tool handlers (thin serializers)
+    ├── tools.py         # register_tools orchestrator
+    ├── tool_groups/     # Domain MCP tool registrars
+    ├── serializers.py   # Tool response/request serializers
     ├── deps.py          # YlangDeps dependency bundle
     └── auth.py          # Bearer token middleware (HTTP only)
 ```
@@ -159,11 +184,19 @@ sequenceDiagram
 `ModelRouter` builds an **attempt chain** per request:
 
 1. Start from activity's model list (or explicit `model` parameter).
-2. Skip models whose provider key is missing.
-3. Skip providers in cooldown after retryable errors.
-4. Apply optional daily budget cap from usage aggregates.
-5. Optionally reorder by personal usage success rates.
-6. Append `fallback_model` (default `ollama/qwen2.5`) at the end.
+2. For **`improve:*`**, Cursor slugs (`claude-sonnet-4-*`, `composer`, `auto`, …)
+   defer to `models_improve` — only LiteLLM `provider/model` strings prepend.
+3. Skip models whose provider key is missing.
+4. Skip providers in cooldown after retryable errors.
+5. Apply optional daily budget cap from usage aggregates.
+6. Optionally reorder by personal usage success rates (**skipped for `improve`**
+   so configured `models_improve` order stays authoritative).
+7. Append `fallback_model` (default `ollama/qwen2.5`) at the end.
+
+`Engine.complete` / `complete_stream` **hot-reload** runtime SQLite overrides
+(`RuntimeSettingsStore`) into the router when the engine was built via
+`Engine.from_settings`. Improver context retrieval also hard-blocks templates
+with 0% accept rate and ≥3 injections (see `library/effectiveness.py`).
 
 See `src/ylang/core/model_router.py` for implementation details.
 
@@ -242,23 +275,49 @@ See [gateway.md](gateway.md) for virtual models and Cursor setup.
 
 Optional Ollama smoke tests use `@pytest.mark.llm_e2e`.
 
+## Admin console (HTTP) — third face
+
+When `YLANG_TRANSPORT=http`, the same process serves `/console/*` (session cookie or Bearer). This is the **third face** alongside MCP and the OpenAI gateway — same core stores and engine, browser UX for operators. See [console.md](console.md).
+
+Operator Hub (`/console/control`) includes the **Optimize Ylang** wizard (`#optimize-wizard`: diagnose → propose → apply → measure) plus KPIs and top applyable proposals.
+
+### Intended navigation IA
+
+Target information architecture (document even if the live nav is still a flat list):
+
+| Group | Pages | Notes |
+|-------|-------|-------|
+| **Core** | Control, Overview, Usage, Improver, Templates, Facts, Patterns, Proposals | Always visible; Operator Hub is the ops home |
+| **Learn** | Experiments, Feedback | **Gated** — appear in nav only when runtime flags `experiments` / `edit_feedback` are on |
+| **System** | Data, Advisor, Setup, Parameters, Ops | Advanced or primary per IA; Health linked from Setup |
+
+Templates support `visibility=archived` (excluded from improver retrieval) and toxic quarantine (`toxic=1` / `archive-toxic`). Data manager adds search + safe mutators (cache clear, usage scrub). Parameters exposes Fast/cheap vs Quality presets, preferred-template chips, and a pending-proposals embed.
+
+Settings and Ops document usage digests as **CLI/cron only** (optional Linux `notify-send` when a display is available) — the console does not email or push digests.
+
+Edit-distance Feedback requires the **dual gate** (console `edit_feedback` + hook `YLANG_CAPTURE_EDIT_FEEDBACK`).
+
 ## Status
 
 ### Shipped
 
-- MCP server (stdio and HTTP `/mcp`) — improver, library, facts, usage, pattern and analytics tools
+- MCP server (stdio and HTTP `/mcp`) — 17 tools including improver, library, facts, usage, pattern and analytics tools
 - OpenAI-compatible gateway on HTTP transport — all four routes above; virtual models `route-code`, `route-search`, `route-reason`, `route-other`
-- Bearer auth on `/mcp`, `/v1/*`, and `/usage` when `YLANG_AUTH_TOKEN` is set; `/health` exempt
+- Admin console on HTTP (third face) — Operator Hub + Optimize wizard, templates, facts, analytics, proposals, Parameters, ops
+- Bearer auth on `/mcp`, `/v1/*`, `/console/*`, and `/usage` when `YLANG_AUTH_TOKEN` is set; `/health` exempt
 - Activity-based model routing, fallback chain, provider cooldown, usage-based preference boost
 - **Daily budget cap enforced at runtime** — when `YLANG_DAILY_BUDGET_USD` is set and rolling 24h spend ≥ cap, `ModelRouter.apply_budget_filter` drops cloud models from candidate lists (local `ollama/*` remains via fallback); 80% startup stderr warning
 - Usage logging on every LLM call; `GET /usage` dashboard and CLI export
 - Pattern detection (`detect_patterns`, `ylang patterns suggest` / `apply`) and learned-template improver context
 - Propose-only improver and optimization surfaces (`optimization_suggestions`, optional `YLANG_EXPERIMENTS=1`)
+- Local usage digest CLI with optional desktop notify (`notify-send`)
 
 ### Planned
 
 - **Auto-evaluation loop** — experiments and optimization suggestions are surfaced propose-only; no automatic closure (routing/template updates from outcomes without manual review)
-- **Pattern-learning maturity** — detection and manual apply exist; threshold notifications (BL-005) and fuller automation not yet shipped
+- **Pattern-learning maturity** — detection and manual apply exist; fuller automation not yet shipped
+- **Grouped/gated console nav** — intended IA above; live build may still list all links flat
+- **Email digest** — desktop notify is local-only
 
 Not in scope: optimizer with provenance, GitHub/KB sources, hosted team features.
 

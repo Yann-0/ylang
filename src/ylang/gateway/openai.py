@@ -34,7 +34,9 @@ def new_completion_id() -> str:
     return f"chatcmpl-{uuid.uuid4().hex[:24]}"
 
 
-def parse_chat_request(body: Any) -> tuple[list[Message], str, bool, list[dict[str, Any]] | None, Any]:
+def parse_chat_request(
+    body: Any,
+) -> tuple[list[Message], str, bool, list[dict[str, Any]] | None, Any]:
     """Parse POST /v1/chat/completions JSON into messages, model, stream, tools, tool_choice."""
     if not isinstance(body, dict):
         msg = "Request body must be a JSON object"

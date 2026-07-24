@@ -9,7 +9,11 @@ import pytest
 
 from ylang.core import Engine
 from ylang.core.stores import open_stores
-from ylang.improver.context import ImproveContext, build_improve_context, _EMPTY_CONVERSATION
+from ylang.improver.context import (
+    ImproveContext,
+    build_improve_context,
+    _EMPTY_CONVERSATION,
+)
 from ylang.improver.improver import Improver, _build_user_message
 from ylang.improver.registry import resolve_cursor_mode
 
@@ -21,7 +25,9 @@ def backends(tmp_path: Path):
     stores.close()
 
 
-def test_build_improve_context_empty_conversation_includes_facts_and_reference(backends) -> None:
+def test_build_improve_context_empty_conversation_includes_facts_and_reference(
+    backends,
+) -> None:
     """Empty or missing conversation still yields facts and reference prompts."""
     backends.memory.remember("project uses pytest", "private")
 
@@ -39,10 +45,9 @@ def test_build_improve_context_empty_conversation_includes_facts_and_reference(b
     assert context.has_content is True
 
 
-def test_build_improve_context_caps(backends) -> None:
-    conversation = [
-        {"role": "user", "content": f"turn {index}"} for index in range(30)
-    ]
+def test_build_improve_context_caps(backends, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "25")
+    conversation = [{"role": "user", "content": f"turn {index}"} for index in range(30)]
     for index in range(25):
         backends.memory.remember(f"fact number {index}", "private")
 
@@ -61,15 +66,35 @@ def test_build_improve_context_caps(backends) -> None:
     assert "code-explain" in context.reference_prompts_block.lower()
 
 
-def test_build_improve_context_includes_learned_templates(backends) -> None:
+def test_build_improve_context_fast_path_caps(backends, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "18")
+    conversation = [{"role": "user", "content": f"turn {index}"} for index in range(30)]
+
+    context = build_improve_context(
+        "summarize this code",
+        "code-explain",
+        conversation,
+        backends.library,
+        backends.memory,
+        store=backends.store,
+    )
+    assert context.conversation_block is not None
+    assert context.conversation_block.count("turn") <= 10
+
+
+def test_build_improve_context_includes_learned_templates(
+    backends, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from ylang.library.store import save_learned_template
     from ylang.library.types import TemplateParam
 
+    # Above fast-path threshold so learned_template_limit stays enabled.
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "25")
     save_learned_template(
         backends.library,
         "learned-test-pattern",
         name="Test Pattern",
-        body="Always include edge cases for {topic}.",
+        body="Always include edge cases and regression tests for {topic}.",
         params=[TemplateParam(name="topic", description="Topic", default="tests")],
     )
     context = build_improve_context(
@@ -83,22 +108,112 @@ def test_build_improve_context_includes_learned_templates(backends) -> None:
     assert "learned-test-pattern" in context.reference_prompts_block
 
 
-def test_build_user_message_always_includes_all_context_sections() -> None:
-    """When context is provided, all three sections appear even if blocks are empty."""
+def test_learned_template_limit_from_runtime_settings(
+    backends, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from ylang.core.runtime_settings import RuntimeSettingsStore
+    from ylang.library.store import save_learned_template
+    from ylang.library.types import TemplateParam
+
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "25")
+    for index in range(3):
+        save_learned_template(
+            backends.library,
+            f"learned-limit-{index}",
+            name=f"Pattern {index}",
+            body=(
+                f"Include edge cases and regression tests for pattern {index} "
+                "using {topic}."
+            ),
+            params=[TemplateParam(name="topic", description="Topic", default="tests")],
+        )
+
+    RuntimeSettingsStore(backends.store._connection).set("learned_template_limit", "1")
+    context = build_improve_context(
+        "add tests",
+        "edit_file",
+        None,
+        backends.library,
+        backends.memory,
+        store=backends.store,
+    )
+    assert context.reference_prompts_block is not None
+    learned_ids = [
+        template_id
+        for template_id in context.reference_template_ids
+        if template_id.startswith("learned-limit-")
+    ]
+    assert len(learned_ids) == 1
+
+
+def test_zero_accept_learned_templates_excluded_from_context(
+    backends, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import datetime, timezone
+
+    from ylang.library.store import save_learned_template
+    from ylang.library.types import TemplateParam
+
+    monkeypatch.setenv("YLANG_IMPROVER_TIMEOUT_SEC", "25")
+    save_learned_template(
+        backends.library,
+        "learned-good",
+        name="Good Pattern",
+        body="Provide helpful guidance for improving {topic} with concrete examples.",
+        params=[TemplateParam(name="topic", description="Topic", default="tests")],
+    )
+    save_learned_template(
+        backends.library,
+        "learned-bad",
+        name="Bad Pattern",
+        body="Provide noisy guidance for improving {topic} without useful detail.",
+        params=[TemplateParam(name="topic", description="Topic", default="tests")],
+    )
+    now = datetime.now(timezone.utc)
+    for _ in range(43):
+        backends.store.write_usage(
+            surface="mcp",
+            activity="improve:agent",
+            model_used="test/model",
+            prompt_tokens=10,
+            cost=0.01,
+            improver_fired=True,
+            improver_accepted=False,
+            improver_validated=True,
+            improver_changed=True,
+            improver_context_templates="learned-bad",
+            latency_ms=50,
+            success=True,
+            timestamp=now,
+        )
+
+    context = build_improve_context(
+        "add tests",
+        "edit_file",
+        None,
+        backends.library,
+        backends.memory,
+        store=backends.store,
+    )
+    assert context.reference_prompts_block is not None
+    assert "learned-good" in context.reference_prompts_block
+    assert "learned-bad" not in context.reference_prompts_block
+    assert "learned-bad" not in context.reference_template_ids
+
+
+def test_build_user_message_omits_empty_context_sections() -> None:
+    """Empty context blocks should not inflate the improver user prompt."""
     context = ImproveContext()
     resolved = resolve_cursor_mode("edit_file", "fix bug")
     message = _build_user_message("fix bug", resolved, context)
     assert "Cursor mode: agent" in message
-    assert "Recent conversation:" in message
-    assert "(No prior conversation provided.)" in message
-    assert "Project facts:" in message
-    assert "(No project facts stored.)" in message
-    assert "Reference prompts:" in message
-    assert "(No matching reference prompts found.)" in message
+    assert "Recent conversation:" not in message
+    assert "Project facts:" not in message
+    assert "Reference prompts:" not in message
     assert "Text:\nfix bug" in message
 
 
-def test_build_user_message_includes_context_blocks() -> None:
+def test_build_user_message_includes_populated_context_sections() -> None:
     context = ImproveContext(
         conversation_block="user: hello",
         facts_block="- uses pytest (private)",
@@ -132,8 +247,12 @@ def test_improver_passes_context_to_engine(backends) -> None:
     mock_response.usage = MagicMock(prompt_tokens=1)
     mock_response._hidden_params = {"response_cost": 0.0}
 
-    with patch("ylang.core.engine.litellm.completion", return_value=mock_response) as mocked:
-        improver.improve("fix teh bug", "edit_file", model="test-model", context=context)
+    with patch(
+        "ylang.core.engine.litellm.completion", return_value=mock_response
+    ) as mocked:
+        improver.improve(
+            "fix teh bug", "edit_file", model="test-model", context=context
+        )
 
     messages = mocked.call_args.kwargs["messages"]
     user_message = messages[1]["content"]

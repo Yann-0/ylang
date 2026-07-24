@@ -3,7 +3,9 @@
 
 Reads ``YLANG_MCP_URL`` / ``YLANG_AUTH_TOKEN`` (from ``sessionStart`` hook env or
 ``~/.cursor/mcp.json``). Skips ``/loop``, ``/YOLO``, ``/ylang-skip``, meta prompts,
-and reference-only ``@file`` lines. Fail-open: errors and timeouts log to
+and reference-only ``@file`` lines. An inline ``ylang-off`` / ``/ylang-off``
+instruction anywhere in the prompt bypasses improvement and is stripped from the
+submitted text. Fail-open: errors and timeouts log to
 ``~/.cursor/hooks/ylang-improve-prompt.log`` and return ``continue: true``.
 MCP calls honor ``YLANG_HOOK_TIMEOUT_SEC`` (default 15s).
 
@@ -21,7 +23,7 @@ import sys
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
@@ -39,6 +41,8 @@ _META_MARKERS = (
 )
 _USER_QUERY_RE = re.compile(r"<user_query>\s*(.*?)\s*</user_query>", re.DOTALL)
 _TIMESTAMP_RE = re.compile(r"<timestamp>.*?</timestamp>\s*", re.DOTALL)
+# Match ylang-off / /ylang-off as a token (not inside longer identifiers).
+_YLANG_OFF_RE = re.compile(r"(?<![\w-])/?ylang-off(?![\w-])", re.IGNORECASE)
 _DEFAULT_HOOK_TIMEOUT_SEC = 15.0
 
 
@@ -52,6 +56,25 @@ def _hook_timeout_sec() -> float:
     except ValueError:
         return _DEFAULT_HOOK_TIMEOUT_SEC
     return max(1.0, value)
+
+
+def _env_flag_truthy(environ: Mapping[str, str], key: str) -> bool:
+    """Return True when ``environ[key]`` is a common truthy string."""
+    return environ.get(key, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _should_capture_edit_feedback(environ: Mapping[str, str] | None = None) -> bool:
+    """Return True when the hook should record edit distance via ``record_prompt_edit``.
+
+    Capture is on when either ``YLANG_CAPTURE_EDIT_FEEDBACK`` or
+    ``YLANG_EDIT_FEEDBACK`` is truthy. The former is the primary hook/service
+    env; the latter mirrors the console runtime ``edit_feedback`` flag name
+    for operators who set both layers the same way.
+    """
+    env = environ if environ is not None else os.environ
+    return _env_flag_truthy(env, "YLANG_CAPTURE_EDIT_FEEDBACK") or _env_flag_truthy(
+        env, "YLANG_EDIT_FEEDBACK"
+    )
 
 
 async def _run_timed(coro: Any, *, label: str) -> Any:
@@ -146,7 +169,9 @@ def _conversation_from_transcript(path: str | None) -> list[dict[str, str]]:
 
 
 def _resolve_mode(payload: dict[str, Any]) -> str:
-    explicit = str(payload.get("composer_mode") or payload.get("mode") or "").strip().lower()
+    explicit = (
+        str(payload.get("composer_mode") or payload.get("mode") or "").strip().lower()
+    )
     aliases = {
         "chat": "ask",
         "ask": "ask",
@@ -166,6 +191,20 @@ def _is_hook_meta_prompt(prompt: str) -> bool:
     return hits >= 2
 
 
+def _has_ylang_off(prompt: str) -> bool:
+    """Return True when the prompt contains an inline ``ylang-off`` instruction."""
+    return _YLANG_OFF_RE.search(prompt) is not None
+
+
+def _strip_ylang_off(prompt: str) -> str:
+    """Remove ``ylang-off`` / ``/ylang-off`` tokens and tidy leftover whitespace."""
+    cleaned = _YLANG_OFF_RE.sub(" ", prompt)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
 def _should_skip(prompt: str) -> bool:
     """Return True when the hook should not call improve_prompt at all."""
     stripped = prompt.strip()
@@ -173,7 +212,11 @@ def _should_skip(prompt: str) -> bool:
         return True
     if _is_hook_meta_prompt(stripped):
         return True
-    if os.environ.get("YLANG_HOOK_DISABLED", "").strip().lower() in {"1", "true", "yes"}:
+    if os.environ.get("YLANG_HOOK_DISABLED", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
         return True
     lowered = stripped.lower()
     return any(lowered.startswith(prefix.lower()) for prefix in _SKIP_PREFIXES)
@@ -203,9 +246,7 @@ def _write_improved_file(
     path.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).isoformat()
     rejection_line = (
-        f"- rejection_reason: `{rejection_reason}`\n"
-        if rejection_reason
-        else ""
+        f"- rejection_reason: `{rejection_reason}`\n" if rejection_reason else ""
     )
     body = (
         f"<!-- ylang-auto-improve generated={stamp} -->\n"
@@ -293,6 +334,18 @@ def _run_main() -> None:
         return
 
     prompt = str(payload.get("prompt") or "").strip()
+    if _has_ylang_off(prompt):
+        cleaned = _strip_ylang_off(prompt)
+        _log("skipped (ylang-off)")
+        if cleaned and cleaned != prompt:
+            print(
+                json.dumps({"continue": True, "updated_input": {"prompt": cleaned}}),
+                flush=True,
+            )
+        else:
+            _fail_open()
+        return
+
     if _should_skip(prompt):
         reason = (
             "skipped (hook meta/diagnostic prompt)"
@@ -317,14 +370,18 @@ def _run_main() -> None:
             )
         except OSError as exc:
             _log(f"failed to write improved prompt file: {exc}")
-        _log(f"passthrough mode={mode} validated=True changed=False (file/terminal reference)")
+        _log(
+            f"passthrough mode={mode} validated=True changed=False (file/terminal reference)"
+        )
         _fail_open()
         return
 
     mode = _resolve_mode(payload)
     tool = f"cursor-{mode}"
-    model = os.environ.get("YLANG_HOOK_MODEL", "claude-sonnet-4-5").strip() or "claude-sonnet-4-5"
-    conversation = _conversation_from_transcript(os.environ.get("CURSOR_TRANSCRIPT_PATH"))
+    model = os.environ.get("YLANG_HOOK_MODEL", "auto").strip() or "auto"
+    conversation = _conversation_from_transcript(
+        os.environ.get("CURSOR_TRANSCRIPT_PATH")
+    )
 
     try:
         mcp_url, auth_token = _load_mcp_config()
@@ -352,6 +409,7 @@ def _run_main() -> None:
         _fail_open()
         return
 
+    auto_apply = bool(result.get("auto_apply_default", True))
     improved = str(result.get("improved") or prompt).strip()
     original = str(result.get("original") or prompt).strip()
     cursor_mode = str(result.get("cursor_mode") or mode)
@@ -405,29 +463,39 @@ def _run_main() -> None:
         except Exception as exc:  # noqa: BLE001 - hook must fail open
             _log(f"record improver_accepted failed: {exc}")
 
-    if (
-        os.environ.get("YLANG_CAPTURE_EDIT_FEEDBACK", "").strip().lower() in {"1", "true", "yes"}
-        and improved
-        and prompt.strip() != improved.strip()
-    ):
+    # Polish samples: compare improved vs what will be submitted after this hook.
+    # auto_apply (or unchanged) → submitted=improved (kept-as-is, distance 0);
+    # review path → user continues with the original prompt.
+    if _should_capture_edit_feedback() and improved:
+        submitted = improved if auto_apply else prompt
         try:
             asyncio.run(
                 _run_timed(
-                    _record_edit_feedback(mcp_url, auth_token, improved, prompt),
+                    _record_edit_feedback(mcp_url, auth_token, improved, submitted),
                     label="record prompt edit feedback",
                 )
             )
-            _log("recorded prompt edit feedback")
+            _log(
+                "recorded prompt edit feedback "
+                f"(kept_as_is={submitted.strip() == improved.strip()})"
+            )
         except TimeoutError as exc:
             _log(f"record prompt edit feedback timed out: {exc}")
         except Exception as exc:  # noqa: BLE001 - hook must fail open
             _log(f"record prompt edit feedback failed: {exc}")
 
-    # Cursor currently documents only `continue`/`user_message` for this hook.
-    # We also emit `updated_input` for forward compatibility if Cursor adds support.
+    # Cursor hook output: honor auto_apply_default from improve_prompt.
+    # When false + changed+validated: surface user_message for review instead of silent apply.
     output: dict[str, Any] = {"continue": True}
     if improved and improved != original:
-        output["updated_input"] = {"prompt": improved}
+        if auto_apply:
+            output["updated_input"] = {"prompt": improved}
+        else:
+            output["user_message"] = (
+                "Ylang improved your prompt — review the sidecar file "
+                f"(.cursor/{_IMPROVED_FILENAME}) before continuing:\n\n"
+                f"{improved}"
+            )
     print(json.dumps(output), flush=True)
 
 

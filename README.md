@@ -115,7 +115,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 ## Status
 
-**v0.2.0** shipped; **Phase 5** on main adds `ylang patterns apply`, `ylang usage digest`, learned-template improver context, preference routing via `improver_accepted`, nightly Ollama e2e CI, and gateway load profiling.
+**v0.5.2** — admin console (LAN-ready), governed proposals, template studio, MCP
+(17 tools), OpenAI-compatible gateway, and CLI learning loop (`ylang patterns`,
+`ylang usage digest` with optional desktop notify).
 
 ### Shipped
 
@@ -124,8 +126,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 - HTTP transport + bearer auth on `/mcp`, `/v1/*`, and `/usage` (`YLANG_AUTH_TOKEN`); `/health` unauthenticated
 - Activity-based routing, fallback chain, cooldown, preference boost; **daily budget cap enforced** when `YLANG_DAILY_BUDGET_USD` is set
 - CLI learning loop (`ylang patterns suggest` / `apply`, `ylang usage digest` / `dashboard`)
+- Local digest via CLI/cron; optional `notify-send` when `usage_digest_enabled` and a display are available
 
 ### Planned
 
 - Auto-evaluation loop — propose-only optimization/experiment surfaces; no automatic outcome-driven apply
-- Pattern-learning maturity — manual suggest/apply today; notifications and fuller automation pending
+- Pattern-learning maturity — manual suggest/apply today; fuller automation pending
+- Email digest delivery (desktop notify is local-only)

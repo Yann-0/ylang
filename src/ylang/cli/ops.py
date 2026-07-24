@@ -8,9 +8,14 @@ import os
 import socket
 import sqlite3
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 from urllib.parse import urlparse
 
+from ylang import __version__
+
+from ylang.console.import_ops import import_json_payload
 from ylang.core.db import verify_storage_writable
 from ylang.core.stores import open_stores
 from ylang.settings import Settings, provider_has_key
@@ -18,7 +23,9 @@ from ylang.settings import Settings, provider_has_key
 
 def build_backup_parser() -> argparse.ArgumentParser:
     """Build ``ylang backup`` parser."""
-    parser = argparse.ArgumentParser(prog="ylang backup", description="Backup SQLite database")
+    parser = argparse.ArgumentParser(
+        prog="ylang backup", description="Backup SQLite database"
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -30,7 +37,9 @@ def build_backup_parser() -> argparse.ArgumentParser:
 
 def build_export_parser() -> argparse.ArgumentParser:
     """Build ``ylang export`` parser."""
-    parser = argparse.ArgumentParser(prog="ylang export", description="Export templates and facts as JSON")
+    parser = argparse.ArgumentParser(
+        prog="ylang export", description="Export templates and facts as JSON"
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -42,7 +51,9 @@ def build_export_parser() -> argparse.ArgumentParser:
 
 def build_import_parser() -> argparse.ArgumentParser:
     """Build ``ylang import`` parser."""
-    parser = argparse.ArgumentParser(prog="ylang import", description="Import templates and facts from JSON")
+    parser = argparse.ArgumentParser(
+        prog="ylang import", description="Import templates and facts from JSON"
+    )
     parser.add_argument(
         "--input",
         type=Path,
@@ -54,7 +65,9 @@ def build_import_parser() -> argparse.ArgumentParser:
 
 def build_doctor_parser() -> argparse.ArgumentParser:
     """Build ``ylang doctor`` parser."""
-    return argparse.ArgumentParser(prog="ylang doctor", description="Check local Ylang environment")
+    return argparse.ArgumentParser(
+        prog="ylang doctor", description="Check local Ylang environment"
+    )
 
 
 def run_backup_cli(argv: list[str] | None = None) -> int:
@@ -87,7 +100,11 @@ def run_export_cli(argv: list[str] | None = None) -> int:
                     "name": template.name,
                     "body": template.body,
                     "params": [
-                        {"name": p.name, "description": p.description, "default": p.default}
+                        {
+                            "name": p.name,
+                            "description": p.description,
+                            "default": p.default,
+                        }
                         for p in template.params
                     ],
                     "source": template.source,
@@ -106,7 +123,10 @@ def run_export_cli(argv: list[str] | None = None) -> int:
         ]
         payload = {"version": 1, "templates": templates, "facts": facts}
         args.output.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        print(f"Exported {len(templates)} templates and {len(facts)} facts", file=sys.stderr)
+        print(
+            f"Exported {len(templates)} templates and {len(facts)} facts",
+            file=sys.stderr,
+        )
         return 0
     finally:
         stores.close()
@@ -118,39 +138,11 @@ def run_import_cli(argv: list[str] | None = None) -> int:
     payload = json.loads(args.input.read_text(encoding="utf-8"))
     stores, _ = _open_stores()
     try:
-        imported_templates = 0
-        for item in payload.get("templates", []):
-            from ylang.library.types import TemplateParam, TemplateVisibility
-
-            params = [
-                TemplateParam(
-                    name=str(p["name"]),
-                    description=str(p.get("description", "")),
-                    default=p.get("default"),
-                )
-                for p in item.get("params", [])
-            ]
-            visibility: TemplateVisibility = (
-                "public" if item.get("visibility") == "public" else "private"
-            )
-            stores.library.save(
-                str(item["template_id"]),
-                name=str(item["name"]),
-                body=str(item["body"]),
-                params=params,
-                source=str(item.get("source", "user")),  # type: ignore[arg-type]
-                visibility=visibility,
-                tags=list(item.get("tags", [])),
-            )
-            imported_templates += 1
-        imported_facts = 0
-        for item in payload.get("facts", []):
-            stores.memory.remember(
-                str(item["fact"]),
-                str(item["scope"]),
-                workspace=str(item.get("workspace", "")),
-            )
-            imported_facts += 1
+        imported_templates, imported_facts = import_json_payload(
+            stores.library,
+            stores.memory,
+            payload,
+        )
         print(
             f"Imported {imported_templates} templates and {imported_facts} facts",
             file=sys.stderr,
@@ -182,7 +174,9 @@ def run_doctor_cli(argv: list[str] | None = None) -> int:
         ok = False
 
     fallback = settings.fallback_model
-    if provider_has_key(fallback, settings.provider_keys) or fallback.lower().startswith("ollama/"):
+    if provider_has_key(
+        fallback, settings.provider_keys
+    ) or fallback.lower().startswith("ollama/"):
         print(f"Fallback model: {fallback} ✓")
     else:
         print(f"Fallback model: {fallback} (may need provider key)")
@@ -193,11 +187,33 @@ def run_doctor_cli(argv: list[str] | None = None) -> int:
         else:
             ok = False
             print("HTTP auth token: missing ✗")
+        print(f"HTTP bind: {settings.host}:{settings.port}")
         port = settings.port
         if _port_free(settings.host, port):
             print(f"Port {port}: available ✓")
         else:
             print(f"Port {port}: in use (service may already run)")
+        base_url = f"http://127.0.0.1:{port}"
+        health = _fetch_json(f"{base_url}/health")
+        if health is not None:
+            running_version = str(health.get("version", "unknown"))
+            print(f"Running service version: {running_version}")
+            if running_version != __version__:
+                print(
+                    f"  ⚠ Installed package is v{__version__} but service reports "
+                    f"v{running_version} — run: sudo systemctl restart ylang"
+                )
+        login_status = _http_status(f"{base_url}/console/login")
+        if login_status == 200:
+            print("Console login page: reachable ✓")
+        elif login_status == 401:
+            ok = False
+            print(
+                "Console login page: 401 Unauthorized ✗ "
+                "(stale service or missing v0.5+ console routes — restart ylang)"
+            )
+        elif login_status is not None:
+            print(f"Console login page: HTTP {login_status}")
 
     ollama_host = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
     if _ollama_reachable(ollama_host):
@@ -237,3 +253,21 @@ def _ollama_reachable(host: str) -> bool:
             return True
     except OSError:
         return False
+
+
+def _fetch_json(url: str) -> dict[str, object] | None:
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:  # noqa: S310
+            return json.loads(response.read().decode("utf-8"))
+    except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
+        return None
+
+
+def _http_status(url: str) -> int | None:
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:  # noqa: S310
+            return int(response.status)
+    except urllib.error.HTTPError as exc:
+        return int(exc.code)
+    except (urllib.error.URLError, TimeoutError):
+        return None

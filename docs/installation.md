@@ -47,6 +47,16 @@ python -m ylang    # starts MCP server on stdio — press Ctrl+C to stop
 
 There is no `--help` flag; `python -m ylang` always starts the server. The process prints connection details to **stderr** and waits for MCP traffic on stdin/stdout (stdio transport).
 
+## Interactive setup (`ylang init`)
+
+```bash
+ylang init
+```
+
+Checks Python 3.12+, provider keys, Ollama reachability, writes `~/.cursor/mcp.json` (HTTP transport), copies Cursor hooks, and prints the console URL (`http://127.0.0.1:8787/console`).
+
+Use `--non-interactive` to skip prompts and rely on existing environment variables.
+
 ## CLI (`ylang` command)
 
 `pip install -e .` installs a **`ylang`** console script into the active venv (`app/.venv/bin/ylang`). It is **not** on your shell `PATH` until you activate the venv or use a wrapper.

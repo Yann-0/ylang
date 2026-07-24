@@ -8,6 +8,7 @@ from collections import Counter
 
 from ylang.library.pattern_detector import (
     UsagePatternDetector,
+    is_trivial_prompt_pattern,
     normalize_prompt_text,
     pattern_id_from_text,
 )
@@ -96,8 +97,11 @@ class SemanticPatternDetector(UsagePatternDetector):
             if not row.activity.startswith(_IMPROVE_ACTIVITY_PREFIX):
                 continue
             sample = row.improver_input_sample
-            if sample and normalize_prompt_text(sample):
-                texts.append(sample)
+            if sample:
+                if is_trivial_prompt_pattern(sample):
+                    continue
+                if normalize_prompt_text(sample):
+                    texts.append(sample)
         clusters = cluster_prompt_texts_semantic(texts)
         patterns: list[DetectedPattern] = []
         for cluster in clusters:
@@ -114,7 +118,9 @@ class SemanticPatternDetector(UsagePatternDetector):
         return sorted(patterns, key=lambda item: item.occurrence_count, reverse=True)
 
 
-def create_pattern_detector(store: UsageStore, *, mode: str = "lexical") -> UsagePatternDetector:
+def create_pattern_detector(
+    store: UsageStore, *, mode: str = "lexical"
+) -> UsagePatternDetector:
     """Return the configured pattern detector backend."""
     if mode == "semantic":
         return SemanticPatternDetector(store)

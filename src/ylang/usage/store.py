@@ -11,6 +11,15 @@ from typing import Self
 from collections.abc import Callable
 
 from ylang.core.db import YlangDatabase, _is_readonly_error, open_connection
+from ylang.core.sqlite_rows import (
+    SqliteRow,
+    cell_bool,
+    cell_float,
+    cell_int,
+    cell_optional_bool,
+    cell_optional_str,
+    cell_str,
+)
 from ylang.usage.activity import normalize_usage_activity
 from ylang.usage.sample import truncate_improver_input_sample
 
@@ -32,6 +41,7 @@ CREATE TABLE IF NOT EXISTS usage (
 
 CREATE INDEX IF NOT EXISTS idx_usage_timestamp ON usage (timestamp);
 """
+
 
 def _open_connection(db_path: Path) -> sqlite3.Connection:
     return open_connection(db_path)
@@ -123,6 +133,14 @@ class UsageWindow:
         anchor = now or datetime.now(timezone.utc)
         _require_utc(anchor)
         return cls(since=anchor - timedelta(hours=hours), until=anchor)
+
+    @classmethod
+    def all_time(cls, *, now: datetime | None = None) -> UsageWindow:
+        """Window from epoch through ``now`` (UTC) for lifetime aggregates."""
+        anchor = now or datetime.now(timezone.utc)
+        _require_utc(anchor)
+        epoch = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        return cls(since=epoch, until=anchor)
 
 
 class UsageStore:
@@ -346,6 +364,30 @@ class UsageStore:
         row = cursor.fetchone()
         return int(row[0]) if row is not None else None
 
+    def mark_late_improver_orphans(self, *, after_id: int) -> int:
+        """Mark late successful improver rows after a timeout stub as skipped.
+
+        Used when a wall-clock timeout already recorded the outcome and a
+        background ``Engine.complete`` still managed to write a usage row.
+        Returns the number of rows neutralized.
+        """
+        cursor = self._connection.execute(
+            """
+            UPDATE usage
+            SET success = 0,
+                improver_fired = 0,
+                improver_validated = 0,
+                improver_changed = 0,
+                improver_rejection_reason = 'improver timeout orphan'
+            WHERE id > ?
+              AND improver_fired = 1
+              AND success = 1
+            """,
+            (after_id,),
+        )
+        self._connection.commit()
+        return int(cursor.rowcount)
+
     def recall_usage(self, window: UsageWindow) -> list[UsageRecord]:
         """Return usage rows with timestamp in [since, until), newest first."""
         cursor = self._connection.execute(
@@ -365,27 +407,27 @@ class UsageStore:
         return [_row_to_record(row) for row in cursor.fetchall()]
 
 
-def _row_to_record(row: tuple[object, ...]) -> UsageRecord:
-    context_templates = str(row[12]) if len(row) > 12 and row[12] is not None else None
-    validated = bool(row[13]) if len(row) > 13 and row[13] is not None else None
-    changed = bool(row[14]) if len(row) > 14 and row[14] is not None else None
-    rejection = str(row[15]) if len(row) > 15 and row[15] is not None else None
-    task_class = str(row[16]) if len(row) > 16 and row[16] is not None else None
-    cursor_mode = str(row[17]) if len(row) > 17 and row[17] is not None else None
-    experiment = str(row[18]) if len(row) > 18 and row[18] is not None else None
+def _row_to_record(row: SqliteRow) -> UsageRecord:
+    context_templates = cell_optional_str(row, 12)
+    validated = cell_optional_bool(row, 13)
+    changed = cell_optional_bool(row, 14)
+    rejection = cell_optional_str(row, 15)
+    task_class = cell_optional_str(row, 16)
+    cursor_mode = cell_optional_str(row, 17)
+    experiment = cell_optional_str(row, 18)
     return UsageRecord(
-        id=int(row[0]),
-        timestamp=_from_iso(str(row[1])),
-        surface=str(row[2]),
-        activity=str(row[3]),
-        model_used=str(row[4]),
-        prompt_tokens=int(row[5]),
-        cost=float(row[6]),
-        improver_fired=bool(row[7]),
-        improver_accepted=bool(row[8]),
-        improver_input_sample=str(row[9]) if row[9] is not None else None,
-        latency_ms=int(row[10]),
-        success=bool(row[11]),
+        id=cell_int(row, 0),
+        timestamp=_from_iso(cell_str(row, 1)),
+        surface=cell_str(row, 2),
+        activity=cell_str(row, 3),
+        model_used=cell_str(row, 4),
+        prompt_tokens=cell_int(row, 5),
+        cost=cell_float(row, 6),
+        improver_fired=cell_bool(row, 7),
+        improver_accepted=cell_bool(row, 8),
+        improver_input_sample=cell_optional_str(row, 9),
+        latency_ms=cell_int(row, 10),
+        success=cell_bool(row, 11),
         improver_context_templates=context_templates,
         improver_validated=validated,
         improver_changed=changed,

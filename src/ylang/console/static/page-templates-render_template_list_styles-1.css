@@ -1,0 +1,55 @@
+.template-toolbar { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; }
+.template-toolbar .form-row { margin-bottom: 0; flex: 1 1 10rem; }
+.template-toolbar .form-row input,
+.template-toolbar .form-row select { max-width: none; width: 100%; }
+.template-toolbar .form-row.checkbox-row {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 0.4rem;
+  padding-bottom: 0.35rem;
+}
+.template-toolbar .form-row.checkbox-row label { margin: 0; }
+.template-toolbar .form-row.checkbox-row input { width: auto; }
+.template-browse-header {
+  display: flex; flex-wrap: wrap; gap: 1rem; align-items: baseline;
+  justify-content: space-between;
+}
+.template-browse-header h2 { margin: 0; }
+.template-new-link { font-size: 0.95rem; }
+.template-table-wrap { overflow-x: auto; }
+.template-table tr.selected td { background: #243044; }
+.template-table .col-actions { width: 6rem; white-space: nowrap; }
+.template-table .col-usage { width: 5rem; text-align: right; }
+.icon-btn {
+  background: transparent; border: 1px solid transparent; color: #9aa7b8;
+  padding: 0.25rem 0.35rem; border-radius: 0.35rem; cursor: pointer; line-height: 0;
+  vertical-align: middle;
+}
+.icon-btn:hover { color: #e7ecf3; background: #2a3548; border-color: #374151; }
+.icon-btn.danger:hover { color: #fca5a5; background: #3f1515; border-color: #7f1d1d; }
+.icon { display: inline-block; vertical-align: middle; }
+.inline-form { display: inline; margin: 0; padding: 0; }
+.pagination {
+  display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;
+  justify-content: space-between; margin-top: 1rem; color: #9aa7b8; font-size: 0.9rem;
+}
+.pagination-links { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; }
+.pagination-links a, .pagination-links span {
+  padding: 0.35rem 0.65rem; border-radius: 0.35rem; border: 1px solid #2a3548;
+}
+.pagination-links a:hover { background: #1f2a3d; text-decoration: none; }
+.pagination-links .current { background: #2563eb; border-color: #2563eb; color: #fff; }
+.usage-hint { font-size: 0.8rem; color: #9aa7b8; margin-top: 0.25rem; }
+#template-edit { scroll-margin-top: 1rem; }
+#template-create { scroll-margin-top: 1rem; }
+#template-create summary {
+  cursor: pointer; list-style: none; color: #93c5fd; font-weight: 600;
+}
+#template-create summary::-webkit-details-marker { display: none; }
+#template-create[open] > summary { margin-bottom: 1rem; }
+.template-preview-panel {
+  margin-top: 1rem; padding-top: 1rem; border-top: 1px solid #2a3548;
+}
+.template-preview-values {
+  display: grid; gap: 0.5rem; margin-bottom: 0.75rem;
+}
+.preview-param-row { margin-bottom: 0; }
+.preview-param-row input { max-width: none; width: 100%; }

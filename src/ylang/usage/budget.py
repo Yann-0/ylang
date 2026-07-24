@@ -5,7 +5,11 @@ from __future__ import annotations
 import sys
 
 from ylang.settings import Settings
-from ylang.usage.aggregates import clear_aggregate_cache, default_daily_window, rolling_cost
+from ylang.usage.aggregates import (
+    clear_aggregate_cache,
+    default_daily_window,
+    rolling_cost,
+)
 from ylang.usage.store import UsageStore
 
 _BUDGET_WARN_FRACTION = 0.80
