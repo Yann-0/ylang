@@ -4,5 +4,6 @@
   "composer-2.5-fast": "anthropic/claude-sonnet-4-6",
   "gpt-5.3-codex-high-fast": "openai/gpt-4o",
   "gpt-4o-mini": "ollama/qwen-coder-14b",
-  "ollama/gpt-4o-mini": "ollama/qwen-coder-14b"
+  "ollama/gpt-4o-mini": "ollama/qwen-coder-14b",
+  "ylang-mini": "ollama/qwen-coder-14b"
 }

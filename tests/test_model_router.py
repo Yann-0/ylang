@@ -59,6 +59,7 @@ def test_resolve_gpt_4o_mini_slug_maps_to_local_ollama() -> None:
     """Cursor ``gpt-4o-mini`` is a local Ollama tag; avoid OpenAI BYOK rate limits."""
     assert resolve_explicit_model("gpt-4o-mini") == "ollama/qwen-coder-14b"
     assert resolve_explicit_model("ollama/gpt-4o-mini") == "ollama/qwen-coder-14b"
+    assert resolve_explicit_model("ylang-mini") == "ollama/qwen-coder-14b"
     # Real OpenAI remains available via explicit LiteLLM form.
     assert resolve_explicit_model("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
 

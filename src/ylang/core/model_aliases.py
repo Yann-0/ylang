@@ -26,6 +26,9 @@ DEFAULT_CURSOR_SLUG_ALIASES: dict[str, str] = {
     # non-colliding parent tag (same weights on this host).
     "gpt-4o-mini": "ollama/qwen-coder-14b",
     "ollama/gpt-4o-mini": "ollama/qwen-coder-14b",
+    # Prefer this custom Cursor model id — built-in ``gpt-4o-mini`` is often
+    # intercepted and sent to api.openai.com (BYOK rate-limit errors).
+    "ylang-mini": "ollama/qwen-coder-14b",
 }
 
 

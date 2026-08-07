@@ -201,17 +201,29 @@ sequenceDiagram
 
 ## Cursor setup
 
-1. Deploy Ylang on HTTP transport ([deployment.md](deployment.md)).
-2. In Cursor → **Settings → Models**:
-   - **OpenAI API Key:** `YLANG_AUTH_TOKEN` **or** your `OPENAI_API_KEY` (both accepted as Bearer)
-   - **Override OpenAI Base URL:** `http://<host>:8787/v1`
-   - For **Remote SSH from Windows**, do **not** use `127.0.0.1` (that is your laptop). Use the server LAN IP or DNS name, e.g. `http://192.168.1.25:8787/v1` or `http://stelsrv-d001:8787/v1`
-3. Select **`gpt-4o-mini`** (local Ollama via alias) or **`route-code`** for activity routing.
+Cursor agent/chat BYOK requests often leave your LAN (Cursor cloud). Port `8787` is not public on this host — expose the gateway over HTTPS first:
+
+```bash
+sudo /srv/ylang/app/deploy/apache/install-ylang-vhost.sh
+```
+
+Then in Cursor → **Settings → Models**:
+
+| Setting | Value |
+|---------|-------|
+| OpenAI API Key | `YLANG_AUTH_TOKEN` (or `OPENAI_API_KEY` — both accepted) |
+| Override OpenAI Base URL | `https://ylang.stelliane.dev/v1` |
+| Custom model (**Add model**) | `ylang-mini` |
+
+Select **`ylang-mini`** in the chat model picker (not the built-in `gpt-4o-mini`).
+
+**Why not built-in `gpt-4o-mini`?** Cursor often intercepts native OpenAI model ids and sends them to **api.openai.com** with your `sk-…` key → *User Provided API Key Rate Limit Exceeded*. A custom id like `ylang-mini` forces Override Base URL routing. Confirm in Ylang usage: `surface=gateway`, `model_used=ollama/qwen-coder-14b`.
 
 **Notes:**
 
-- **If you see *User Provided API Key Rate Limit Exceeded*:** Cursor is calling **api.openai.com** with your `sk-…` key (Override off / wrong Base URL), not Ylang. Fix the Base URL, then verify with `curl` below — a successful local call writes `ollama/qwen-coder-14b` into usage.
-- **Endpoint verification:** Cursor may verify custom endpoints **server-side**. A LAN hostname can fail verification even when the endpoint works from your machine. Try the host IP address if verification fails.
+- Local `curl` to `127.0.0.1:8787` only proves the service is up — it does **not** prove Cursor can reach it.
+- LAN URLs (`http://192.168.1.25:8787/v1`, `http://127.0.0.1:8787/v1`) fail for cloud-routed Cursor requests; use `https://ylang.stelliane.dev/v1`.
+- **Endpoint verification:** Cursor may verify custom endpoints **server-side**; HTTPS public hostnames work more reliably than LAN names.
 - Tab/autocomplete typically stays on Cursor's built-in models; the gateway captures chat/agent requests you explicitly route.
 - MCP (`/mcp`) and the gateway (`/v1/*`) share auth and the same process.
 - **First-party Cursor models (Grok, Composer):** enabling OpenAI API Key / Override OpenAI Base URL (including this Ylang gateway) causes `Bad Request — This model does not support custom API keys`. Turn the override off (or `Ctrl+Shift+0`) before using Grok/Composer; see [cursor-integration.md — First-party models vs Ylang gateway](cursor-integration.md#first-party-models-vs-ylang-gateway).
