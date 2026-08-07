@@ -455,10 +455,11 @@ When `improve_prompt` (or hooks) pass a Cursor IDE slug as `model`, the router m
 | `claude-4.6-sonnet-high-thinking`, `claude-4.6-sonnet-medium-thinking` | `anthropic/claude-sonnet-4-6` |
 | `claude-4.6-opus-high-thinking` | `anthropic/claude-opus-4-6` |
 | `gpt-5.3-codex-high-fast`, `gpt-5.5-medium`, `gemini-3.1-pro` | `openai/gpt-4o` |
+| `gpt-4o-mini`, `ollama/gpt-4o-mini` | `ollama/qwen-coder-14b` (local; LiteLLM misroutes the OpenAI-colliding Ollama tag) |
 | `claude-sonnet-4-*` (prefix) | `anthropic/claude-sonnet-4-6` |
 | `claude-opus-4-*` (prefix) | `anthropic/claude-opus-4-6` |
 
-Unknown slugs fall back to activity routing. Full table: `src/ylang/core/model_router.py`.
+Aliases are applied **before** LiteLLM-routable checks, so local rewrites can override a colliding `ollama/…` tag. Use `openai/gpt-4o-mini` when you want real OpenAI. Unknown slugs fall back to activity routing. Full table: `src/ylang/core/model_aliases.py` / `deploy/ylang.models.json`.
 
 ---
 

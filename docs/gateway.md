@@ -161,10 +161,12 @@ Any `model` string that is **not** a virtual `route-*` id is treated as an expli
 
 1. The gateway maps it to `activity=other` and passes the raw string to the Engine as `explicit_model`.
 2. `ModelRouter.resolve_explicit_model()` translates it to LiteLLM form when possible:
+   - Cursor / local aliases first (e.g. `gpt-4o-mini` / `ollama/gpt-4o-mini` → `ollama/qwen-coder-14b`, `claude-sonnet-4-6` → Anthropic)
    - Already LiteLLM-routable: `provider/model` (e.g. `openai/gpt-4o`, `anthropic/claude-3-5-sonnet-latest`, `mistral/mistral-large-latest`, `ollama/qwen2.5`)
-   - Cursor slug aliases (e.g. `gpt-4o`, `claude-sonnet-4-6`, `composer-2.5-fast`) → mapped provider/model
    - Prefix rules: `claude-sonnet-4-*` → `anthropic/claude-sonnet-4-6`, `claude-opus-4-*` → `anthropic/claude-opus-4-6`
    - Unrecognized slugs: warning logged; activity routing proceeds without the explicit model
+
+   **Note:** An Ollama tag named like an OpenAI model (`gpt-4o-mini`) must be aliased to a non-colliding LiteLLM id. Otherwise LiteLLM routes through the OpenAI client and Cursor shows *User Provided API Key Rate Limit Exceeded* when the cloud key is throttled.
 3. The attempt chain tries the resolved explicit model first, then the activity-selected model, then remaining candidates, then the fallback floor (`ollama/qwen2.5` by default).
 
 Provider translation lives in core — the gateway has no provider-specific code.
@@ -200,13 +202,15 @@ sequenceDiagram
 ## Cursor setup
 
 1. Deploy Ylang on HTTP transport ([deployment.md](deployment.md)).
-2. In Cursor → **Settings → Models**, add a custom OpenAI-compatible provider:
-   - **Base URL:** `http://<host>:8787/v1` (e.g. `http://stelsrv-d001:8787/v1`)
-   - **API key:** your `YLANG_AUTH_TOKEN`
-3. Select **`route-code`** as the model for Agent/chat traffic you want routed through Ylang.
+2. In Cursor → **Settings → Models**:
+   - **OpenAI API Key:** `YLANG_AUTH_TOKEN` **or** your `OPENAI_API_KEY` (both accepted as Bearer)
+   - **Override OpenAI Base URL:** `http://<host>:8787/v1`
+   - For **Remote SSH from Windows**, do **not** use `127.0.0.1` (that is your laptop). Use the server LAN IP or DNS name, e.g. `http://192.168.1.25:8787/v1` or `http://stelsrv-d001:8787/v1`
+3. Select **`gpt-4o-mini`** (local Ollama via alias) or **`route-code`** for activity routing.
 
 **Notes:**
 
+- **If you see *User Provided API Key Rate Limit Exceeded*:** Cursor is calling **api.openai.com** with your `sk-…` key (Override off / wrong Base URL), not Ylang. Fix the Base URL, then verify with `curl` below — a successful local call writes `ollama/qwen-coder-14b` into usage.
 - **Endpoint verification:** Cursor may verify custom endpoints **server-side**. A LAN hostname can fail verification even when the endpoint works from your machine. Try the host IP address if verification fails.
 - Tab/autocomplete typically stays on Cursor's built-in models; the gateway captures chat/agent requests you explicitly route.
 - MCP (`/mcp`) and the gateway (`/v1/*`) share auth and the same process.

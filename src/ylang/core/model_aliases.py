@@ -21,6 +21,11 @@ DEFAULT_CURSOR_SLUG_ALIASES: dict[str, str] = {
     "gpt-5.3-codex-high-fast": "openai/gpt-4o",
     "gpt-5.5-medium": "openai/gpt-4o",
     "gemini-3.1-pro": "openai/gpt-4o",
+    # Local Ollama tag ``gpt-4o-mini`` collides with OpenAI's model id; LiteLLM
+    # misroutes ``ollama/gpt-4o-mini`` through the OpenAI client. Use the
+    # non-colliding parent tag (same weights on this host).
+    "gpt-4o-mini": "ollama/qwen-coder-14b",
+    "ollama/gpt-4o-mini": "ollama/qwen-coder-14b",
 }
 
 

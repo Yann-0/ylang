@@ -188,17 +188,20 @@ def resolve_explicit_model(model: str) -> str | None:
     Sentinels ``auto`` / ``default`` / ``route`` / empty string skip the explicit
     model and let the activity bucket (``YLANG_MODELS_IMPROVE`` for improver)
     choose.
+
+    Configured aliases are applied **before** LiteLLM-routable checks so
+    colliding local tags (e.g. ``ollama/gpt-4o-mini``) can be rewritten.
     """
     stripped = model.strip()
     if stripped.lower() in _AUTO_MODEL_SENTINELS:
         return None
-    if is_litellm_routable(stripped):
-        return stripped
     if mapped := _CURSOR_SLUG_ALIASES.get(stripped):
         return mapped
     lowered = stripped.lower()
     if mapped := _CURSOR_SLUG_ALIASES.get(lowered):
         return mapped
+    if is_litellm_routable(stripped):
+        return stripped
     if lowered.startswith("claude-sonnet-4-"):
         return "anthropic/claude-sonnet-4-6"
     if lowered.startswith("claude-opus-4-"):

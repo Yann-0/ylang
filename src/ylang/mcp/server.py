@@ -106,10 +106,15 @@ async def _run_http_async(server: FastMCP, settings: Settings) -> None:
     import uvicorn
 
     base_app = server.streamable_http_app()
+    # Cursor Override Base URL often sends the OpenAI BYOK key as Bearer; accept
+    # it alongside YLANG_AUTH_TOKEN so chat hits the gateway instead of OpenAI.
+    openai_key = settings.provider_keys.openai
+    extra_tokens = [openai_key] if openai_key else None
     app = BearerTokenMiddleware(
         base_app,
         settings.auth_token or "",
         previous_token=settings.auth_token_previous,
+        extra_tokens=extra_tokens,
     )
     app = maybe_rate_limit_middleware(app)
     config = uvicorn.Config(

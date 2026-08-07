@@ -55,6 +55,14 @@ def test_resolve_cursor_slug_alias() -> None:
     assert resolve_explicit_model("claude-sonnet-4-5") == "anthropic/claude-sonnet-4-6"
 
 
+def test_resolve_gpt_4o_mini_slug_maps_to_local_ollama() -> None:
+    """Cursor ``gpt-4o-mini`` is a local Ollama tag; avoid OpenAI BYOK rate limits."""
+    assert resolve_explicit_model("gpt-4o-mini") == "ollama/qwen-coder-14b"
+    assert resolve_explicit_model("ollama/gpt-4o-mini") == "ollama/qwen-coder-14b"
+    # Real OpenAI remains available via explicit LiteLLM form.
+    assert resolve_explicit_model("openai/gpt-4o-mini") == "openai/gpt-4o-mini"
+
+
 def test_resolve_improver_fast_slug_defers_to_activity_routing() -> None:
     assert resolve_improver_explicit_model("auto") is None
     assert resolve_improver_explicit_model("composer-2.5-fast") is None

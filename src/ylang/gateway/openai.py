@@ -111,11 +111,28 @@ def openai_error_response(
 
 
 def models_list_payload() -> dict[str, Any]:
-    """Return the virtual ``route-*`` catalog for GET /v1/models.
+    """Return virtual ``route-*`` models plus local Cursor aliases for GET /v1/models.
 
-    Passthrough provider slugs are accepted on chat completions but not listed here.
+    Listing ``gpt-4o-mini`` (mapped to local Ollama) helps Cursor verify Override
+    Base URL against this gateway instead of probing api.openai.com.
     """
+    from ylang.core.model_aliases import load_cursor_slug_aliases
+
     created = int(time.time())
+    model_ids: list[str] = [
+        "route-code",
+        "route-search",
+        "route-reason",
+        "route-other",
+    ]
+    seen = set(model_ids)
+    for slug, target in load_cursor_slug_aliases().items():
+        if not target.startswith("ollama/"):
+            continue
+        for model_id in (slug, target):
+            if model_id not in seen:
+                seen.add(model_id)
+                model_ids.append(model_id)
     return {
         "object": "list",
         "data": [
@@ -125,12 +142,7 @@ def models_list_payload() -> dict[str, Any]:
                 "created": created,
                 "owned_by": "ylang",
             }
-            for model_id in (
-                "route-code",
-                "route-search",
-                "route-reason",
-                "route-other",
-            )
+            for model_id in model_ids
         ],
     }
 

@@ -44,3 +44,16 @@ def test_bearer_auth_accepts_valid_token(client: TestClient) -> None:
     response = client.get("/", headers={"Authorization": "Bearer secret-token"})
     assert response.status_code == 200
     assert response.text == "ok"
+
+
+def test_bearer_auth_accepts_extra_token() -> None:
+    app = Starlette(routes=[Route("/", _ok)])
+    wrapped = BearerTokenMiddleware(
+        app,
+        "secret-token",
+        extra_tokens=["sk-openai-proxy"],
+    )
+    client = TestClient(wrapped)
+    response = client.get("/", headers={"Authorization": "Bearer sk-openai-proxy"})
+    assert response.status_code == 200
+    assert response.text == "ok"

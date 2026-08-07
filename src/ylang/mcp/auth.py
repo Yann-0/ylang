@@ -62,12 +62,20 @@ class BearerTokenMiddleware:
         token: str,
         *,
         previous_token: str | None = None,
+        extra_tokens: list[str] | None = None,
     ) -> None:
-        """Wrap ``app`` and require auth on HTTP requests."""
+        """Wrap ``app`` and require auth on HTTP requests.
+
+        ``extra_tokens`` are alternate bearers (e.g. ``OPENAI_API_KEY`` so Cursor
+        BYOK can keep a real OpenAI key while Override Base URL points at Ylang).
+        """
         self.app = app
-        self._valid_tokens = [token]
-        if previous_token:
-            self._valid_tokens.append(previous_token)
+        self._valid_tokens: list[str] = []
+        for candidate in (token, previous_token, *(extra_tokens or ())):
+            if candidate and candidate not in self._valid_tokens:
+                self._valid_tokens.append(candidate)
+        if not self._valid_tokens:
+            self._valid_tokens = [token]
         self._bearer_values = [f"Bearer {item}" for item in self._valid_tokens]
 
     def _authorized(self, scope: Scope) -> bool:

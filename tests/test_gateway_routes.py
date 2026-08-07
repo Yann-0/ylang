@@ -52,7 +52,15 @@ def test_models_lists_virtual_models(gateway_client: TestClient) -> None:
     payload = response.json()
     assert payload["object"] == "list"
     ids = {item["id"] for item in payload["data"]}
-    assert ids == {"route-code", "route-search", "route-reason", "route-other"}
+    assert {
+        "route-code",
+        "route-search",
+        "route-reason",
+        "route-other",
+    }.issubset(ids)
+    # Local Ollama Cursor aliases are advertised for Override Base URL verify.
+    assert "gpt-4o-mini" in ids
+    assert "ollama/qwen-coder-14b" in ids
 
 
 def test_chat_completion_non_stream(gateway_client: TestClient) -> None:
