@@ -38,7 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Cursor `gpt-4o-mini` → local Ollama** — alias bare/`ollama/gpt-4o-mini` to `ollama/qwen-coder-14b` (LiteLLM misroutes the OpenAI-colliding Ollama tag through the OpenAI client, which surfaced as Cursor *User Provided API Key Rate Limit Exceeded*); aliases now win over LiteLLM-routable checks
 - **Gateway Cursor BYOK** — accept `OPENAI_API_KEY` as an alternate Bearer alongside `YLANG_AUTH_TOKEN`; advertise local Ollama aliases (including `gpt-4o-mini`) on `GET /v1/models`
-- **Custom model id `ylang-mini`** — maps to local Ollama (avoids Cursor intercepting built-in `gpt-4o-mini` → api.openai.com); optional Apache vhost under `deploy/apache/` if you want public HTTPS
+- **Custom model id `ylang-mini`** — maps to local Ollama (avoids Cursor intercepting built-in `gpt-4o-mini` → api.openai.com)
+- **Cursor Agent reachability** — Apache HTTPS front `ylang.stelliane.dev` is required so cloud-routed BYOK can hit the gateway (LAN `:8787` alone never receives Agent `POST /v1/chat/completions`)
 - **Improver rejection salvage** — timeout grace + short/medium prompt skeleton fallback; fuzzy `change.before` anchoring; empty-`changes[]` / bad-anchor salvage; Hub no longer nags handled validation reasons
 - **Applyable template boost** — `retrieval_preferred_template_ids` runtime setting (+ Parameters UI); optimizer boost suggestions for high-accept library templates are applyable
 - **`models_improve` honored for improver** — Cursor slugs (`claude-sonnet-4-*`, `composer`, `auto`) defer to activity routing; runtime overrides hot-reload on each completion; preference reorder skipped for the `improve` bucket
