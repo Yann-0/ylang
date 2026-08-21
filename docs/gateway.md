@@ -201,29 +201,57 @@ sequenceDiagram
 
 ## Cursor setup
 
-**Why LAN `:8787` is not enough:** Cursor Agent sends BYOK chat/completions from **Cursor’s cloud**, not from your Windows Remote-SSH session. Logs on this host showed browser `GET /v1` from the LAN and **zero** Agent `POST /v1/chat/completions` — so Override pointed at `http://192.168.1.25:8787/v1` never receives Agent traffic, and built-in `gpt-4o-mini` keeps hitting api.openai.com (*User Provided API Key Rate Limit Exceeded*).
+### Base URL must be exact
 
-**Fix — public HTTPS front (DNS `ylang.stelliane.dev` already points at this server):**
+`Override OpenAI Base URL` is the whole ballgame. A malformed value makes Cursor fall back to api.openai.com with your `sk-…` key, which surfaces as *User Provided API Key Rate Limit Exceeded* — an error that looks like a quota problem but is really a routing problem.
 
-```bash
-sudo /srv/ylang/app/deploy/apache/install-ylang-vhost.sh
-sudo systemctl restart ylang   # if you just pulled alias changes
-```
+| Value | Result |
+|-------|--------|
+| `http://<host>:8787/v1` | correct (LAN) |
+| `http://<host>:11434,` | **wrong** — Ollama's own port, trailing comma, no `/v1` |
+| `http://<host>:8787` | **wrong** — missing `/v1` |
+| `http://<host>:8787/v1/chat/completions` | **wrong** — Cursor appends the path itself |
 
-Then Cursor → **Settings → Models**:
+### Option A — LAN (no DNS needed)
+
+Works when Cursor issues the request from your machine and that machine can reach the server.
 
 | Setting | Value |
 |---------|-------|
-| OpenAI API Key | `YLANG_AUTH_TOKEN` (**not** an `sk-…` OpenAI key) |
-| Override OpenAI Base URL | `https://ylang.stelliane.dev/v1` |
-| Model | `gpt-4o-mini` (gateway aliases → local Ollama) |
+| OpenAI API Key | `YLANG_AUTH_TOKEN` (an `sk-…` key also works — both are accepted) |
+| Override OpenAI Base URL | `http://192.168.1.25:8787/v1` |
+| Model | `gpt-4o-mini` (aliased → local Ollama) |
 
-Click **Verify**, then send a chat. On the server you must see `POST /v1/chat/completions` (not only MCP improver rows). Usage should show `model_used=ollama/qwen-coder-14b`.
+### Option B — public HTTPS (needed if Cursor calls from its cloud)
+
+Port `8787` is **not** open to the internet, so a public front is required. The vhost is ready, but **you must create the DNS record yourself** — `ylang.stelliane.dev` does not resolve until you add it:
+
+```text
+ylang.stelliane.dev.  A  <your public IP>
+```
+
+The wildcard TLS cert (`*.stelliane.dev`) already covers the name, and there is no wildcard DNS, so the A record is mandatory. Then:
+
+```bash
+sudo /srv/ylang/app/deploy/apache/install-ylang-vhost.sh
+/srv/ylang/app/deploy/apache/verify-cursor-gateway.sh
+```
+
+Base URL becomes `https://ylang.stelliane.dev/v1`. Verify the proxy before touching DNS:
+
+```bash
+curl -sS --resolve ylang.stelliane.dev:443:<your public IP> \
+  https://ylang.stelliane.dev/health
+```
+
+### Confirming it works
+
+Click **Verify** in Cursor, then send a chat. The server must log `POST /v1/chat/completions` and usage must show `model_used=ollama/qwen-coder-14b`. If no request arrives, the Base URL is still wrong — nothing in Ylang can change that.
 
 **Notes:**
 
 - Browser `Unauthorized` on `/v1` is normal (no Bearer). Use Cursor’s API key field or `curl -H "Authorization: Bearer …"`.
-- Using a real OpenAI `sk-…` key in Cursor with Override still lets Cursor rate-limit / validate against OpenAI — use `YLANG_AUTH_TOKEN`.
+- Ollama's own OpenAI-compatible port (`11434`) bypasses Ylang entirely — no routing, no usage rows, no aliases. Always point at `8787`.
 - Tab/autocomplete typically stays on Cursor's built-in models; the gateway captures chat/agent requests you explicitly route.
 - MCP (`/mcp`) and the gateway (`/v1/*`) share auth and the same process.
 - **First-party Cursor models (Grok, Composer):** enabling OpenAI API Key / Override OpenAI Base URL causes `Bad Request — This model does not support custom API keys`. Turn the override off (or `Ctrl+Shift+0`) before using Grok/Composer; see [cursor-integration.md — First-party models vs Ylang gateway](cursor-integration.md#first-party-models-vs-ylang-gateway).
