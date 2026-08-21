@@ -212,36 +212,45 @@ sequenceDiagram
 | `http://<host>:8787` | **wrong** — missing `/v1` |
 | `http://<host>:8787/v1/chat/completions` | **wrong** — Cursor appends the path itself |
 
-### Option A — LAN (no DNS needed)
+### A LAN URL cannot work
 
-Works when Cursor issues the request from your machine and that machine can reach the server.
+Cursor routes BYOK model calls through **its own cloud**, which refuses private address space:
+
+```text
+Provider returned error: Access to private networks is forbidden
+```
+
+So `http://192.168.1.25:8787/v1`, `http://stelsrv-d001:8787/v1`, and `http://127.0.0.1:8787/v1` are all dead ends for Agent/chat regardless of local reachability. The gateway needs a **public HTTPS origin**. Port `8787` itself is not forwarded, so it goes through Apache on 443.
+
+### Option A — path on an existing host (no new DNS record)
+
+Reuses a hostname that already resolves, so nothing changes at your registrar:
+
+```bash
+sudo /srv/ylang/app/deploy/apache/install-ylang-path-proxy.sh
+/srv/ylang/app/deploy/apache/verify-cursor-gateway.sh
+```
 
 | Setting | Value |
 |---------|-------|
 | OpenAI API Key | `YLANG_AUTH_TOKEN` (an `sk-…` key also works — both are accepted) |
-| Override OpenAI Base URL | `http://192.168.1.25:8787/v1` |
+| Override OpenAI Base URL | `https://stelliane.dev/ylang/v1` |
 | Model | `gpt-4o-mini` (aliased → local Ollama) |
 
-### Option B — public HTTPS (needed if Cursor calls from its cloud)
+The installer injects a marked block into an existing `*:443` vhost (override with `VHOST=…`), keeps a timestamped backup, and rolls back if `apache2ctl configtest` fails. Only `/ylang/v1/*` and `/ylang/health` are proxied — `/console` and `/mcp` stay off the public host.
 
-Port `8787` is **not** open to the internet, so a public front is required. The vhost is ready, but **you must create the DNS record yourself** — `ylang.stelliane.dev` does not resolve until you add it:
+### Option B — dedicated subdomain (needs a DNS record)
+
+Prefer a clean hostname? Add the A record yourself (there is no wildcard DNS for `*.stelliane.dev`, though the wildcard TLS cert already covers the name):
 
 ```text
 ylang.stelliane.dev.  A  <your public IP>
 ```
 
-The wildcard TLS cert (`*.stelliane.dev`) already covers the name, and there is no wildcard DNS, so the A record is mandatory. Then:
-
 ```bash
 sudo /srv/ylang/app/deploy/apache/install-ylang-vhost.sh
-/srv/ylang/app/deploy/apache/verify-cursor-gateway.sh
-```
-
-Base URL becomes `https://ylang.stelliane.dev/v1`. Verify the proxy before touching DNS:
-
-```bash
-curl -sS --resolve ylang.stelliane.dev:443:<your public IP> \
-  https://ylang.stelliane.dev/health
+BASE_URL=https://ylang.stelliane.dev/v1 \
+  /srv/ylang/app/deploy/apache/verify-cursor-gateway.sh
 ```
 
 ### Confirming it works
