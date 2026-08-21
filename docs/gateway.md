@@ -201,61 +201,37 @@ sequenceDiagram
 
 ## Cursor setup
 
-### Base URL must be exact
+### Cursor Agent chat cannot use a private gateway
 
-`Override OpenAI Base URL` is the whole ballgame. A malformed value makes Cursor fall back to api.openai.com with your `sk-…` key, which surfaces as *User Provided API Key Rate Limit Exceeded* — an error that looks like a quota problem but is really a routing problem.
-
-| Value | Result |
-|-------|--------|
-| `http://<host>:8787/v1` | correct (LAN) |
-| `http://<host>:11434,` | **wrong** — Ollama's own port, trailing comma, no `/v1` |
-| `http://<host>:8787` | **wrong** — missing `/v1` |
-| `http://<host>:8787/v1/chat/completions` | **wrong** — Cursor appends the path itself |
-
-### A LAN URL cannot work
-
-Cursor routes BYOK model calls through **its own cloud**, which refuses private address space:
+Ylang is deliberately **not** reachable from the internet: it binds the LAN only and no port is forwarded. Cursor routes BYOK model calls through **its own cloud**, which refuses private address space:
 
 ```text
 Provider returned error: Access to private networks is forbidden
 ```
 
-So `http://192.168.1.25:8787/v1`, `http://stelsrv-d001:8787/v1`, and `http://127.0.0.1:8787/v1` are all dead ends for Agent/chat regardless of local reachability. The gateway needs a **public HTTPS origin**. Port `8787` itself is not forwarded, so it goes through Apache on 443.
+So `http://192.168.1.25:8787/v1`, `http://stelsrv-d001:8787/v1`, and `http://127.0.0.1:8787/v1` all fail for Agent/chat no matter how reachable they are on your LAN. Keeping Ylang private and routing Cursor Agent chat through it are mutually exclusive — that is a Cursor constraint, not something Ylang can work around.
 
-### Option A — path on an existing host (no new DNS record)
+A related symptom: when the Base URL is unusable, Cursor silently falls back to api.openai.com with your `sk-…` key and reports *User Provided API Key Rate Limit Exceeded*. That message looks like a quota problem but means "Cursor never reached your endpoint". Malformed values cause the same thing:
 
-Reuses a hostname that already resolves, so nothing changes at your registrar:
+| Value | Result |
+|-------|--------|
+| `http://<host>:11434,` | Ollama's own port, trailing comma, no `/v1` |
+| `http://<host>:8787` | missing `/v1` |
+| `http://<host>:8787/v1/chat/completions` | Cursor appends the path itself |
 
-```bash
-sudo /srv/ylang/app/deploy/apache/install-ylang-path-proxy.sh
-/srv/ylang/app/deploy/apache/verify-cursor-gateway.sh
-```
+### What does work while staying private
 
-| Setting | Value |
-|---------|-------|
-| OpenAI API Key | `YLANG_AUTH_TOKEN` (an `sk-…` key also works — both are accepted) |
-| Override OpenAI Base URL | `https://stelliane.dev/ylang/v1` |
-| Model | `gpt-4o-mini` (aliased → local Ollama) |
+| Surface | Status |
+|---------|--------|
+| MCP improver + hooks (`/mcp`) | works — Cursor's MCP client runs on the host, so `127.0.0.1` is fine |
+| Console (`/console`) | works over LAN |
+| CLI (`ylang …`) | works |
+| `/v1/*` from LAN clients (scripts, local IDEs, LiteLLM, Continue) | works |
+| Cursor Agent/chat via `/v1/*` | **not possible** without a public origin |
 
-The installer injects a marked block into an existing `*:443` vhost (override with `VHOST=…`), keeps a timestamped backup, and rolls back if `apache2ctl configtest` fails. Only `/ylang/v1/*` and `/ylang/health` are proxied — `/console` and `/mcp` stay off the public host.
+Use the MCP improver for Cursor and point LAN-local OpenAI-compatible clients at `http://<host>:8787/v1` with a Bearer token.
 
-### Option B — dedicated subdomain (needs a DNS record)
-
-Prefer a clean hostname? Add the A record yourself (there is no wildcard DNS for `*.stelliane.dev`, though the wildcard TLS cert already covers the name):
-
-```text
-ylang.stelliane.dev.  A  <your public IP>
-```
-
-```bash
-sudo /srv/ylang/app/deploy/apache/install-ylang-vhost.sh
-BASE_URL=https://ylang.stelliane.dev/v1 \
-  /srv/ylang/app/deploy/apache/verify-cursor-gateway.sh
-```
-
-### Confirming it works
-
-Click **Verify** in Cursor, then send a chat. The server must log `POST /v1/chat/completions` and usage must show `model_used=ollama/qwen-coder-14b`. If no request arrives, the Base URL is still wrong — nothing in Ylang can change that.
+If you ever decide to accept a public origin, it needs a hostname with valid TLS on port 443 (a bare public IP fails certificate validation) — but that is out of scope here by design.
 
 **Notes:**
 
