@@ -222,6 +222,17 @@ USAGE_TRACE_COLUMNS: tuple[tuple[str, str], ...] = (
     ("evaluation_json", "TEXT"),
 )
 
+USAGE_TRACE_PHASE_B_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("session_id", "TEXT"),
+    ("workspace", "TEXT"),
+    ("context_sources_json", "TEXT"),
+    ("memory_fact_ids_json", "TEXT"),
+    ("mcp_server", "TEXT"),
+    ("retention_until", "TEXT"),
+    ("cost_actual", "REAL"),
+    ("template_version", "INTEGER"),
+)
+
 
 @migration(11, "usage_trace_columns")
 def _migrate_usage_trace_columns(connection: sqlite3.Connection) -> None:
@@ -248,6 +259,16 @@ def _migrate_usage_evaluation_json(connection: sqlite3.Connection) -> None:
         return
     if not _column_exists(connection, "usage", "evaluation_json"):
         connection.execute("ALTER TABLE usage ADD COLUMN evaluation_json TEXT")
+
+
+@migration(13, "usage_trace_phase_b")
+def _migrate_usage_trace_phase_b(connection: sqlite3.Connection) -> None:
+    """Add Phase B control-plane usage columns (session, workspace, retention)."""
+    if not _table_exists(connection, "usage"):
+        return
+    for column, ddl in USAGE_TRACE_PHASE_B_COLUMNS:
+        if not _column_exists(connection, "usage", column):
+            connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
 
 
 def run_migrations(connection: sqlite3.Connection) -> int:

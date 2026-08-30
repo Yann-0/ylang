@@ -12,6 +12,7 @@ from ylang.mcp.serializers import (
     _serialize_context_used,
     _serialize_improvement,
 )
+from ylang.usage.store import UsageWindow
 
 
 def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
@@ -28,6 +29,8 @@ def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
         accepted: bool = False,
         record_acceptance_only: bool = False,
         parent_trace_id: str | None = None,
+        session_id: str | None = None,
+        workspace: str | None = None,
     ) -> dict[str, Any]:
         """Expand rough prompts into full specs; mode-aware for Cursor agent/plan/debug/ask/multitask."""
         if record_acceptance_only:
@@ -52,6 +55,8 @@ def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
             mode=mode,
             accepted=accepted,
             parent_trace_id=parent_trace_id,
+            session_id=session_id,
+            workspace=workspace,
         )
         if use_context and context is not None and context.reference_template_ids:
             deps.store.update_last_improver_context_templates(
@@ -60,4 +65,10 @@ def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
         payload = _serialize_improvement(result)
         if use_context and context is not None:
             payload["context_used"] = _serialize_context_used(context, conversation)
+        latest_id = deps.store.latest_usage_id()
+        if latest_id is not None:
+            for row in deps.store.recall_usage(UsageWindow.last_hours(1)):
+                if row.id == latest_id and row.trace_id:
+                    payload["trace_id"] = row.trace_id
+                    break
         return payload

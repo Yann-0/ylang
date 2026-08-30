@@ -123,6 +123,14 @@ Written on every `Engine.complete()` or `Engine.complete_stream()` call, except 
 | `policy_decision_json` | TEXT | Budget/band/fallback/capture snapshot |
 | `capture_level` | TEXT | Privacy tier applied (`off`/`minimal`/`redacted`/`full_local`) |
 | `evaluation_json` | TEXT | Assembled evaluation signals (objective/user/behavioral/heuristic) |
+| `session_id` | TEXT | Optional client session correlation id |
+| `workspace` | TEXT | Optional workspace / project label |
+| `context_sources_json` | TEXT | JSON list of improver context source labels + template ids |
+| `memory_fact_ids_json` | TEXT | JSON list of memory fact ids injected into improver context |
+| `mcp_server` | TEXT | MCP server name (defaults to `ylang` when `mcp_tool` is set) |
+| `retention_until` | TEXT | ISO UTC expiry for sensitive bodies (`redacted`/`full_local`) |
+| `cost_actual` | REAL | Optional actual billed cost when distinct from estimate |
+| `template_version` | INTEGER | Optional template version used for the call |
 
 Indexes: `idx_usage_timestamp` on `timestamp`; `idx_usage_trace_id`; `idx_usage_parent_trace_id`.
 
@@ -218,6 +226,7 @@ Incremental changes use a versioned migration runner in `src/ylang/core/migratio
 (`schema_migrations` table). On open, `run_migrations()` applies any pending versions
 (facts workspace, improver columns, FTS, feedback, experiments, runtime settings,
 improver cache, apply audit log, **usage trace columns (v11)**, **evaluation_json (v12)**,
+**usage Phase B columns (v13: session/workspace/context/retention)**,
 and related indexes).
 New installs still get `CREATE TABLE IF NOT EXISTS` from stores; upgrades rely on
 numbered migrations.

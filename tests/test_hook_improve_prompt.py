@@ -447,10 +447,119 @@ def test_session_start_exports_capture_edit_feedback(
     module = _load_session_start_module()
     monkeypatch.delenv("YLANG_CAPTURE_EDIT_FEEDBACK", raising=False)
     monkeypatch.delenv("YLANG_EDIT_FEEDBACK", raising=False)
-    with patch.object(
-        module, "_load_ylang_mcp", return_value=("http://127.0.0.1/mcp", "tok")
+    with (
+        patch.object(
+            module, "_load_ylang_mcp", return_value=("http://127.0.0.1/mcp", "tok")
+        ),
+        patch("sys.stdin", io.StringIO("")),
     ):
         module.main()
     env = json.loads(capsys.readouterr().out)["env"]
     assert env["YLANG_CAPTURE_EDIT_FEEDBACK"] == "1"
     assert env["YLANG_MCP_URL"] == "http://127.0.0.1/mcp"
+
+
+def test_session_start_exports_correlation_from_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = _load_session_start_module()
+    payload = {
+        "session_id": "sess-abc",
+        "workspace_roots": ["/home/me/projects/ylang"],
+    }
+    with (
+        patch.object(
+            module, "_load_ylang_mcp", return_value=("http://127.0.0.1/mcp", "tok")
+        ),
+        patch("sys.stdin", io.StringIO(json.dumps(payload))),
+    ):
+        module.main()
+    env = json.loads(capsys.readouterr().out)["env"]
+    assert env["YLANG_SESSION_ID"] == "sess-abc"
+    assert env["YLANG_WORKSPACE"] == "ylang"
+
+
+def test_correlation_from_payload_prefers_conversation_id(
+    hook_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(tmp_path))
+    monkeypatch.delenv("YLANG_SESSION_ID", raising=False)
+    monkeypatch.delenv("YLANG_LAST_TRACE_ID", raising=False)
+    corr = hook_module._correlation_from_payload(
+        {
+            "conversation_id": "conv-123",
+            "workspace_roots": ["/srv/ylang"],
+        }
+    )
+    assert corr["session_id"] == "conv-123"
+    assert corr["workspace"] == "ylang"
+    assert corr["parent_trace_id"] is None
+
+
+def test_correlation_reads_prior_trace_from_last_trace_file(
+    hook_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(tmp_path))
+    cursor_dir = tmp_path / ".cursor"
+    cursor_dir.mkdir()
+    (cursor_dir / "ylang-last-trace.json").write_text(
+        json.dumps({"trace_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}),
+        encoding="utf-8",
+    )
+    corr = hook_module._correlation_from_payload({"conversation_id": "c1"})
+    assert corr["parent_trace_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+
+def test_hook_passes_correlation_to_improve_prompt(
+    hook_module,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("CURSOR_PROJECT_DIR", str(tmp_path))
+    payload = {
+        "prompt": "add dark mode toggle",
+        "composer_mode": "agent",
+        "conversation_id": "conv-xyz",
+        "workspace_roots": ["/tmp/my-app"],
+    }
+    seen: list[dict[str, object]] = []
+
+    async def fake_improve(**kwargs: object) -> dict[str, object]:
+        seen.append(dict(kwargs))
+        return {
+            "improved": "Add a dark mode toggle to settings.",
+            "original": "add dark mode toggle",
+            "validated": True,
+            "auto_apply_default": True,
+            "cursor_mode": "agent",
+            "mode_source": "explicit",
+            "trace_id": "trace-1111-2222-3333-444444444444",
+        }
+
+    with (
+        patch.object(
+            hook_module,
+            "_load_mcp_config",
+            return_value=("http://127.0.0.1/mcp", "token"),
+        ),
+        patch.object(hook_module, "_call_improve_prompt", side_effect=fake_improve),
+        patch("sys.stdin", io.StringIO(json.dumps(payload))),
+    ):
+        hook_module.main()
+
+    captured = capsys.readouterr()
+    assert json.loads(captured.out)["updated_input"]["prompt"].startswith("Add a dark")
+    assert seen[0]["session_id"] == "conv-xyz"
+    assert seen[0]["workspace"] == "my-app"
+    last_trace = json.loads(
+        (tmp_path / ".cursor" / "ylang-last-trace.json").read_text(encoding="utf-8")
+    )
+    assert last_trace["trace_id"] == "trace-1111-2222-3333-444444444444"
+    sidecar = (tmp_path / ".cursor" / "ylang-improved-prompt.md").read_text(
+        encoding="utf-8"
+    )
+    assert "session_id: `conv-xyz`" in sidecar
+    assert "trace_id: `trace-1111-2222-3333-444444444444`" in sidecar
+

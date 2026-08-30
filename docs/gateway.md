@@ -45,8 +45,10 @@ The middleware compares the full `Authorization` header value with constant-time
 |--------|--------|
 | `X-Ylang-Parent-Trace` | Sets `parent_trace_id` on the usage/trace row |
 | `X-Ylang-Trace-Id` | Sets this call's `trace_id` (otherwise Engine allocates a UUID) |
+| `X-Ylang-Session` | Sets `session_id` on the usage row |
+| `X-Ylang-Workspace` | Sets `workspace` on the usage row |
 
-Body aliases `parent_trace_id` / `trace_id` are also accepted. Ylang never invents parent links without an explicit client value.
+Body aliases `parent_trace_id` / `trace_id` / `session_id` / `workspace` are also accepted. Ylang never invents parent links without an explicit client value.
 
 ## GET /health
 

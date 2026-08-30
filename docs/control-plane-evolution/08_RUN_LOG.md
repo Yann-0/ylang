@@ -4,6 +4,18 @@ Exact evidence for audits and gates. Append-only; newest entry at top.
 
 ---
 
+## 2026-08-30 — Phase B+ hooks correlation + usage columns
+
+- Migration v13: `session_id`, `workspace`, `context_sources_json`, `memory_fact_ids_json`,
+  `mcp_server`, `retention_until`, `cost_actual`, `template_version`
+- Engine defaults: `mcp_server=ylang` when `mcp_tool` set; retention now+90d for redacted/full_local
+- Gateway headers `X-Ylang-Session` / `X-Ylang-Workspace`; improver/MCP session+workspace pass-through
+- Cursor hooks: pass `session_id` / `workspace` / `parent_trace_id`; write last-trace sidecar
+- Purge also clears bodies when `retention_until` is past
+- Suite: `471 passed`, 1 deselected (ruff clean)
+
+---
+
 ## 2026-08-30 — Phase B + ship
 
 - Dedicated `evaluation_json` column (migration v12)

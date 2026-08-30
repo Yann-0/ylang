@@ -41,6 +41,8 @@ def test_build_improve_context_empty_conversation_includes_facts_and_reference(
     assert context.conversation_block == _EMPTY_CONVERSATION
     assert context.facts_block is not None
     assert "pytest" in context.facts_block
+    assert context.fact_ids
+    assert all(isinstance(fid, int) for fid in context.fact_ids)
     assert context.reference_prompts_block is not None
     assert context.has_content is True
 

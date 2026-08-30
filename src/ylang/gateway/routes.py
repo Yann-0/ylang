@@ -17,7 +17,12 @@ from starlette.responses import (
 )
 
 from ylang.core.engine import Engine
-from ylang.core.trace_ids import parent_trace_from_request, trace_id_from_request
+from ylang.core.trace_ids import (
+    parent_trace_from_request,
+    session_id_from_request,
+    trace_id_from_request,
+    workspace_from_request,
+)
 from ylang.core.types import StreamChunk, StreamCompletionError
 from ylang.gateway.mapping import resolve_gateway_model
 from ylang.gateway.openai import (
@@ -79,12 +84,11 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
             )
 
         route = resolve_gateway_model(request_model)
-        parent_trace_id = parent_trace_from_request(
-            request, body if isinstance(body, dict) else None
-        )
-        client_trace_id = trace_id_from_request(
-            request, body if isinstance(body, dict) else None
-        )
+        body_dict = body if isinstance(body, dict) else None
+        parent_trace_id = parent_trace_from_request(request, body_dict)
+        client_trace_id = trace_id_from_request(request, body_dict)
+        session_id = session_id_from_request(request, body_dict)
+        workspace = workspace_from_request(request, body_dict)
 
         if stream:
             return await _stream_response(
@@ -97,6 +101,8 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
                 tool_choice=tool_choice,
                 parent_trace_id=parent_trace_id,
                 trace_id=client_trace_id,
+                session_id=session_id,
+                workspace=workspace,
             )
 
         return await _complete_response(
@@ -109,6 +115,8 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
             tool_choice=tool_choice,
             parent_trace_id=parent_trace_id,
             trace_id=client_trace_id,
+            session_id=session_id,
+            workspace=workspace,
         )
 
     @server.custom_route("/v1/models", methods=["GET"])
@@ -127,6 +135,8 @@ async def _complete_response(
     tool_choice: str | dict[str, Any] | None = None,
     parent_trace_id: str | None = None,
     trace_id: str | None = None,
+    session_id: str | None = None,
+    workspace: str | None = None,
 ) -> Response:
     try:
         result = await run_store_sync(
@@ -140,6 +150,8 @@ async def _complete_response(
             selected_route=request_model,
             parent_trace_id=parent_trace_id,
             trace_id=trace_id,
+            session_id=session_id,
+            workspace=workspace,
         )
     except Exception as exc:
         logger.exception("Gateway completion failed")
@@ -179,6 +191,8 @@ def _start_stream(
     tool_choice: str | dict[str, Any] | None = None,
     parent_trace_id: str | None = None,
     trace_id: str | None = None,
+    session_id: str | None = None,
+    workspace: str | None = None,
 ) -> tuple[Iterator[StreamChunk] | None, StreamCompletionError | None]:
     """Pull the first stream chunk so pre-stream failures become JSON errors."""
     generator = engine.complete_stream(
@@ -191,6 +205,8 @@ def _start_stream(
         selected_route=request_model,
         parent_trace_id=parent_trace_id,
         trace_id=trace_id,
+        session_id=session_id,
+        workspace=workspace,
     )
     iterator = iter(generator)
     try:
@@ -218,6 +234,8 @@ async def _stream_response(
     tool_choice: str | dict[str, Any] | None = None,
     parent_trace_id: str | None = None,
     trace_id: str | None = None,
+    session_id: str | None = None,
+    workspace: str | None = None,
 ) -> Response:
     completion_id = new_completion_id()
     chunks, stream_error = await run_store_sync(
@@ -231,6 +249,8 @@ async def _stream_response(
         tool_choice=tool_choice,
         parent_trace_id=parent_trace_id,
         trace_id=trace_id,
+        session_id=session_id,
+        workspace=workspace,
     )
     if stream_error is not None:
         return openai_error_response(

@@ -9,6 +9,7 @@ import time
 import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import litellm
@@ -40,6 +41,7 @@ from ylang.usage.capture import (
     tool_calls_for_capture,
 )
 from ylang.usage.evaluation import evaluation_json_for_write
+from ylang.usage.purge import DEFAULT_TRACE_RETENTION_DAYS
 from ylang.usage.store import UsageStore, dumps_json_list
 
 if TYPE_CHECKING:
@@ -191,6 +193,14 @@ class Engine:
         mcp_tool: str | None = None,
         selected_route: str | None = None,
         trace_id: str | None = None,
+        session_id: str | None = None,
+        workspace: str | None = None,
+        context_sources_json: str | None = None,
+        memory_fact_ids_json: str | None = None,
+        mcp_server: str | None = None,
+        retention_until: str | None = None,
+        cost_actual: float | None = None,
+        template_version: int | None = None,
     ) -> CompletionResult:
         """Resolve model from activity, complete via LiteLLM, write usage.
 
@@ -285,6 +295,14 @@ class Engine:
                 parent_trace_id=parent_trace_id,
                 mcp_tool=mcp_tool,
                 selected_route=selected_route,
+                session_id=session_id,
+                workspace=workspace,
+                context_sources_json=context_sources_json,
+                memory_fact_ids_json=memory_fact_ids_json,
+                mcp_server=mcp_server,
+                retention_until=retention_until,
+                cost_actual=cost_actual,
+                template_version=template_version,
             )
         return CompletionResult(
             content=content,
@@ -296,6 +314,7 @@ class Engine:
             success=success,
             error=error,
             tool_calls=tool_calls,
+            trace_id=allocated_trace_id,
         )
 
     def complete_stream(
@@ -312,6 +331,14 @@ class Engine:
         mcp_tool: str | None = None,
         selected_route: str | None = None,
         trace_id: str | None = None,
+        session_id: str | None = None,
+        workspace: str | None = None,
+        context_sources_json: str | None = None,
+        memory_fact_ids_json: str | None = None,
+        mcp_server: str | None = None,
+        retention_until: str | None = None,
+        cost_actual: float | None = None,
+        template_version: int | None = None,
     ) -> Iterator[StreamChunk]:
         """Stream completion deltas via LiteLLM; write exactly one usage row at end."""
         self._refresh_routing()
@@ -417,6 +444,14 @@ class Engine:
                 parent_trace_id=parent_trace_id,
                 mcp_tool=mcp_tool,
                 selected_route=selected_route,
+                session_id=session_id,
+                workspace=workspace,
+                context_sources_json=context_sources_json,
+                memory_fact_ids_json=memory_fact_ids_json,
+                mcp_server=mcp_server,
+                retention_until=retention_until,
+                cost_actual=cost_actual,
+                template_version=template_version,
             )
 
         if not success:
@@ -450,6 +485,14 @@ class Engine:
         parent_trace_id: str | None,
         mcp_tool: str | None,
         selected_route: str | None,
+        session_id: str | None = None,
+        workspace: str | None = None,
+        context_sources_json: str | None = None,
+        memory_fact_ids_json: str | None = None,
+        mcp_server: str | None = None,
+        retention_until: str | None = None,
+        cost_actual: float | None = None,
+        template_version: int | None = None,
     ) -> None:
         """Persist one usage row with control-plane trace fields."""
         reason = routing_reason_json(
@@ -481,6 +524,18 @@ class Engine:
             improver_fired=improver_fired,
             improver_accepted=improver_accepted,
         )
+        resolved_mcp_server = mcp_server
+        if mcp_tool is not None and resolved_mcp_server is None:
+            resolved_mcp_server = "ylang"
+        resolved_retention = retention_until
+        if (
+            capture_level in {"redacted", "full_local"}
+            and resolved_retention is None
+        ):
+            resolved_retention = (
+                datetime.now(timezone.utc)
+                + timedelta(days=DEFAULT_TRACE_RETENTION_DAYS)
+            ).isoformat()
         self._store.write_usage(
             surface=self._surface,
             activity=activity,
@@ -515,6 +570,14 @@ class Engine:
             policy_decision_json=json.dumps(policy, separators=(",", ":"), sort_keys=True),
             capture_level=capture_level,
             evaluation_json=evaluation,
+            session_id=session_id,
+            workspace=workspace,
+            context_sources_json=context_sources_json,
+            memory_fact_ids_json=memory_fact_ids_json,
+            mcp_server=resolved_mcp_server,
+            retention_until=resolved_retention,
+            cost_actual=cost_actual,
+            template_version=template_version,
         )
 
 

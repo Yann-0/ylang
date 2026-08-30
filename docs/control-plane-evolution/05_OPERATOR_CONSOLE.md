@@ -44,7 +44,7 @@ Document these limits in console Trace detail (“Not observed”).
 | MCP `improve_prompt` | Single trace | `mcp_tool` set |
 | Gateway chat | One trace per completion | Stream: one usage row at end (already) |
 | Gateway tool round-trip | Child traces if Engine invoked again | Wire when gateway loops tools |
-| Cursor hooks | Optional correlation ids Phase B | Fail-open hooks stay |
+| Cursor hooks | `session_id` / `workspace` / `parent_trace_id` via improve hook | Fail-open hooks stay |
 
 ---
 

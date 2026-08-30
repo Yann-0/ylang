@@ -131,7 +131,12 @@ The `beforeSubmitPrompt` hook:
 
 - Reads conversation from `CURSOR_TRANSCRIPT_PATH` when available
 - Calls Ylang `improve_prompt` via HTTP MCP client
-- Writes `.cursor/ylang-improved-prompt.md` with original, improved, validation status
+- Passes control-plane correlation: `session_id` (Cursor `conversation_id` / `session_id`),
+  `workspace` (basename of first `workspace_roots` entry), and `parent_trace_id`
+  (prior turn from `.cursor/ylang-last-trace.json` when present)
+- Writes `.cursor/ylang-improved-prompt.md` with original, improved, validation status,
+  and correlation ids when available
+- Persists the latest `trace_id` to `.cursor/ylang-last-trace.json` for the next turn
 - Passes through bare file/terminal references unchanged (`validated=True`, no LLM call)
 - Skips meta-prompts (prior hook output, `/loop`, `/YOLO`, `/ylang-skip`)
 - Skips improvement when the prompt contains **`ylang-off`** / **`/ylang-off`** (see below)

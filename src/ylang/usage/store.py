@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Self
 
 from ylang.core.db import YlangDatabase, _is_readonly_error, open_connection
-from ylang.core.migrations import USAGE_TRACE_COLUMNS
+from ylang.core.migrations import USAGE_TRACE_COLUMNS, USAGE_TRACE_PHASE_B_COLUMNS
 from ylang.core.sqlite_rows import (
     SqliteRow,
     cell_bool,
@@ -123,6 +123,14 @@ class UsageRecord:
     policy_decision_json: str | None = None
     capture_level: str | None = None
     evaluation_json: str | None = None
+    session_id: str | None = None
+    workspace: str | None = None
+    context_sources_json: str | None = None
+    memory_fact_ids_json: str | None = None
+    mcp_server: str | None = None
+    retention_until: str | None = None
+    cost_actual: float | None = None
+    template_version: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,7 +228,7 @@ class UsageStore:
             row[1]
             for row in self._connection.execute("PRAGMA table_info(usage)").fetchall()
         }
-        for column, ddl in USAGE_TRACE_COLUMNS:
+        for column, ddl in (*USAGE_TRACE_COLUMNS, *USAGE_TRACE_PHASE_B_COLUMNS):
             if column not in columns:
                 self._connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
         self._connection.execute(
@@ -269,6 +277,14 @@ class UsageStore:
         policy_decision_json: str | None = None,
         capture_level: str | None = None,
         evaluation_json: str | None = None,
+        session_id: str | None = None,
+        workspace: str | None = None,
+        context_sources_json: str | None = None,
+        memory_fact_ids_json: str | None = None,
+        mcp_server: str | None = None,
+        retention_until: str | None = None,
+        cost_actual: float | None = None,
+        template_version: int | None = None,
     ) -> None:
         """Insert one per-request usage row. Commits immediately."""
         when = timestamp or datetime.now(timezone.utc)
@@ -313,6 +329,14 @@ class UsageStore:
             policy_decision_json,
             level,
             evaluation_json,
+            session_id,
+            workspace,
+            context_sources_json,
+            memory_fact_ids_json,
+            mcp_server,
+            retention_until,
+            cost_actual,
+            template_version,
         )
         try:
             self._execute_write(params)
@@ -341,10 +365,13 @@ class UsageStore:
                 mcp_tool, selected_route, candidate_models_json, routing_reason_json,
                 fallback_events_json, tool_calls_json, completion_tokens,
                 error_class, error_message_redacted, result_status,
-                policy_decision_json, capture_level, evaluation_json
+                policy_decision_json, capture_level, evaluation_json,
+                session_id, workspace, context_sources_json, memory_fact_ids_json,
+                mcp_server, retention_until, cost_actual, template_version
             ) VALUES (
                 ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?
             )
             """,
             params,
@@ -457,7 +484,9 @@ class UsageStore:
                 mcp_tool, selected_route, candidate_models_json, routing_reason_json,
                 fallback_events_json, tool_calls_json, completion_tokens,
                 error_class, error_message_redacted, result_status,
-                policy_decision_json, capture_level, evaluation_json
+                policy_decision_json, capture_level, evaluation_json,
+                session_id, workspace, context_sources_json, memory_fact_ids_json,
+                mcp_server, retention_until, cost_actual, template_version
             FROM usage
             WHERE timestamp >= ? AND timestamp < ?
             ORDER BY timestamp DESC, id DESC
@@ -477,6 +506,12 @@ def _row_to_record(row: SqliteRow) -> UsageRecord:
     experiment = cell_optional_str(row, 18)
     completion_raw = row[29] if len(row) > 29 else None
     completion_tokens = int(completion_raw) if completion_raw is not None else None
+    cost_actual_raw = row[42] if len(row) > 42 else None
+    cost_actual = float(cost_actual_raw) if cost_actual_raw is not None else None
+    template_version_raw = row[43] if len(row) > 43 else None
+    template_version = (
+        int(template_version_raw) if template_version_raw is not None else None
+    )
     return UsageRecord(
         id=cell_int(row, 0),
         timestamp=_from_iso(cell_str(row, 1)),
@@ -514,6 +549,14 @@ def _row_to_record(row: SqliteRow) -> UsageRecord:
         policy_decision_json=cell_optional_str(row, 33),
         capture_level=cell_optional_str(row, 34),
         evaluation_json=cell_optional_str(row, 35) if len(row) > 35 else None,
+        session_id=cell_optional_str(row, 36) if len(row) > 36 else None,
+        workspace=cell_optional_str(row, 37) if len(row) > 37 else None,
+        context_sources_json=cell_optional_str(row, 38) if len(row) > 38 else None,
+        memory_fact_ids_json=cell_optional_str(row, 39) if len(row) > 39 else None,
+        mcp_server=cell_optional_str(row, 40) if len(row) > 40 else None,
+        retention_until=cell_optional_str(row, 41) if len(row) > 41 else None,
+        cost_actual=cost_actual,
+        template_version=template_version,
     )
 
 

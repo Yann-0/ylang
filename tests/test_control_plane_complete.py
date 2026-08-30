@@ -208,6 +208,8 @@ def test_gateway_parent_trace_header(
                 **_AUTH,
                 "X-Ylang-Parent-Trace": "parent-abc",
                 "X-Ylang-Trace-Id": "child-xyz",
+                "X-Ylang-Session": "sess-1",
+                "X-Ylang-Workspace": "ws-main",
             },
             json={
                 "model": "route-code",
@@ -218,6 +220,8 @@ def test_gateway_parent_trace_header(
     row = ylang_deps.store.recall_usage(UsageWindow.last_hours(1))[0]
     assert row.parent_trace_id == "parent-abc"
     assert row.trace_id == "child-xyz"
+    assert row.session_id == "sess-1"
+    assert row.workspace == "ws-main"
 
 
 def test_migration_12_evaluation_json(tmp_path: Path) -> None:
@@ -228,6 +232,43 @@ def test_migration_12_evaluation_json(tmp_path: Path) -> None:
     }
     assert "evaluation_json" in columns
     store.close()
+
+
+def test_migration_13_phase_b_columns(tmp_path: Path) -> None:
+    from ylang.core.migrations import USAGE_TRACE_PHASE_B_COLUMNS
+
+    store = open_store(tmp_path / "phaseb.db")
+    columns = {
+        row[1]
+        for row in store._connection.execute("PRAGMA table_info(usage)").fetchall()
+    }
+    for name, _ddl in USAGE_TRACE_PHASE_B_COLUMNS:
+        assert name in columns
+    store.close()
+
+
+def test_engine_phase_b_session_sets_retention(tmp_path: Path) -> None:
+    engine = _engine(tmp_path, capture_level="redacted")
+    with patch(
+        "ylang.core.engine.litellm.completion",
+        return_value=_mock_response("ok"),
+    ):
+        result = engine.complete(
+            [{"role": "user", "content": "hi"}],
+            "code",
+            session_id="s-9",
+            workspace="ws-a",
+            context_sources_json='["conversation"]',
+            mcp_tool="improve_prompt",
+        )
+    assert result.trace_id
+    row = engine.store.recall_usage(UsageWindow.last_hours(1))[0]
+    assert row.session_id == "s-9"
+    assert row.workspace == "ws-a"
+    assert row.context_sources_json == '["conversation"]'
+    assert row.mcp_server == "ylang"
+    assert row.retention_until is not None
+    assert row.capture_level == "redacted"
 
 
 def test_compare_usage_dimensions(tmp_path: Path) -> None:

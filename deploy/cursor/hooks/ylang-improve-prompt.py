@@ -10,6 +10,10 @@ submitted text. Fail-open: errors and timeouts log to
 MCP calls honor ``YLANG_HOOK_TIMEOUT_SEC`` (default 15s).
 
 Writes the latest result to ``.cursor/ylang-improved-prompt.md`` in the workspace.
+Passes ``session_id`` / ``workspace`` / ``parent_trace_id`` into MCP ``improve_prompt``
+for control-plane correlation (Cursor ``conversation_id``, ``workspace_roots``,
+prior turn ``trace_id``).
+
 The shebang path is deployment-specific; point hooks at your venv Python.
 """
 
@@ -32,6 +36,11 @@ from ylang.improver.reference import is_reference_only_prompt
 
 _HOOK_LOG = Path.home() / ".cursor" / "hooks" / "ylang-improve-prompt.log"
 _IMPROVED_FILENAME = "ylang-improved-prompt.md"
+_LAST_TRACE_FILENAME = "ylang-last-trace.json"
+_TRACE_ID_RE = re.compile(
+    r"^-+\s*trace_id:\s*`?([0-9a-fA-F-]{8,})`?\s*$",
+    re.MULTILINE,
+)
 _SKIP_PREFIXES = ("/loop", "/YOLO", "/ylang-skip")
 _META_MARKERS = (
     "ylang-auto-improve generated=",
@@ -227,9 +236,105 @@ def _is_reference_passthrough(prompt: str) -> bool:
     return is_reference_only_prompt(prompt.strip())
 
 
-def _improved_prompt_path() -> Path:
+def _project_cursor_dir() -> Path:
+    """Return ``.cursor`` under the active project (or cwd)."""
     project_dir = os.environ.get("CURSOR_PROJECT_DIR") or os.getcwd()
-    return Path(project_dir) / ".cursor" / _IMPROVED_FILENAME
+    return Path(project_dir) / ".cursor"
+
+
+def _improved_prompt_path() -> Path:
+    return _project_cursor_dir() / _IMPROVED_FILENAME
+
+
+def _last_trace_path() -> Path:
+    return _project_cursor_dir() / _LAST_TRACE_FILENAME
+
+
+def _first_nonempty_str(*values: Any) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
+def _workspace_label(payload: Mapping[str, Any]) -> str | None:
+    """Derive a workspace label from Cursor roots or project dir."""
+    roots = payload.get("workspace_roots")
+    if isinstance(roots, list) and roots:
+        root = str(roots[0] or "").strip()
+        if root:
+            return Path(root).name or root
+    project = os.environ.get("CURSOR_PROJECT_DIR", "").strip()
+    if project:
+        return Path(project).name or project
+    return None
+
+
+def _read_prior_trace_id() -> str | None:
+    """Load parent ``trace_id`` from last-trace JSON or improved-prompt sidecar."""
+    path = _last_trace_path()
+    try:
+        if path.is_file():
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                tid = _first_nonempty_str(data.get("trace_id"))
+                if tid:
+                    return tid
+    except (OSError, json.JSONDecodeError):
+        pass
+    improved = _improved_prompt_path()
+    try:
+        if improved.is_file():
+            match = _TRACE_ID_RE.search(improved.read_text(encoding="utf-8"))
+            if match:
+                return match.group(1)
+    except OSError:
+        pass
+    return _first_nonempty_str(os.environ.get("YLANG_LAST_TRACE_ID"))
+
+
+def _write_last_trace(
+    *,
+    trace_id: str,
+    session_id: str | None,
+    workspace: str | None,
+) -> None:
+    path = _last_trace_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "trace_id": trace_id,
+        "session_id": session_id,
+        "workspace": workspace,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+
+def _correlation_from_payload(payload: Mapping[str, Any]) -> dict[str, str | None]:
+    """Extract session / workspace / parent_trace for MCP improve_prompt."""
+    session_id = _first_nonempty_str(
+        payload.get("session_id"),
+        payload.get("conversation_id"),
+        os.environ.get("YLANG_SESSION_ID"),
+    )
+    workspace = _first_nonempty_str(
+        payload.get("workspace"),
+        _workspace_label(payload),
+        os.environ.get("YLANG_WORKSPACE"),
+    )
+    parent_trace_id = _first_nonempty_str(
+        payload.get("parent_trace_id"),
+        payload.get("parent_trace"),
+        _read_prior_trace_id(),
+    )
+    return {
+        "session_id": session_id,
+        "workspace": workspace,
+        "parent_trace_id": parent_trace_id,
+    }
 
 
 def _write_improved_file(
@@ -242,12 +347,25 @@ def _write_improved_file(
     validated: bool,
     rejection_reason: str | None = None,
     changed: bool = False,
+    session_id: str | None = None,
+    workspace: str | None = None,
+    trace_id: str | None = None,
+    parent_trace_id: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).isoformat()
     rejection_line = (
         f"- rejection_reason: `{rejection_reason}`\n" if rejection_reason else ""
     )
+    corr_lines = ""
+    if session_id:
+        corr_lines += f"- session_id: `{session_id}`\n"
+    if workspace:
+        corr_lines += f"- workspace: `{workspace}`\n"
+    if trace_id:
+        corr_lines += f"- trace_id: `{trace_id}`\n"
+    if parent_trace_id:
+        corr_lines += f"- parent_trace_id: `{parent_trace_id}`\n"
     body = (
         f"<!-- ylang-auto-improve generated={stamp} -->\n"
         f"# Ylang improved task specification\n\n"
@@ -257,7 +375,8 @@ def _write_improved_file(
         f"- mode_source: `{mode_source or 'unknown'}`\n"
         f"- validated: `{validated}`\n"
         f"- changed: `{changed}`\n"
-        f"{rejection_line}\n"
+        f"{rejection_line}"
+        f"{corr_lines}\n"
         f"## Improved prompt\n\n"
         f"{improved.strip()}\n\n"
         f"## Original prompt\n\n"
@@ -277,6 +396,9 @@ async def _call_improve_prompt(
     model: str,
     accepted: bool = False,
     record_acceptance_only: bool = False,
+    session_id: str | None = None,
+    workspace: str | None = None,
+    parent_trace_id: str | None = None,
 ) -> dict[str, Any]:
     headers = {"Authorization": f"Bearer {auth_token}"}
     args: dict[str, Any] = {
@@ -292,6 +414,13 @@ async def _call_improve_prompt(
         args["conversation"] = conversation
     if record_acceptance_only:
         args["use_context"] = False
+    else:
+        if session_id:
+            args["session_id"] = session_id
+        if workspace:
+            args["workspace"] = workspace
+        if parent_trace_id:
+            args["parent_trace_id"] = parent_trace_id
 
     async with streamablehttp_client(mcp_url, headers=headers) as (read, write, _):
         async with ClientSession(read, write) as session:
@@ -358,6 +487,7 @@ def _run_main() -> None:
 
     if _is_reference_passthrough(prompt):
         mode = _resolve_mode(payload)
+        correlation = _correlation_from_payload(payload)
         try:
             _write_improved_file(
                 path=_improved_prompt_path(),
@@ -367,6 +497,9 @@ def _run_main() -> None:
                 mode_source="explicit",
                 validated=True,
                 changed=False,
+                session_id=correlation.get("session_id"),
+                workspace=correlation.get("workspace"),
+                parent_trace_id=correlation.get("parent_trace_id"),
             )
         except OSError as exc:
             _log(f"failed to write improved prompt file: {exc}")
@@ -382,6 +515,10 @@ def _run_main() -> None:
     conversation = _conversation_from_transcript(
         os.environ.get("CURSOR_TRANSCRIPT_PATH")
     )
+    correlation = _correlation_from_payload(payload)
+    session_id = correlation.get("session_id")
+    workspace = correlation.get("workspace")
+    parent_trace_id = correlation.get("parent_trace_id")
 
     try:
         mcp_url, auth_token = _load_mcp_config()
@@ -395,6 +532,9 @@ def _run_main() -> None:
                     mode=mode,
                     conversation=conversation,
                     model=model,
+                    session_id=session_id,
+                    workspace=workspace,
+                    parent_trace_id=parent_trace_id,
                 ),
                 label="improve_prompt",
             )
@@ -418,6 +558,7 @@ def _run_main() -> None:
     rejection_reason = result.get("rejection_reason")
     rejection_text = str(rejection_reason).strip() if rejection_reason else None
     changed = improved != original
+    trace_id = _first_nonempty_str(result.get("trace_id"))
 
     try:
         _write_improved_file(
@@ -429,14 +570,35 @@ def _run_main() -> None:
             validated=validated,
             rejection_reason=rejection_text,
             changed=changed,
+            session_id=session_id,
+            workspace=workspace,
+            trace_id=trace_id,
+            parent_trace_id=parent_trace_id,
         )
     except OSError as exc:
         _log(f"failed to write improved prompt file: {exc}")
 
+    if trace_id:
+        try:
+            _write_last_trace(
+                trace_id=trace_id,
+                session_id=session_id,
+                workspace=workspace,
+            )
+        except OSError as exc:
+            _log(f"failed to write last-trace file: {exc}")
+
     reason_suffix = f" reason={rejection_text!r}" if rejection_text else ""
+    corr_suffix = ""
+    if session_id:
+        corr_suffix += f" session={session_id}"
+    if workspace:
+        corr_suffix += f" workspace={workspace}"
+    if trace_id:
+        corr_suffix += f" trace={trace_id}"
     _log(
         f"improved mode={cursor_mode} validated={validated} "
-        f"changed={changed}{reason_suffix}"
+        f"changed={changed}{reason_suffix}{corr_suffix}"
     )
 
     if changed and validated:

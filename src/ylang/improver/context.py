@@ -34,6 +34,8 @@ class ImproveContext:
     reference_template_ids: tuple[str, ...] = ()
     blocks_block: str | None = None
     mode_handoff: dict[str, str | bool] | None = None
+    fact_ids: tuple[int, ...] = ()
+    workspace: str | None = None
 
     @property
     def has_content(self) -> bool:
@@ -123,6 +125,11 @@ def build_improve_context(
         max_chars=mode_config.reference_prompt_char_limit,
     )
     all_ids = tuple(dict.fromkeys((*reference_ids, *block_ids)))
+    facts_block, fact_ids = _build_facts_block(
+        memory,
+        fact_limit=mode_config.facts_limit,
+        char_limit=mode_config.facts_char_limit,
+    )
 
     return ImproveContext(
         conversation_block=_build_conversation_block(
@@ -130,15 +137,12 @@ def build_improve_context(
             turn_limit=mode_config.conversation_turn_limit,
             char_limit=mode_config.conversation_char_limit,
         ),
-        facts_block=_build_facts_block(
-            memory,
-            fact_limit=mode_config.facts_limit,
-            char_limit=mode_config.facts_char_limit,
-        ),
+        facts_block=facts_block,
         reference_prompts_block=reference_block,
         reference_template_ids=all_ids,
         blocks_block=blocks_block or None,
         mode_handoff=handoff,
+        fact_ids=fact_ids,
     )
 
 
@@ -173,21 +177,23 @@ def _build_facts_block(
     *,
     fact_limit: int,
     char_limit: int,
-) -> str | None:
+) -> tuple[str | None, tuple[int, ...]]:
     facts = memory.recall(limit=fact_limit)
     if not facts:
-        return None
+        return None, ()
     lines: list[str] = []
+    fact_ids: list[int] = []
     used = 0
     for fact in facts:
         line = f"- {fact.fact} ({fact.scope})"
         if used + len(line) + 1 > char_limit:
             break
         lines.append(line)
+        fact_ids.append(fact.id)
         used += len(line) + 1
     if not lines:
-        return None
-    return "\n".join(lines)
+        return None, ()
+    return "\n".join(lines), tuple(fact_ids)
 
 
 def _build_reference_prompts_block(

@@ -29,6 +29,7 @@ class CompletionResult:
     completion_tokens: int = 0
     error: str | None = None
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    trace_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

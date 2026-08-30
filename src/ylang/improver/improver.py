@@ -231,6 +231,8 @@ class Improver:
         mode: str | None = None,
         accepted: bool = False,
         parent_trace_id: str | None = None,
+        session_id: str | None = None,
+        workspace: str | None = None,
     ) -> ImprovementResult:
         """Propose prompt improvements; log usage; never mutate caller state."""
         resolved = resolve_cursor_mode(tool, text, explicit_mode=mode)
@@ -263,6 +265,9 @@ class Improver:
             activity=activity,
             experiment_variant=experiment_variant,
             parent_trace_id=parent_trace_id,
+            context=context,
+            session_id=session_id,
+            workspace=workspace,
         )
         if isinstance(completion, ImprovementResult):
             return completion
@@ -305,9 +310,21 @@ class Improver:
         activity: str,
         experiment_variant: str | None,
         parent_trace_id: str | None = None,
+        context: ImproveContext | None = None,
+        session_id: str | None = None,
+        workspace: str | None = None,
     ) -> CompletionResult | ImprovementResult:
         """Call the engine with optional timeout/grace; may return a timeout result."""
         usage_cancelled = threading.Event()
+        context_sources = _context_sources_json(context)
+        memory_fact_ids = (
+            json.dumps(list(context.fact_ids), separators=(",", ":"))
+            if context is not None and context.fact_ids
+            else None
+        )
+        resolved_workspace = workspace
+        if resolved_workspace is None and context is not None:
+            resolved_workspace = context.workspace
 
         def _complete() -> CompletionResult:
             return self._engine.complete(
@@ -324,6 +341,11 @@ class Improver:
                 usage_cancelled=usage_cancelled,
                 mcp_tool="improve_prompt",
                 parent_trace_id=parent_trace_id,
+                session_id=session_id,
+                workspace=resolved_workspace,
+                context_sources_json=context_sources,
+                memory_fact_ids_json=memory_fact_ids,
+                mcp_server="ylang",
             )
 
         if timeout_sec <= 0:
@@ -753,6 +775,28 @@ class Improver:
                 "critique pass failed; keeping original improvement", exc_info=True
             )
         return result
+
+
+def _context_sources_json(context: ImproveContext | None) -> str | None:
+    """Build a compact JSON list of context source labels and template ids."""
+    if context is None:
+        return None
+    sources: list[str] = []
+    if (
+        context.conversation_block
+        and context.conversation_block != _EMPTY_CONVERSATION
+    ):
+        sources.append("conversation")
+    if context.facts_block:
+        sources.append("facts")
+    if context.reference_template_ids:
+        sources.append("templates")
+        sources.extend(context.reference_template_ids)
+    if context.blocks_block:
+        sources.append("blocks")
+    if not sources:
+        return None
+    return json.dumps(sources, separators=(",", ":"))
 
 
 def _build_user_message(
