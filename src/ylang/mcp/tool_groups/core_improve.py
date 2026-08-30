@@ -16,6 +16,7 @@ from ylang.mcp.serializers import (
 
 def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
     """Register core improve MCP tools."""
+
     @server.tool()
     def improve_prompt(
         text: str,
@@ -26,6 +27,7 @@ def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
         mode: str | None = None,
         accepted: bool = False,
         record_acceptance_only: bool = False,
+        parent_trace_id: str | None = None,
     ) -> dict[str, Any]:
         """Expand rough prompts into full specs; mode-aware for Cursor agent/plan/debug/ask/multitask."""
         if record_acceptance_only:
@@ -49,6 +51,7 @@ def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
             context=context,
             mode=mode,
             accepted=accepted,
+            parent_trace_id=parent_trace_id,
         )
         if use_context and context is not None and context.reference_template_ids:
             deps.store.update_last_improver_context_templates(
@@ -58,4 +61,3 @@ def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
         if use_context and context is not None:
             payload["context_used"] = _serialize_context_used(context, conversation)
         return payload
-

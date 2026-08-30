@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import threading
 import time
+import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -13,6 +15,7 @@ import litellm
 from litellm.caching.caching import Cache
 
 from ylang.core.model_router import ModelRouter
+from ylang.core.routing_reason import routing_reason_json
 from ylang.core.types import (
     Activity,
     CompletionResult,
@@ -25,7 +28,19 @@ from ylang.settings import (
     ProviderKeys,
     api_key_for_model,
 )
-from ylang.usage.store import UsageStore
+from ylang.usage.capture import (
+    DEFAULT_CAPTURE_LEVEL,
+    CaptureLevel,
+    classify_error,
+    hash_messages,
+    parse_capture_level,
+    prompt_body_for_capture,
+    redact_error_message,
+    redact_secrets,
+    tool_calls_for_capture,
+)
+from ylang.usage.evaluation import evaluation_json_for_write
+from ylang.usage.store import UsageStore, dumps_json_list
 
 if TYPE_CHECKING:
     from ylang.settings import Settings
@@ -63,6 +78,7 @@ class Engine:
         fallback_model: str = FALLBACK_MODEL,
         quality_band: int | None = None,
         provider_cooldown_seconds: int | None = None,
+        capture_level: CaptureLevel | None = None,
     ) -> None:
         """Wire a usage store and routing surface label for completion logging.
 
@@ -77,10 +93,17 @@ class Engine:
             fallback_model: Local floor model appended to every attempt chain.
             quality_band: Max rank offset for cost tie-break among available models.
             provider_cooldown_seconds: Cooldown after retryable provider failures.
+            capture_level: Trace privacy tier; defaults to ``minimal``.
         """
         self._store = store
         self._surface = surface
         self._base_settings = base_settings
+        if capture_level is not None:
+            self._capture_level: CaptureLevel = capture_level
+        elif base_settings is not None:
+            self._capture_level = base_settings.capture_level
+        else:
+            self._capture_level = DEFAULT_CAPTURE_LEVEL
         if router is not None:
             self._router = router
         else:
@@ -120,6 +143,7 @@ class Engine:
             surface=surface,
             router=ModelRouter.from_settings(settings, usage_store=store),
             base_settings=settings,
+            capture_level=settings.capture_level,
         )
 
     def _refresh_routing(self) -> None:
@@ -136,6 +160,19 @@ class Engine:
         overrides = RuntimeSettingsStore(self._store._connection).as_dict()
         effective = merge_settings(self._base_settings, overrides)
         self._router.apply_settings(effective)
+        self._capture_level = effective.capture_level
+
+    def _effective_capture_level(self) -> CaptureLevel:
+        """Return the capture level for this request (runtime-aware when possible)."""
+        if self._base_settings is None:
+            return self._capture_level
+        from ylang.core.runtime_settings import RuntimeSettingsStore, merge_settings
+
+        overrides = RuntimeSettingsStore(self._store._connection).as_dict()
+        if "capture_level" not in overrides:
+            return self._capture_level
+        effective = merge_settings(self._base_settings, overrides)
+        return parse_capture_level(effective.capture_level)
 
     def complete(
         self,
@@ -150,6 +187,10 @@ class Engine:
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
         usage_cancelled: threading.Event | None = None,
+        parent_trace_id: str | None = None,
+        mcp_tool: str | None = None,
+        selected_route: str | None = None,
+        trace_id: str | None = None,
     ) -> CompletionResult:
         """Resolve model from activity, complete via LiteLLM, write usage.
 
@@ -161,6 +202,8 @@ class Engine:
             activity,
             explicit_model=model,
         )
+        capture_level = self._effective_capture_level()
+        allocated_trace_id = trace_id or str(uuid.uuid4())
 
         started = time.perf_counter()
         content = ""
@@ -170,7 +213,9 @@ class Engine:
         completion_tokens = 0
         cost = 0.0
         error: str | None = None
+        last_exc: BaseException | None = None
         success = False
+        fallback_events: list[dict[str, Any]] = []
 
         for index, candidate in enumerate(attempt_chain):
             api_key = api_key_for_model(candidate, self._router.provider_keys)
@@ -193,32 +238,53 @@ class Engine:
                 success = True
                 break
             except Exception as exc:
+                last_exc = exc
                 error = str(exc)
                 if index + 1 >= len(attempt_chain) or not _should_try_next_model(exc):
                     break
                 next_model = attempt_chain[index + 1]
+                error_class = classify_error(exc, success=False) or "error"
+                fallback_events.append(
+                    {
+                        "from": candidate,
+                        "to": next_model,
+                        "error_class": error_class,
+                    }
+                )
                 if _is_retryable_llm_error(exc):
                     self._router.cooldown.mark_failed(candidate)
                 logger.warning(
                     "LLM fallback: %s -> %s (%s)",
                     candidate,
                     next_model,
-                    _error_reason(exc),
+                    redact_secrets(_error_reason(exc)),
                 )
 
         latency_ms = int((time.perf_counter() - started) * 1000)
         if usage_cancelled is None or not usage_cancelled.is_set():
-            self._store.write_usage(
-                surface=self._surface,
+            self._write_traced_usage(
+                messages=messages,
                 activity=activity,
                 model_used=model_used,
                 prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
                 cost=cost,
                 improver_fired=improver_fired,
                 improver_accepted=improver_accepted,
                 improver_input_sample=improver_input_sample,
                 latency_ms=latency_ms,
                 success=success,
+                error=error,
+                last_exc=last_exc,
+                tool_calls=tool_calls,
+                attempt_chain=attempt_chain,
+                explicit_model=model,
+                fallback_events=fallback_events,
+                capture_level=capture_level,
+                trace_id=allocated_trace_id,
+                parent_trace_id=parent_trace_id,
+                mcp_tool=mcp_tool,
+                selected_route=selected_route,
             )
         return CompletionResult(
             content=content,
@@ -242,6 +308,10 @@ class Engine:
         improver_accepted: bool = False,
         tools: list[dict[str, Any]] | None = None,
         tool_choice: str | dict[str, Any] | None = None,
+        parent_trace_id: str | None = None,
+        mcp_tool: str | None = None,
+        selected_route: str | None = None,
+        trace_id: str | None = None,
     ) -> Iterator[StreamChunk]:
         """Stream completion deltas via LiteLLM; write exactly one usage row at end."""
         self._refresh_routing()
@@ -249,14 +319,20 @@ class Engine:
             activity,
             explicit_model=model,
         )
+        capture_level = self._effective_capture_level()
+        allocated_trace_id = trace_id or str(uuid.uuid4())
 
         started = time.perf_counter()
         model_used = attempt_chain[0] if attempt_chain else self._router.fallback_model
         prompt_tokens = 0
+        completion_tokens = 0
         cost = 0.0
         error: str | None = None
+        last_exc: BaseException | None = None
         success = False
         emitted = False
+        fallback_events: list[dict[str, Any]] = []
+        tool_calls: list[dict[str, Any]] = []
 
         try:
             for index, candidate in enumerate(attempt_chain):
@@ -277,13 +353,17 @@ class Engine:
                             or chunk.usage is not None
                         ):
                             emitted = True
+                            if chunk.tool_calls_delta:
+                                tool_calls.extend(chunk.tool_calls_delta)
                             yield chunk
                     model_used = stream_usage.model_used or candidate
                     prompt_tokens = stream_usage.prompt_tokens
+                    completion_tokens = stream_usage.completion_tokens
                     cost = stream_usage.cost
                     success = True
                     return
                 except Exception as exc:
+                    last_exc = exc
                     error = str(exc)
                     if emitted:
                         raise StreamCompletionError(
@@ -295,27 +375,48 @@ class Engine:
                     ):
                         break
                     next_model = attempt_chain[index + 1]
+                    error_class = classify_error(exc, success=False) or "error"
+                    fallback_events.append(
+                        {
+                            "from": candidate,
+                            "to": next_model,
+                            "error_class": error_class,
+                        }
+                    )
                     if _is_retryable_llm_error(exc):
                         self._router.cooldown.mark_failed(candidate)
                     logger.warning(
                         "LLM stream fallback: %s -> %s (%s)",
                         candidate,
                         next_model,
-                        _error_reason(exc),
+                        redact_secrets(_error_reason(exc)),
                     )
                     model_used = next_model
         finally:
             latency_ms = int((time.perf_counter() - started) * 1000)
-            self._store.write_usage(
-                surface=self._surface,
+            self._write_traced_usage(
+                messages=messages,
                 activity=activity,
                 model_used=model_used,
                 prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
                 cost=cost,
                 improver_fired=improver_fired,
                 improver_accepted=improver_accepted,
+                improver_input_sample=None,
                 latency_ms=latency_ms,
                 success=success,
+                error=error,
+                last_exc=last_exc,
+                tool_calls=tool_calls,
+                attempt_chain=attempt_chain,
+                explicit_model=model,
+                fallback_events=fallback_events,
+                capture_level=capture_level,
+                trace_id=allocated_trace_id,
+                parent_trace_id=parent_trace_id,
+                mcp_tool=mcp_tool,
+                selected_route=selected_route,
             )
 
         if not success:
@@ -323,6 +424,98 @@ class Engine:
                 message=error or "completion failed",
                 model_used=model_used,
             )
+
+    def _write_traced_usage(
+        self,
+        *,
+        messages: list[Message],
+        activity: Activity | str,
+        model_used: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost: float,
+        improver_fired: bool,
+        improver_accepted: bool,
+        improver_input_sample: str | None,
+        latency_ms: int,
+        success: bool,
+        error: str | None,
+        last_exc: BaseException | None,
+        tool_calls: list[dict[str, Any]],
+        attempt_chain: list[str],
+        explicit_model: str | None,
+        fallback_events: list[dict[str, Any]],
+        capture_level: CaptureLevel,
+        trace_id: str,
+        parent_trace_id: str | None,
+        mcp_tool: str | None,
+        selected_route: str | None,
+    ) -> None:
+        """Persist one usage row with control-plane trace fields."""
+        reason = routing_reason_json(
+            self._router,
+            activity,
+            attempt_chain=attempt_chain,
+            selected=model_used,
+            explicit_model=explicit_model,
+            fallback_events=fallback_events,
+        )
+        sample, body = prompt_body_for_capture(improver_input_sample, capture_level)
+        prompt_hash = None
+        if capture_level != "off":
+            prompt_hash = hash_messages(messages)
+        policy = {
+            "daily_budget_usd": self._router._daily_budget_usd,  # noqa: SLF001
+            "quality_band": self._router.quality_band,
+            "fallback_model": self._router.fallback_model,
+            "explicit_model": explicit_model,
+            "capture_level": capture_level,
+        }
+        evaluation = evaluation_json_for_write(
+            success=success,
+            latency_ms=latency_ms,
+            cost=cost,
+            completion_tokens=completion_tokens,
+            error_class=classify_error(last_exc, success=success),
+            fallback_events=fallback_events,
+            improver_fired=improver_fired,
+            improver_accepted=improver_accepted,
+        )
+        self._store.write_usage(
+            surface=self._surface,
+            activity=activity,
+            model_used=model_used,
+            prompt_tokens=prompt_tokens,
+            cost=cost,
+            improver_fired=improver_fired,
+            improver_accepted=improver_accepted,
+            improver_input_sample=sample,
+            latency_ms=latency_ms,
+            success=success,
+            trace_id=trace_id,
+            parent_trace_id=parent_trace_id,
+            prompt_hash=prompt_hash,
+            prompt_body_redacted=body,
+            mcp_tool=mcp_tool,
+            selected_route=selected_route,
+            candidate_models_json=dumps_json_list(attempt_chain),
+            routing_reason_json=reason,
+            fallback_events_json=(
+                json.dumps(fallback_events, separators=(",", ":"), sort_keys=True)
+                if fallback_events
+                else None
+            ),
+            tool_calls_json=tool_calls_for_capture(tool_calls, capture_level),
+            completion_tokens=completion_tokens,
+            error_class=classify_error(last_exc, success=success),
+            error_message_redacted=(
+                None if capture_level == "off" else redact_error_message(error)
+            ),
+            result_status="success" if success else "error",
+            policy_decision_json=json.dumps(policy, separators=(",", ":"), sort_keys=True),
+            capture_level=capture_level,
+            evaluation_json=evaluation,
+        )
 
 
 def _should_try_next_model(exc: BaseException) -> bool:

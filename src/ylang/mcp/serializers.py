@@ -78,6 +78,8 @@ def _serialize_summary(summary: TemplateSummary) -> dict[str, Any]:
 
 
 def _serialize_usage(record: UsageRecord) -> dict[str, Any]:
+    from ylang.core.routing_reason import routing_one_liner
+
     context_templates: list[str] = []
     if record.improver_context_templates:
         context_templates = [
@@ -112,6 +114,23 @@ def _serialize_usage(record: UsageRecord) -> dict[str, Any]:
         payload["cursor_mode"] = record.cursor_mode
     if record.experiment_variant is not None:
         payload["experiment_variant"] = record.experiment_variant
+    if record.trace_id is not None:
+        payload["trace_id"] = record.trace_id
+    if record.parent_trace_id is not None:
+        payload["parent_trace_id"] = record.parent_trace_id
+    if record.mcp_tool is not None:
+        payload["mcp_tool"] = record.mcp_tool
+    if record.selected_route is not None:
+        payload["selected_route"] = record.selected_route
+    if record.routing_reason_json is not None:
+        payload["routing_reason_json"] = record.routing_reason_json
+        payload["routing_explanation"] = routing_one_liner(record.routing_reason_json)
+    if record.capture_level is not None:
+        payload["capture_level"] = record.capture_level
+    if record.result_status is not None:
+        payload["result_status"] = record.result_status
+    if record.evaluation_json is not None:
+        payload["evaluation_json"] = record.evaluation_json
     return payload
 
 

@@ -39,6 +39,15 @@ HTTP transport requires `YLANG_AUTH_TOKEN`. Bearer auth applies to **`/mcp`, `/v
 
 The middleware compares the full `Authorization` header value with constant-time `secrets.compare_digest`. Send exactly `Bearer <token>` with no extra whitespace.
 
+### Optional trace correlation headers
+
+| Header | Effect |
+|--------|--------|
+| `X-Ylang-Parent-Trace` | Sets `parent_trace_id` on the usage/trace row |
+| `X-Ylang-Trace-Id` | Sets this call's `trace_id` (otherwise Engine allocates a UUID) |
+
+Body aliases `parent_trace_id` / `trace_id` are also accepted. Ylang never invents parent links without an explicit client value.
+
 ## GET /health
 
 Unauthenticated liveness probe. Returns JSON with `status`, `version`, and `service`. Exempt from bearer middleware (`mcp/auth.py`).

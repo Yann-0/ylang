@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Self
 
-from collections.abc import Callable
-
 from ylang.core.db import YlangDatabase, _is_readonly_error, open_connection
+from ylang.core.migrations import USAGE_TRACE_COLUMNS
 from ylang.core.sqlite_rows import (
     SqliteRow,
     cell_bool,
@@ -21,6 +22,7 @@ from ylang.core.sqlite_rows import (
     cell_str,
 )
 from ylang.usage.activity import normalize_usage_activity
+from ylang.usage.capture import DEFAULT_CAPTURE_LEVEL
 from ylang.usage.sample import truncate_improver_input_sample
 
 _SCHEMA_SQL = """
@@ -104,6 +106,23 @@ class UsageRecord:
     improver_task_class: str | None = None
     cursor_mode: str | None = None
     experiment_variant: str | None = None
+    trace_id: str | None = None
+    parent_trace_id: str | None = None
+    prompt_hash: str | None = None
+    prompt_body_redacted: str | None = None
+    mcp_tool: str | None = None
+    selected_route: str | None = None
+    candidate_models_json: str | None = None
+    routing_reason_json: str | None = None
+    fallback_events_json: str | None = None
+    tool_calls_json: str | None = None
+    completion_tokens: int | None = None
+    error_class: str | None = None
+    error_message_redacted: str | None = None
+    result_status: str | None = None
+    policy_decision_json: str | None = None
+    capture_level: str | None = None
+    evaluation_json: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,6 +216,19 @@ class UsageStore:
         ):
             if column not in columns:
                 self._connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
+        columns = {
+            row[1]
+            for row in self._connection.execute("PRAGMA table_info(usage)").fetchall()
+        }
+        for column, ddl in USAGE_TRACE_COLUMNS:
+            if column not in columns:
+                self._connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_trace_id ON usage (trace_id)"
+        )
+        self._connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_usage_parent_trace_id ON usage (parent_trace_id)"
+        )
         self._connection.commit()
 
     def write_usage(
@@ -220,10 +252,31 @@ class UsageStore:
         improver_task_class: str | None = None,
         cursor_mode: str | None = None,
         experiment_variant: str | None = None,
+        trace_id: str | None = None,
+        parent_trace_id: str | None = None,
+        prompt_hash: str | None = None,
+        prompt_body_redacted: str | None = None,
+        mcp_tool: str | None = None,
+        selected_route: str | None = None,
+        candidate_models_json: str | None = None,
+        routing_reason_json: str | None = None,
+        fallback_events_json: str | None = None,
+        tool_calls_json: str | None = None,
+        completion_tokens: int | None = None,
+        error_class: str | None = None,
+        error_message_redacted: str | None = None,
+        result_status: str | None = None,
+        policy_decision_json: str | None = None,
+        capture_level: str | None = None,
+        evaluation_json: str | None = None,
     ) -> None:
         """Insert one per-request usage row. Commits immediately."""
         when = timestamp or datetime.now(timezone.utc)
         sample = truncate_improver_input_sample(improver_input_sample)
+        status = result_status
+        if status is None:
+            status = "success" if success else "error"
+        level = capture_level or DEFAULT_CAPTURE_LEVEL
         params = (
             _to_iso(when),
             surface,
@@ -243,6 +296,23 @@ class UsageStore:
             improver_task_class,
             cursor_mode,
             experiment_variant,
+            trace_id,
+            parent_trace_id,
+            prompt_hash,
+            prompt_body_redacted,
+            mcp_tool,
+            selected_route,
+            candidate_models_json,
+            routing_reason_json,
+            fallback_events_json,
+            tool_calls_json,
+            completion_tokens,
+            error_class,
+            error_message_redacted,
+            status,
+            policy_decision_json,
+            level,
+            evaluation_json,
         )
         try:
             self._execute_write(params)
@@ -259,41 +329,26 @@ class UsageStore:
             self._execute_write(params)
 
     def _execute_write(self, params: tuple[object, ...]) -> None:
-        if len(params) == 11:
-            self._connection.execute(
-                """
-                INSERT INTO usage (
-                    timestamp, surface, activity, model_used, prompt_tokens, cost,
-                    improver_fired, improver_accepted, improver_input_sample,
-                    latency_ms, success
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                params,
+        self._connection.execute(
+            """
+            INSERT INTO usage (
+                timestamp, surface, activity, model_used, prompt_tokens, cost,
+                improver_fired, improver_accepted, improver_input_sample,
+                latency_ms, success, improver_context_templates,
+                improver_validated, improver_changed, improver_rejection_reason,
+                improver_task_class, cursor_mode, experiment_variant,
+                trace_id, parent_trace_id, prompt_hash, prompt_body_redacted,
+                mcp_tool, selected_route, candidate_models_json, routing_reason_json,
+                fallback_events_json, tool_calls_json, completion_tokens,
+                error_class, error_message_redacted, result_status,
+                policy_decision_json, capture_level, evaluation_json
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
-        elif len(params) == 12:
-            self._connection.execute(
-                """
-                INSERT INTO usage (
-                    timestamp, surface, activity, model_used, prompt_tokens, cost,
-                    improver_fired, improver_accepted, improver_input_sample,
-                    latency_ms, success, improver_context_templates
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                params,
-            )
-        else:
-            self._connection.execute(
-                """
-                INSERT INTO usage (
-                    timestamp, surface, activity, model_used, prompt_tokens, cost,
-                    improver_fired, improver_accepted, improver_input_sample,
-                    latency_ms, success, improver_context_templates,
-                    improver_validated, improver_changed, improver_rejection_reason,
-                    improver_task_class, cursor_mode, experiment_variant
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                params,
-            )
+            """,
+            params,
+        )
         self._connection.commit()
 
     def update_last_improver_accepted(self, accepted: bool) -> None:
@@ -397,7 +452,12 @@ class UsageStore:
                 improver_fired, improver_accepted, improver_input_sample,
                 latency_ms, success, improver_context_templates,
                 improver_validated, improver_changed, improver_rejection_reason,
-                improver_task_class, cursor_mode, experiment_variant
+                improver_task_class, cursor_mode, experiment_variant,
+                trace_id, parent_trace_id, prompt_hash, prompt_body_redacted,
+                mcp_tool, selected_route, candidate_models_json, routing_reason_json,
+                fallback_events_json, tool_calls_json, completion_tokens,
+                error_class, error_message_redacted, result_status,
+                policy_decision_json, capture_level, evaluation_json
             FROM usage
             WHERE timestamp >= ? AND timestamp < ?
             ORDER BY timestamp DESC, id DESC
@@ -415,6 +475,8 @@ def _row_to_record(row: SqliteRow) -> UsageRecord:
     task_class = cell_optional_str(row, 16)
     cursor_mode = cell_optional_str(row, 17)
     experiment = cell_optional_str(row, 18)
+    completion_raw = row[29] if len(row) > 29 else None
+    completion_tokens = int(completion_raw) if completion_raw is not None else None
     return UsageRecord(
         id=cell_int(row, 0),
         timestamp=_from_iso(cell_str(row, 1)),
@@ -435,7 +497,31 @@ def _row_to_record(row: SqliteRow) -> UsageRecord:
         improver_task_class=task_class,
         cursor_mode=cursor_mode,
         experiment_variant=experiment,
+        trace_id=cell_optional_str(row, 19),
+        parent_trace_id=cell_optional_str(row, 20),
+        prompt_hash=cell_optional_str(row, 21),
+        prompt_body_redacted=cell_optional_str(row, 22),
+        mcp_tool=cell_optional_str(row, 23),
+        selected_route=cell_optional_str(row, 24),
+        candidate_models_json=cell_optional_str(row, 25),
+        routing_reason_json=cell_optional_str(row, 26),
+        fallback_events_json=cell_optional_str(row, 27),
+        tool_calls_json=cell_optional_str(row, 28),
+        completion_tokens=completion_tokens,
+        error_class=cell_optional_str(row, 30),
+        error_message_redacted=cell_optional_str(row, 31),
+        result_status=cell_optional_str(row, 32),
+        policy_decision_json=cell_optional_str(row, 33),
+        capture_level=cell_optional_str(row, 34),
+        evaluation_json=cell_optional_str(row, 35) if len(row) > 35 else None,
     )
+
+
+def dumps_json_list(values: list[str] | None) -> str | None:
+    """Serialize a string list to compact JSON, or ``None`` when empty."""
+    if not values:
+        return None
+    return json.dumps(values, separators=(",", ":"))
 
 
 def open_store(db_path: Path) -> UsageStore:

@@ -47,6 +47,7 @@ Restart-required keys (transport, auth token, provider API keys, storage path) r
 | `YLANG_QUALITY_BAND` | `0` | [Quality band and cost tie-break](#quality-band-and-cost-tie-break) |
 | `YLANG_PROVIDER_COOLDOWN_SECONDS` | `60` | [Fallback and resilience](#fallback-and-resilience) |
 | `YLANG_DAILY_BUDGET_USD` | *(none)* | [Daily budget cap](#daily-budget-cap) |
+| `YLANG_CAPTURE_LEVEL` | `minimal` | Trace privacy: `off` \| `minimal` \| `redacted` \| `full_local` |
 | `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | [Improver context](#improver-context) |
 | `YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT` | `0.5` | [Improver analytics](#improver-analytics-and-optimization) |
 | `YLANG_PATTERN_DETECTOR` | `lexical` | [Improver analytics](#improver-analytics-and-optimization) |
@@ -358,6 +359,7 @@ Optimization suggestions and the Advisor can propose concrete `setting_key`/`set
 | `improver_timeout_sec` | Improver LLM wall-clock budget in seconds (`0` disables; default `12`). On timeout: short grace for late completions, then a deterministic skeleton for prompts ≤200 chars; longer prompts return the original and record `improver timeout`. Late completions after hard timeout do not count as successful improver fires. Critique is skipped when less than ~2s or ~20% of budget remains. For `18`, raise `YLANG_HOOK_TIMEOUT_SEC` to at least `20`. |
 | `usage_digest_enabled` | When `true`, indicates cron should run `ylang usage digest` |
 | `usage_digest_last_at` | ISO timestamp; updated automatically when digest CLI runs |
+| `capture_level` | Trace privacy tier (`off` / `minimal` / `redacted` / `full_local`; default `minimal`) |
 
 Restart-required values (host, port, storage path, API keys) remain env-only. See [console.md](console.md).
 

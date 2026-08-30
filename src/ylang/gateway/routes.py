@@ -17,6 +17,7 @@ from starlette.responses import (
 )
 
 from ylang.core.engine import Engine
+from ylang.core.trace_ids import parent_trace_from_request, trace_id_from_request
 from ylang.core.types import StreamChunk, StreamCompletionError
 from ylang.gateway.mapping import resolve_gateway_model
 from ylang.gateway.openai import (
@@ -78,6 +79,12 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
             )
 
         route = resolve_gateway_model(request_model)
+        parent_trace_id = parent_trace_from_request(
+            request, body if isinstance(body, dict) else None
+        )
+        client_trace_id = trace_id_from_request(
+            request, body if isinstance(body, dict) else None
+        )
 
         if stream:
             return await _stream_response(
@@ -88,6 +95,8 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
                 request_model=route.request_model,
                 tools=tools,
                 tool_choice=tool_choice,
+                parent_trace_id=parent_trace_id,
+                trace_id=client_trace_id,
             )
 
         return await _complete_response(
@@ -98,6 +107,8 @@ def register_gateway_routes(server: FastMCP, engine: Engine) -> None:
             request_model=route.request_model,
             tools=tools,
             tool_choice=tool_choice,
+            parent_trace_id=parent_trace_id,
+            trace_id=client_trace_id,
         )
 
     @server.custom_route("/v1/models", methods=["GET"])
@@ -114,6 +125,8 @@ async def _complete_response(
     request_model: str,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
+    parent_trace_id: str | None = None,
+    trace_id: str | None = None,
 ) -> Response:
     try:
         result = await run_store_sync(
@@ -124,6 +137,9 @@ async def _complete_response(
             improver_fired=False,
             tools=tools,
             tool_choice=tool_choice,
+            selected_route=request_model,
+            parent_trace_id=parent_trace_id,
+            trace_id=trace_id,
         )
     except Exception as exc:
         logger.exception("Gateway completion failed")
@@ -158,8 +174,11 @@ def _start_stream(
     messages: list,
     route_activity: str,
     explicit_model: str | None,
+    request_model: str,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
+    parent_trace_id: str | None = None,
+    trace_id: str | None = None,
 ) -> tuple[Iterator[StreamChunk] | None, StreamCompletionError | None]:
     """Pull the first stream chunk so pre-stream failures become JSON errors."""
     generator = engine.complete_stream(
@@ -169,6 +188,9 @@ def _start_stream(
         improver_fired=False,
         tools=tools,
         tool_choice=tool_choice,
+        selected_route=request_model,
+        parent_trace_id=parent_trace_id,
+        trace_id=trace_id,
     )
     iterator = iter(generator)
     try:
@@ -194,6 +216,8 @@ async def _stream_response(
     request_model: str,
     tools: list[dict[str, Any]] | None = None,
     tool_choice: str | dict[str, Any] | None = None,
+    parent_trace_id: str | None = None,
+    trace_id: str | None = None,
 ) -> Response:
     completion_id = new_completion_id()
     chunks, stream_error = await run_store_sync(
@@ -202,8 +226,11 @@ async def _stream_response(
         messages=messages,
         route_activity=route_activity,
         explicit_model=explicit_model,
+        request_model=request_model,
         tools=tools,
         tool_choice=tool_choice,
+        parent_trace_id=parent_trace_id,
+        trace_id=trace_id,
     )
     if stream_error is not None:
         return openai_error_response(

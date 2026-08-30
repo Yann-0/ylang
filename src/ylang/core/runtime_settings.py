@@ -10,6 +10,7 @@ from typing import Any
 
 from ylang.core.config_parsers import parse_bool_flag, parse_model_list
 from ylang.settings import Settings
+from ylang.usage.capture import parse_capture_level
 
 HOT_RELOADABLE_KEYS: frozenset[str] = frozenset(
     {
@@ -33,6 +34,7 @@ HOT_RELOADABLE_KEYS: frozenset[str] = frozenset(
         "pattern_alert_threshold",
         "usage_digest_enabled",
         "usage_digest_last_at",
+        "capture_level",
     }
 )
 
@@ -161,6 +163,10 @@ def merge_settings(base: Settings, overrides: dict[str, str]) -> Settings:
             data["provider_cooldown_seconds"] = int(cooldown)
         except ValueError:
             pass
+    if capture := overrides.get("capture_level"):
+        data["capture_level"] = parse_capture_level(
+            capture, default=data.get("capture_level", "minimal")
+        )
     activity_lists = dict(data["activity_model_lists"])
     activity_env_map = {
         "models_code": "code",
@@ -258,6 +264,10 @@ SETTING_DESCRIPTIONS: dict[str, str] = {
         "the console does not email or push."
     ),
     "usage_digest_last_at": "ISO timestamp of the last digest run (updated by CLI).",
+    "capture_level": (
+        "Trace privacy capture: off | minimal | redacted | full_local "
+        "(default minimal; raw bodies only when redacted/full_local)."
+    ),
 }
 
 

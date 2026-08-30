@@ -70,6 +70,21 @@ def build_doctor_parser() -> argparse.ArgumentParser:
     )
 
 
+def build_purge_traces_parser() -> argparse.ArgumentParser:
+    """Build ``ylang purge-traces`` parser."""
+    parser = argparse.ArgumentParser(
+        prog="ylang purge-traces",
+        description="Purge old redacted/full prompt bodies from usage traces",
+    )
+    parser.add_argument(
+        "--older-than-days",
+        type=int,
+        default=90,
+        help="Delete sensitive bodies older than this many days (default 90)",
+    )
+    return parser
+
+
 def run_backup_cli(argv: list[str] | None = None) -> int:
     """Backup the SQLite database using the online backup API."""
     args = build_backup_parser().parse_args(argv)
@@ -188,6 +203,16 @@ def run_doctor_cli(argv: list[str] | None = None) -> int:
             ok = False
             print("HTTP auth token: missing ✗")
         print(f"HTTP bind: {settings.host}:{settings.port}")
+        if settings.host in {"0.0.0.0", "::"}:
+            print(
+                "  ⚠ Bind is all interfaces — LAN reachable. "
+                "Do not expose publicly without owner approval "
+                "(local/private default; see control-plane trust boundary)."
+            )
+        elif settings.host not in {"127.0.0.1", "localhost", "::1"}:
+            print(
+                f"  ⚠ Non-loopback bind {settings.host!r} — confirm this is intentional."
+            )
         port = settings.port
         if _port_free(settings.host, port):
             print(f"Port {port}: available ✓")
@@ -228,6 +253,23 @@ def run_doctor_cli(argv: list[str] | None = None) -> int:
         )
 
     return 0 if ok else 1
+
+
+def run_purge_traces_cli(argv: list[str] | None = None) -> int:
+    """Purge old sensitive prompt bodies from the usage table."""
+    from ylang.usage.purge import purge_sensitive_trace_bodies
+
+    args = build_purge_traces_parser().parse_args(argv)
+    stores, _ = _open_stores()
+    try:
+        updated = purge_sensitive_trace_bodies(
+            stores.store._connection,
+            older_than_days=args.older_than_days,
+        )
+        print(f"Purged sensitive bodies on {updated} usage row(s)", file=sys.stderr)
+        return 0
+    finally:
+        stores.close()
 
 
 def _open_stores():

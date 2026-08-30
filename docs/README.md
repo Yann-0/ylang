@@ -18,6 +18,7 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 | [Database schema](database-schema.md) | SQLite tables and relationships |
 | [Quality charter](quality-charter.md) | Soft limits, principles, config authority |
 | [Quality loop](quality-loop.md) | Before/after metrics per improvement wave |
+| [Control plane evolution](control-plane-evolution/README.md) | Local-first AI Control Plane program (Y0–Y6, gates, run log) |
 
 ## Internal / historical
 

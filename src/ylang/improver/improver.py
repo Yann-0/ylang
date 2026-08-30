@@ -230,6 +230,7 @@ class Improver:
         context: ImproveContext | None = None,
         mode: str | None = None,
         accepted: bool = False,
+        parent_trace_id: str | None = None,
     ) -> ImprovementResult:
         """Propose prompt improvements; log usage; never mutate caller state."""
         resolved = resolve_cursor_mode(tool, text, explicit_mode=mode)
@@ -261,6 +262,7 @@ class Improver:
             timeout_sec=timeout_sec,
             activity=activity,
             experiment_variant=experiment_variant,
+            parent_trace_id=parent_trace_id,
         )
         if isinstance(completion, ImprovementResult):
             return completion
@@ -302,6 +304,7 @@ class Improver:
         timeout_sec: float,
         activity: str,
         experiment_variant: str | None,
+        parent_trace_id: str | None = None,
     ) -> CompletionResult | ImprovementResult:
         """Call the engine with optional timeout/grace; may return a timeout result."""
         usage_cancelled = threading.Event()
@@ -319,6 +322,8 @@ class Improver:
                 improver_accepted=accepted,
                 improver_input_sample=text,
                 usage_cancelled=usage_cancelled,
+                mcp_tool="improve_prompt",
+                parent_trace_id=parent_trace_id,
             )
 
         if timeout_sec <= 0:
@@ -728,6 +733,7 @@ class Improver:
             model=resolve_improver_explicit_model(model),
             response_format={"type": "json_object"},
             improver_fired=False,
+            mcp_tool="improve_prompt",
         )
         if not completion.success:
             return result

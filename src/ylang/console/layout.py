@@ -130,6 +130,9 @@ _CONSOLE_STYLES = """
 
 # (key, href, label) — used to build primary vs advanced nav
 _NAV_CORE = (
+    ("today", "/console/today", "Today"),
+    ("quality", "/console/quality", "Quality"),
+    ("routing", "/console/routing", "Routing"),
     ("control", "/console/control", "Control"),
     ("overview", "/console", "Overview"),
     ("usage", "/console/usage", "Usage"),
@@ -142,6 +145,7 @@ _NAV_LIBRARY = (
 )
 _NAV_OPTIMIZE = (
     ("proposals", "/console/proposals", "Proposals"),
+    ("privacy", "/console/privacy", "Privacy"),
 )
 _NAV_GATED = (
     ("experiments", "/console/experiments", "Experiments"),

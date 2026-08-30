@@ -9,6 +9,7 @@ from ylang.console.route_modules.api import register_api_routes
 from ylang.console.route_modules.experiments import register_experiments_routes
 from ylang.console.route_modules.facts import register_facts_routes
 from ylang.console.route_modules.feedback_data import register_feedback_data_routes
+from ylang.console.route_modules.hubs import register_hub_routes
 from ylang.console.route_modules.ops_misc import register_ops_misc_routes
 from ylang.console.route_modules.overview import register_overview_routes
 from ylang.console.route_modules.patterns import register_patterns_routes
@@ -42,6 +43,7 @@ def register_console_routes(
         runtime_store=runtime_store,
     )
     register_static_auth_routes(ctx)
+    register_hub_routes(ctx)
     register_overview_routes(ctx)
     register_settings_control_routes(ctx)
     register_templates_routes(ctx)

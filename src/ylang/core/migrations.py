@@ -202,6 +202,54 @@ def _migrate_templates_visibility_archived(connection: sqlite3.Connection) -> No
     )
 
 
+USAGE_TRACE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("trace_id", "TEXT"),
+    ("parent_trace_id", "TEXT"),
+    ("prompt_hash", "TEXT"),
+    ("prompt_body_redacted", "TEXT"),
+    ("mcp_tool", "TEXT"),
+    ("selected_route", "TEXT"),
+    ("candidate_models_json", "TEXT"),
+    ("routing_reason_json", "TEXT"),
+    ("fallback_events_json", "TEXT"),
+    ("tool_calls_json", "TEXT"),
+    ("completion_tokens", "INTEGER"),
+    ("error_class", "TEXT"),
+    ("error_message_redacted", "TEXT"),
+    ("result_status", "TEXT"),
+    ("policy_decision_json", "TEXT"),
+    ("capture_level", "TEXT"),
+    ("evaluation_json", "TEXT"),
+)
+
+
+@migration(11, "usage_trace_columns")
+def _migrate_usage_trace_columns(connection: sqlite3.Connection) -> None:
+    """Add Phase A control-plane trace columns to ``usage`` (additive)."""
+    if not _table_exists(connection, "usage"):
+        return
+    for column, ddl in USAGE_TRACE_COLUMNS:
+        if column == "evaluation_json":
+            continue  # added in migration 12 for DBs that already applied v11
+        if not _column_exists(connection, "usage", column):
+            connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_usage_trace_id ON usage (trace_id)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_usage_parent_trace_id ON usage (parent_trace_id)"
+    )
+
+
+@migration(12, "usage_evaluation_json")
+def _migrate_usage_evaluation_json(connection: sqlite3.Connection) -> None:
+    """Add dedicated evaluation_json column (Phase B)."""
+    if not _table_exists(connection, "usage"):
+        return
+    if not _column_exists(connection, "usage", "evaluation_json"):
+        connection.execute("ALTER TABLE usage ADD COLUMN evaluation_json TEXT")
+
+
 def run_migrations(connection: sqlite3.Connection) -> int:
     """Apply pending migrations; return count applied."""
     connection.execute(

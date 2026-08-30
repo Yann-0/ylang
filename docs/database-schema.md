@@ -93,10 +93,11 @@ Written on every `Engine.complete()` or `Engine.complete_stream()` call, except 
 | `activity` | TEXT | Routing bucket (e.g. `code`, `reason`) or `improve:<cursor_mode>` for improver |
 | `model_used` | TEXT | LiteLLM model string that succeeded |
 | `prompt_tokens` | INTEGER | Prompt token count |
+| `completion_tokens` | INTEGER | Completion token count (Phase A trace) |
 | `cost` | REAL | Estimated USD cost from LiteLLM |
 | `improver_fired` | INTEGER | 1 if improver initiated the call |
 | `improver_accepted` | INTEGER | 1 when improver suggestion was accepted |
-| `improver_input_sample` | TEXT | Truncated original prompt when improver fired (~200 chars) |
+| `improver_input_sample` | TEXT | Truncated original prompt when improver fired (~200 chars); subject to capture_level |
 | `improver_context_templates` | TEXT | Comma-separated template ids injected into improver context |
 | `improver_validated` | INTEGER | 1 when improver output passed validation |
 | `improver_changed` | INTEGER | 1 when improved text differs from input |
@@ -106,8 +107,24 @@ Written on every `Engine.complete()` or `Engine.complete_stream()` call, except 
 | `experiment_variant` | TEXT | A/B experiment variant id when `YLANG_EXPERIMENTS=1` |
 | `latency_ms` | INTEGER | Wall-clock latency |
 | `success` | INTEGER | 1 if completion succeeded |
+| `trace_id` | TEXT | Canonical control-plane trace UUID |
+| `parent_trace_id` | TEXT | Parent trace for tool/follow-up linkage |
+| `prompt_hash` | TEXT | SHA-256 of normalized prompt (no body) |
+| `prompt_body_redacted` | TEXT | Optional redacted body (`redacted` / `full_local` only) |
+| `mcp_tool` | TEXT | MCP tool that triggered the call |
+| `selected_route` | TEXT | Virtual route label (e.g. `route-code`) |
+| `candidate_models_json` | TEXT | JSON attempt chain |
+| `routing_reason_json` | TEXT | Structured explainable routing payload |
+| `fallback_events_json` | TEXT | Ordered fallback events with error classes |
+| `tool_calls_json` | TEXT | Observable tool call names (args by capture_level) |
+| `error_class` | TEXT | Stable error class when failed |
+| `error_message_redacted` | TEXT | Scrubbed short error text |
+| `result_status` | TEXT | `success` / `error` / `cancelled` |
+| `policy_decision_json` | TEXT | Budget/band/fallback/capture snapshot |
+| `capture_level` | TEXT | Privacy tier applied (`off`/`minimal`/`redacted`/`full_local`) |
+| `evaluation_json` | TEXT | Assembled evaluation signals (objective/user/behavioral/heuristic) |
 
-Index: `idx_usage_timestamp` on `timestamp`.
+Indexes: `idx_usage_timestamp` on `timestamp`; `idx_usage_trace_id`; `idx_usage_parent_trace_id`.
 
 ### Activity normalization
 
@@ -200,8 +217,10 @@ Base tables are created idempotently on first store access:
 Incremental changes use a versioned migration runner in `src/ylang/core/migrations.py`
 (`schema_migrations` table). On open, `run_migrations()` applies any pending versions
 (facts workspace, improver columns, FTS, feedback, experiments, runtime settings,
-improver cache, apply audit log, and related indexes). New installs still get
-`CREATE TABLE IF NOT EXISTS` from stores; upgrades rely on numbered migrations.
+improver cache, apply audit log, **usage trace columns (v11)**, **evaluation_json (v12)**,
+and related indexes).
+New installs still get `CREATE TABLE IF NOT EXISTS` from stores; upgrades rely on
+numbered migrations.
 
 ## Files on disk
 

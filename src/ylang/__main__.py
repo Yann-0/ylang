@@ -1,7 +1,7 @@
 """Entry point for ``python -m ylang``.
 
 With no subcommand, starts the MCP server (stdio or HTTP per ``Settings``).
-Subcommands: ``usage``, ``patterns``, ``backup``, ``export``, ``import``, ``doctor``, ``init``.
+Subcommands: ``usage``, ``patterns``, ``backup``, ``export``, ``import``, ``doctor``, ``purge-traces``, ``init``.
 """
 
 from __future__ import annotations
@@ -40,6 +40,10 @@ def main() -> None:
             from ylang.cli.ops import run_doctor_cli
 
             raise SystemExit(run_doctor_cli(sys.argv[2:]))
+        if command == "purge-traces":
+            from ylang.cli.ops import run_purge_traces_cli
+
+            raise SystemExit(run_purge_traces_cli(sys.argv[2:]))
         if command == "init":
             from ylang.cli.init import run_init_cli
 

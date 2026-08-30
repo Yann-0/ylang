@@ -17,6 +17,11 @@ from pydantic import BaseModel, Field
 
 from ylang.core.env_file import load_discovered_env_file
 from ylang.core.types import Activity
+from ylang.usage.capture import (
+    DEFAULT_CAPTURE_LEVEL,
+    CaptureLevel,
+    parse_capture_level,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +215,13 @@ class Settings(BaseModel):
         ge=0,
         description="Optional rolling 24h spend cap; models skipped when budget exceeded.",
     )
+    capture_level: CaptureLevel = Field(
+        default=DEFAULT_CAPTURE_LEVEL,
+        description=(
+            "Trace privacy capture tier: off | minimal | redacted | full_local. "
+            "Default minimal stores hashes and reason codes, not raw prompt bodies."
+        ),
+    )
 
     @classmethod
     def load(cls) -> Settings:
@@ -247,6 +259,8 @@ class Settings(BaseModel):
             kwargs["provider_cooldown_seconds"] = int(raw_cooldown)
         if raw_budget := os.environ.get("YLANG_DAILY_BUDGET_USD"):
             kwargs["daily_budget_usd"] = float(raw_budget)
+        if raw_capture := os.environ.get("YLANG_CAPTURE_LEVEL"):
+            kwargs["capture_level"] = parse_capture_level(raw_capture)
 
         settings = cls(**kwargs)
         _warn_missing_provider_keys(provider_keys)
