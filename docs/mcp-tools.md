@@ -308,7 +308,7 @@ Default when none specified: last 7 days.
       "timestamp": "2026-07-04T12:00:00+00:00",
       "surface": "mcp",
       "activity": "improve:agent",
-      "model_used": "anthropic/claude-3-5-sonnet-latest",
+      "model_used": "anthropic/claude-sonnet-5",
       "prompt_tokens": 1200,
       "cost": 0.003,
       "improver_fired": true,
@@ -345,8 +345,8 @@ Default: last 7 days.
   "total_tokens": 45000,
   "success_rate": 0.98,
   "by_activity": {"improve:agent": 45, "improve:plan": 20, "code": 70},
-  "by_model": {"anthropic/claude-3-5-sonnet-latest": 100},
-  "model_costs": {"anthropic/claude-3-5-sonnet-latest": 0.95}
+  "by_model": {"anthropic/claude-sonnet-5": 100},
+  "model_costs": {"anthropic/claude-sonnet-5": 0.95}
 }
 ```
 

@@ -198,7 +198,7 @@ def collect_control_proposals(
 
     fast = pending_proposal_from_setting(
         key="models_improve",
-        value="mistral/mistral-small-latest,openai/gpt-4o-mini",
+        value="mistral/mistral-small-latest,anthropic/claude-haiku-4-5",
         rationale="Fast/cheap improver routing preset.",
     )
     if fast is not None:
@@ -208,7 +208,7 @@ def collect_control_proposals(
                 kind="control_preset",
                 title="Fast/cheap improver models",
                 description=fast.description,
-                evidence="Control Center preset — mistral-small + gpt-4o-mini.",
+                evidence="Control Center preset — mistral-small + claude-haiku-4-5.",
                 priority="low",
                 apply_type=APPLY_RUNTIME_SETTING,
                 setting_key=fast.setting_key,

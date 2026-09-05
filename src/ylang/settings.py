@@ -26,46 +26,51 @@ from ylang.usage.capture import (
 logger = logging.getLogger(__name__)
 
 McpTransport = Literal["stdio", "http"]
-ProviderName = Literal["openai", "anthropic", "mistral", "perplexity"]
+ProviderName = Literal["openai", "anthropic", "mistral", "perplexity", "gemini"]
 
 _PROVIDER_ENV_VARS: dict[ProviderName, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "mistral": "MISTRAL_API_KEY",
     "perplexity": "PERPLEXITY_API_KEY",
+    "gemini": "GEMINI_API_KEY",
 }
 
 _LITELLM_PREFIX_ALIASES: dict[str, ProviderName] = {
     "mistralai": "mistral",
+    "google": "gemini",
 }
 
 DEFAULT_ACTIVITY_MODEL_LISTS: dict[Activity, list[str]] = {
     "code": [
-        "anthropic/claude-3-5-sonnet-latest",
-        "openai/o3-mini",
-        "openai/gpt-4o",
-        "mistral/mistral-large-latest",
+        "anthropic/claude-opus-5",
+        "openai/gpt-5.5",
+        "anthropic/claude-sonnet-5",
+        "mistral/mistral-medium-latest",
     ],
     "search": [
-        "perplexity/sonar",
-        "openai/gpt-4o",
-        "anthropic/claude-3-5-sonnet-latest",
+        "perplexity/sonar-pro",
+        "perplexity/sonar-reasoning-pro",
+        "anthropic/claude-sonnet-5",
+        "gemini/gemini-3.7-flash",
     ],
     "reason": [
-        "openai/o3-mini",
-        "anthropic/claude-3-5-sonnet-latest",
-        "openai/gpt-4o",
+        "anthropic/claude-fable-5",
+        "anthropic/claude-opus-5",
+        "openai/gpt-5.5",
+        "anthropic/claude-sonnet-5",
     ],
     "improve": [
+        "anthropic/claude-sonnet-5",
+        "openai/gpt-5.5",
+        "mistral/mistral-medium-latest",
         "mistral/mistral-small-latest",
-        "openai/gpt-4o-mini",
-        "openai/gpt-4o",
-        "anthropic/claude-3-5-sonnet-latest",
     ],
     "other": [
+        "anthropic/claude-sonnet-5",
+        "openai/gpt-5.5",
+        "gemini/gemini-3.7-flash",
         "mistral/mistral-small-latest",
-        "openai/gpt-4o-mini",
-        "anthropic/claude-3-5-sonnet-latest",
     ],
 }
 
@@ -100,6 +105,7 @@ class ProviderKeys(BaseModel):
     anthropic: str | None = Field(default=None, description="Anthropic API key.")
     mistral: str | None = Field(default=None, description="Mistral API key.")
     perplexity: str | None = Field(default=None, description="Perplexity API key.")
+    gemini: str | None = Field(default=None, description="Google Gemini API key.")
 
     def configured_names(self) -> list[ProviderName]:
         """Return provider names that have a non-empty API key."""
@@ -112,6 +118,8 @@ class ProviderKeys(BaseModel):
             names.append("mistral")
         if self.perplexity:
             names.append("perplexity")
+        if self.gemini:
+            names.append("gemini")
         return names
 
     def missing_names(self) -> list[ProviderName]:
@@ -306,11 +314,15 @@ def _parse_model_list(raw: str) -> list[str]:
 
 
 def _load_provider_keys() -> ProviderKeys:
+    gemini = _read_optional_env("GEMINI_API_KEY") or _read_optional_env(
+        "GOOGLE_API_KEY"
+    )
     return ProviderKeys(
         openai=_read_optional_env("OPENAI_API_KEY"),
         anthropic=_read_optional_env("ANTHROPIC_API_KEY"),
         mistral=_read_optional_env("MISTRAL_API_KEY"),
         perplexity=_read_optional_env("PERPLEXITY_API_KEY"),
+        gemini=gemini,
     )
 
 

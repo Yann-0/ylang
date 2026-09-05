@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Default activity models → Aug 2026 frontier** — `claude-opus-5` / `claude-sonnet-5` / `claude-fable-5`, `openai/gpt-5.5`, `gemini/gemini-3.7-flash`, `mistral-medium-latest` / Small 4; search leads with `perplexity/sonar-pro`
+- **Cursor aliases** — GPT-5.5 / Codex / Gemini / Claude 4.x slugs map to Claude 5 / GPT-5.5 / Gemini 3.7 Flash (no longer GPT-4o / Sonnet 4.6)
+- **Gemini provider** — `GEMINI_API_KEY` / `GOOGLE_API_KEY` gate `gemini/` models
+- **Console presets** — quality uses Sonnet 5 + GPT-5.5; fast uses Mistral Small + Haiku 4.5
+- **Docs** — `docs/models.md`, `docs/cli.md`, README MCP table (17 tools), GitHub Pages (MkDocs)
+
 ### Added
 
 - **Optimize Ylang wizard** on Operator Hub (`#optimize-wizard`) — diagnose → propose → apply → measure

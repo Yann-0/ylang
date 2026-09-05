@@ -172,15 +172,15 @@ Any `model` string that is **not** a virtual `route-*` id is treated as an expli
 
 1. The gateway maps it to `activity=other` and passes the raw string to the Engine as `explicit_model`.
 2. `ModelRouter.resolve_explicit_model()` translates it to LiteLLM form when possible:
-   - Cursor / local aliases first (e.g. `gpt-4o-mini` / `ollama/gpt-4o-mini` → `ollama/qwen-coder-14b`, `claude-sonnet-4-6` → Anthropic)
-   - Already LiteLLM-routable: `provider/model` (e.g. `openai/gpt-4o`, `anthropic/claude-3-5-sonnet-latest`, `mistral/mistral-large-latest`, `ollama/qwen2.5`)
-   - Prefix rules: `claude-sonnet-4-*` → `anthropic/claude-sonnet-4-6`, `claude-opus-4-*` → `anthropic/claude-opus-4-6`
+   - Cursor / local aliases first (e.g. `gpt-4o-mini` / `ollama/gpt-4o-mini` → `ollama/qwen-coder-14b`, `claude-sonnet-4-6` → `anthropic/claude-sonnet-5`, `gpt-5.5-medium` → `openai/gpt-5.5`)
+   - Already LiteLLM-routable: `provider/model` (e.g. `openai/gpt-5.5`, `anthropic/claude-opus-5`, `mistral/mistral-medium-latest`, `gemini/gemini-3.7-flash`, `ollama/qwen2.5`)
+   - Prefix rules: `claude-sonnet-4|5-*` → `anthropic/claude-sonnet-5`, `claude-opus-4|5-*` → `anthropic/claude-opus-5`
    - Unrecognized slugs: warning logged; activity routing proceeds without the explicit model
 
    **Note:** An Ollama tag named like an OpenAI model (`gpt-4o-mini`) must be aliased to a non-colliding LiteLLM id. Otherwise LiteLLM routes through the OpenAI client and Cursor shows *User Provided API Key Rate Limit Exceeded* when the cloud key is throttled.
 3. The attempt chain tries the resolved explicit model first, then the activity-selected model, then remaining candidates, then the fallback floor (`ollama/qwen2.5` by default).
 
-Provider translation lives in core — the gateway has no provider-specific code.
+See [models.md](models.md) for the full alias and default-list tables.
 
 ## Request flow
 

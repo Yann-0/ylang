@@ -25,8 +25,6 @@ from ylang.usage.store import UsageStore, UsageWindow
 if TYPE_CHECKING:
     from ylang.core.engine import Engine
 
-from ylang.settings import DEFAULT_ACTIVITY_MODEL_LISTS
-
 logger = logging.getLogger(__name__)
 
 _NARRATIVE_SYSTEM = """\
@@ -40,8 +38,8 @@ APPLY_RUNTIME_SETTING = "runtime_setting"
 APPLY_LEARNED_TEMPLATE = "learned_template"
 APPLY_ARCHIVE_TEMPLATES = "archive_templates"
 
-# Prefer the cheapest improve models only (not the full fallback chain).
-_FAST_IMPROVE_MODELS = ",".join(DEFAULT_ACTIVITY_MODEL_LISTS["improve"][:2])
+# Fast/cheap improver preset (matches console Parameters "fast" chip).
+_FAST_IMPROVE_MODELS = "mistral/mistral-small-latest,anthropic/claude-haiku-4-5"
 
 
 @dataclass(frozen=True, slots=True)

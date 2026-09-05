@@ -38,6 +38,8 @@ ylang/
 | `pyright` | Static typecheck (`[tool.pyright]` in pyproject; CI non-blocking) |
 | `python -m ylang` | Start MCP server (stdio) |
 | `ylang` | Same as `python -m ylang` (console script from `pyproject.toml`) |
+| `pip install -e ".[docs]" && mkdocs build --strict` | Build GitHub Pages docs site |
+| `mkdocs serve` | Local docs preview |
 
 There is no `--help` flag on the main entry point.
 

@@ -1,0 +1,81 @@
+site_name: Ylang
+site_description: Local-first personal AI efficiency layer — MCP, gateway, and admin console
+site_url: https://yann-0.github.io/ylang/
+repo_url: https://github.com/Yann-0/ylang
+repo_name: Yann-0/ylang
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: site
+
+# Repo-root files (CHANGELOG, CONTRIBUTING, deploy/) are linked from docs for
+# GitHub browsing; ignore those as missing docs-dir targets under --strict.
+validation:
+  nav:
+    omitted_files: info
+  links:
+    not_found: ignore
+    unrecognized_links: ignore
+    anchors: ignore
+    absolute_links: ignore
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: blue grey
+      accent: teal
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.sections
+    - navigation.expand
+    - content.code.copy
+    - search.suggest
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: README.md
+  - Installation: installation.md
+  - Configuration: configuration.md
+  - Models: models.md
+  - Architecture: architecture.md
+  - MCP tools: mcp-tools.md
+  - CLI: cli.md
+  - Cursor integration: cursor-integration.md
+  - Console: console.md
+  - Gateway: gateway.md
+  - Deployment: deployment.md
+  - Development: development.md
+  - Database schema: database-schema.md
+  - Quality charter: quality-charter.md
+  - Quality loop: quality-loop.md
+  - Control plane:
+      - Overview: control-plane-evolution/README.md
+      - Current reality: control-plane-evolution/00_CURRENT_REALITY.md
+      - Scope: control-plane-evolution/01_SCOPE_AND_NON_GOALS.md
+      - Trace model: control-plane-evolution/02_TRACE_MODEL.md
+      - Routing policy: control-plane-evolution/03_ROUTING_AND_POLICY.md
+      - Evaluation: control-plane-evolution/04_EVALUATION_MODEL.md
+      - Operator console: control-plane-evolution/05_OPERATOR_CONSOLE.md
+      - Action plan: control-plane-evolution/06_MASTER_ACTION_PLAN.md
+      - QA gates: control-plane-evolution/07_QA_GATES.md
+      - Run log: control-plane-evolution/08_RUN_LOG.md

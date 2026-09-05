@@ -25,6 +25,10 @@ dev = [
     "httpx2>=2",
     "pyright>=1.1.390",
 ]
+docs = [
+    "mkdocs>=1.6,<2",
+    "mkdocs-material>=9.5,<10",
+]
 
 [tool.ruff]
 target-version = "py312"

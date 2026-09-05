@@ -12,6 +12,7 @@ class JsonLogFormatter(logging.Formatter):
     """Emit one JSON object per log line."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Serialize one log record as a single-line JSON object."""
         payload = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "level": record.levelname,

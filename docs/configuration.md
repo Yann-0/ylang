@@ -137,10 +137,11 @@ Ylang routes LLM calls through [LiteLLM](https://github.com/BerriAI/litellm). **
 
 | Variable | Provider | LiteLLM prefix | Example models |
 |----------|----------|----------------|----------------|
-| `OPENAI_API_KEY` | OpenAI | `openai/` | `openai/gpt-4o`, `openai/o3-mini`, `openai/gpt-4o-mini` |
-| `ANTHROPIC_API_KEY` | Anthropic | `anthropic/` | `anthropic/claude-3-5-sonnet-latest`, `anthropic/claude-sonnet-4-6` |
-| `MISTRAL_API_KEY` | Mistral | `mistral/` or `mistralai/` | `mistral/mistral-large-latest`, `mistral/mistral-small-latest` |
-| `PERPLEXITY_API_KEY` | Perplexity | `perplexity/` | `perplexity/sonar` |
+| `OPENAI_API_KEY` | OpenAI | `openai/` | `openai/gpt-5.5`, `openai/gpt-5.5-pro` |
+| `ANTHROPIC_API_KEY` | Anthropic | `anthropic/` | `anthropic/claude-opus-5`, `anthropic/claude-sonnet-5`, `anthropic/claude-fable-5` |
+| `MISTRAL_API_KEY` | Mistral | `mistral/` or `mistralai/` | `mistral/mistral-medium-latest`, `mistral/mistral-small-latest` |
+| `PERPLEXITY_API_KEY` | Perplexity | `perplexity/` | `perplexity/sonar-pro`, `perplexity/sonar-reasoning-pro` |
+| `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) | Google Gemini | `gemini/` or `google/` | `gemini/gemini-3.7-flash` |
 
 ### Adding a provider
 
@@ -206,15 +207,15 @@ console overrides to `models_improve` hot-reload on each completion (no restart)
 
 ### Default model lists
 
-When no `YLANG_MODELS_*` override is set:
+When no `YLANG_MODELS_*` override is set (see also **[models.md](models.md)**):
 
 | Activity | Default order (index 0 = highest priority) |
 |----------|---------------------------------------------|
-| `code` | `anthropic/claude-3-5-sonnet-latest` → `openai/o3-mini` → `openai/gpt-4o` → `mistral/mistral-large-latest` |
-| `search` | `perplexity/sonar` → `openai/gpt-4o` → `anthropic/claude-3-5-sonnet-latest` |
-| `reason` | `openai/o3-mini` → `anthropic/claude-3-5-sonnet-latest` → `openai/gpt-4o` |
-| `improve` | `mistral/mistral-small-latest` → `openai/gpt-4o-mini` → `openai/gpt-4o` → `anthropic/claude-3-5-sonnet-latest` |
-| `other` | `mistral/mistral-small-latest` → `openai/gpt-4o-mini` → `anthropic/claude-3-5-sonnet-latest` |
+| `code` | `anthropic/claude-opus-5` → `openai/gpt-5.5` → `anthropic/claude-sonnet-5` → `mistral/mistral-medium-latest` |
+| `search` | `perplexity/sonar-pro` → `perplexity/sonar-reasoning-pro` → `anthropic/claude-sonnet-5` → `gemini/gemini-3.7-flash` |
+| `reason` | `anthropic/claude-fable-5` → `anthropic/claude-opus-5` → `openai/gpt-5.5` → `anthropic/claude-sonnet-5` |
+| `improve` | `anthropic/claude-sonnet-5` → `openai/gpt-5.5` → `mistral/mistral-medium-latest` → `mistral/mistral-small-latest` |
+| `other` | `anthropic/claude-sonnet-5` → `openai/gpt-5.5` → `gemini/gemini-3.7-flash` → `mistral/mistral-small-latest` |
 
 **Leftmost model in the list = highest priority.** Only models whose provider key is set (or that don't need a key) are actually attempted.
 
@@ -224,13 +225,13 @@ Set a comma-separated LiteLLM model string per activity. **Order matters** — f
 
 ```bash
 # Prefer OpenAI for code, Anthropic as backup
-YLANG_MODELS_CODE=openai/gpt-4o,anthropic/claude-3-5-sonnet-latest,mistral/mistral-large-latest
+YLANG_MODELS_CODE=openai/gpt-5.5,anthropic/claude-opus-5,mistral/mistral-medium-latest
 
 # Cheaper model first for low-stakes "other" work
-YLANG_MODELS_OTHER=openai/gpt-4o-mini,mistral/mistral-small-latest
+YLANG_MODELS_OTHER=mistral/mistral-small-latest,anthropic/claude-haiku-4-5
 
 # Single provider only (only works if that key is set)
-YLANG_MODELS_IMPROVE=mistral/mistral-large-latest
+YLANG_MODELS_IMPROVE=mistral/mistral-medium-latest
 ```
 
 Rules:
@@ -271,7 +272,7 @@ flowchart TD
 MCP `improve_prompt` accepts a `model` argument. When set:
 
 - Known **Cursor slugs** (e.g. `claude-sonnet-4-5`) map to LiteLLM strings via [aliases](#cursor-model-slug-aliases).
-- Known **LiteLLM strings** (e.g. `openai/gpt-4o`) are tried **first** in the chain.
+- Known **LiteLLM strings** (e.g. `openai/gpt-5.5`) are tried **first** in the chain.
 - Unknown slugs are logged and ignored; activity routing takes over.
 
 This does **not** replace your `YLANG_MODELS_*` lists — it prepends one override for that single call.
@@ -284,10 +285,10 @@ After restart, stderr shows effective routing (example):
 quality_band: 0
 activity routing (quality order → selected):
   code:
-    [0] anthropic/claude-3-5-sonnet-latest  available  ← selected
-    [1] openai/o3-mini  available
-    [2] openai/gpt-4o  available
-    [3] mistral/mistral-large-latest  skipped:no_key
+    [0] anthropic/claude-opus-5  available  ← selected
+    [1] openai/gpt-5.5  available
+    [2] anthropic/claude-sonnet-5  available
+    [3] mistral/mistral-medium-latest  skipped:no_key
   ...
 fallback floor: ollama/qwen2.5  available
 ```
@@ -449,17 +450,19 @@ The improver logs `improve:{cursor_mode}` (e.g. `improve:agent`), not the MCP `t
 
 ## Cursor model slug aliases
 
-When `improve_prompt` (or hooks) pass a Cursor IDE slug as `model`, the router maps it to LiteLLM:
+When the gateway (or hooks) pass a Cursor IDE slug as `model`, the router maps it to LiteLLM. Full table and rationale: **[models.md](models.md)**.
 
 | Cursor slug | LiteLLM model |
 |-------------|---------------|
-| `claude-sonnet-4-5`, `claude-sonnet-4-6`, `composer`, `composer-2.5-fast` | `anthropic/claude-sonnet-4-6` |
-| `claude-4.6-sonnet-high-thinking`, `claude-4.6-sonnet-medium-thinking` | `anthropic/claude-sonnet-4-6` |
-| `claude-4.6-opus-high-thinking` | `anthropic/claude-opus-4-6` |
-| `gpt-5.3-codex-high-fast`, `gpt-5.5-medium`, `gemini-3.1-pro` | `openai/gpt-4o` |
+| `claude-sonnet-4-5`, `claude-sonnet-4-6`, `composer`, `composer-2.5-fast` | `anthropic/claude-sonnet-5` |
+| `claude-4.6-sonnet-high-thinking`, `claude-4.6-sonnet-medium-thinking` | `anthropic/claude-sonnet-5` |
+| `claude-4.6-opus-high-thinking` | `anthropic/claude-opus-5` |
+| `gpt-5.3-codex-high-fast`, `gpt-5.5-medium` | `openai/gpt-5.5` |
+| `gemini-3.1-pro` | `gemini/gemini-3.7-flash` |
 | `gpt-4o-mini`, `ollama/gpt-4o-mini` | `ollama/qwen-coder-14b` (local; LiteLLM misroutes the OpenAI-colliding Ollama tag) |
-| `claude-sonnet-4-*` (prefix) | `anthropic/claude-sonnet-4-6` |
-| `claude-opus-4-*` (prefix) | `anthropic/claude-opus-4-6` |
+| `claude-sonnet-4-*` / `claude-sonnet-5-*` (prefix) | `anthropic/claude-sonnet-5` |
+| `claude-opus-4-*` / `claude-opus-5-*` (prefix) | `anthropic/claude-opus-5` |
+| `claude-fable-*` (prefix) | `anthropic/claude-fable-5` |
 
 Aliases are applied **before** LiteLLM-routable checks, so local rewrites can override a colliding `ollama/…` tag. Use `openai/gpt-4o-mini` when you want real OpenAI. Unknown slugs fall back to activity routing. Full table: `src/ylang/core/model_aliases.py` / `deploy/ylang.models.json`.
 
@@ -507,6 +510,7 @@ OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
 MISTRAL_API_KEY=...
 PERPLEXITY_API_KEY=...
+GEMINI_API_KEY=...
 ```
 
 Default lists automatically use every provider you enable.
@@ -514,9 +518,9 @@ Default lists automatically use every provider you enable.
 ### Prefer one provider for prompt improvement
 
 ```bash
-YLANG_MODELS_IMPROVE=anthropic/claude-3-5-sonnet-latest,openai/gpt-4o
+YLANG_MODELS_IMPROVE=anthropic/claude-sonnet-5,openai/gpt-5.5
 # or
-YLANG_MODELS_IMPROVE=mistral/mistral-large-latest,anthropic/claude-3-5-sonnet-latest
+YLANG_MODELS_IMPROVE=mistral/mistral-medium-latest,anthropic/claude-sonnet-5
 ```
 
 `ylang usage digest` often shows most spend under **`improve:*`** activities. Put cheaper or local models **first** in `YLANG_MODELS_IMPROVE` (and optionally lower `YLANG_QUALITY_BAND`) before trimming gateway lists — hooks call the improver on every submitted prompt when enabled.
@@ -526,7 +530,7 @@ YLANG_MODELS_IMPROVE=mistral/mistral-large-latest,anthropic/claude-3-5-sonnet-la
 ```bash
 YLANG_QUALITY_BAND=2
 YLANG_DAILY_BUDGET_USD=3.00
-YLANG_MODELS_OTHER=openai/gpt-4o-mini,mistral/mistral-small-latest
+YLANG_MODELS_OTHER=mistral/mistral-small-latest,anthropic/claude-haiku-4-5
 YLANG_FALLBACK_MODEL=ollama/qwen2.5
 ```
 
@@ -554,7 +558,7 @@ ANTHROPIC_API_KEY=...
 MISTRAL_API_KEY=...
 
 # Optional tuning
-YLANG_MODELS_IMPROVE=anthropic/claude-3-5-sonnet-latest,openai/gpt-4o,mistral/mistral-large-latest
+YLANG_MODELS_IMPROVE=anthropic/claude-sonnet-5,openai/gpt-5.5,mistral/mistral-medium-latest
 YLANG_DAILY_BUDGET_USD=10.00
 YLANG_QUALITY_BAND=1
 YLANG_FALLBACK_MODEL=ollama/qwen2.5
@@ -579,10 +583,10 @@ Tune improver models separately from gateway routing:
 
 ```bash
 # Improver (hooks / MCP improve_prompt)
-YLANG_MODELS_IMPROVE=anthropic/claude-3-5-sonnet-latest,openai/gpt-4o
+YLANG_MODELS_IMPROVE=anthropic/claude-sonnet-5,openai/gpt-5.5
 
 # Gateway agent traffic uses route-* virtual models → YLANG_MODELS_CODE etc.
-YLANG_MODELS_CODE=openai/gpt-4o,anthropic/claude-3-5-sonnet-latest
+YLANG_MODELS_CODE=anthropic/claude-opus-5,openai/gpt-5.5,anthropic/claude-sonnet-5
 ```
 
 Skip the hook during gateway testing: `export YLANG_HOOK_DISABLED=1` in your shell or Cursor env.

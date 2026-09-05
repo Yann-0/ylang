@@ -10,17 +10,21 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 DEFAULT_CURSOR_SLUG_ALIASES: dict[str, str] = {
-    "claude-4.6-sonnet-high-thinking": "anthropic/claude-sonnet-4-6",
-    "claude-4.6-opus-high-thinking": "anthropic/claude-opus-4-6",
-    "claude-4.6-sonnet-medium-thinking": "anthropic/claude-sonnet-4-6",
-    "claude-3.5-sonnet-high-thinking": "anthropic/claude-sonnet-4-6",
-    "claude-sonnet-4-5": "anthropic/claude-sonnet-4-6",
-    "claude-sonnet-4-6": "anthropic/claude-sonnet-4-6",
-    "composer": "anthropic/claude-sonnet-4-6",
-    "composer-2.5-fast": "anthropic/claude-sonnet-4-6",
-    "gpt-5.3-codex-high-fast": "openai/gpt-4o",
-    "gpt-5.5-medium": "openai/gpt-4o",
-    "gemini-3.1-pro": "openai/gpt-4o",
+    "claude-4.6-sonnet-high-thinking": "anthropic/claude-sonnet-5",
+    "claude-4.6-opus-high-thinking": "anthropic/claude-opus-5",
+    "claude-4.6-sonnet-medium-thinking": "anthropic/claude-sonnet-5",
+    "claude-3.5-sonnet-high-thinking": "anthropic/claude-sonnet-5",
+    "claude-sonnet-4-5": "anthropic/claude-sonnet-5",
+    "claude-sonnet-4-6": "anthropic/claude-sonnet-5",
+    "claude-sonnet-5": "anthropic/claude-sonnet-5",
+    "claude-opus-5": "anthropic/claude-opus-5",
+    "composer": "anthropic/claude-sonnet-5",
+    "composer-2.5-fast": "anthropic/claude-sonnet-5",
+    # Codex is Responses-API only; chat/gateway uses GPT-5.5.
+    "gpt-5.3-codex-high-fast": "openai/gpt-5.5",
+    "gpt-5.5-medium": "openai/gpt-5.5",
+    # Cursor still sends 3.1-pro; route to current GA workhorse.
+    "gemini-3.1-pro": "gemini/gemini-3.7-flash",
     # Local Ollama tag ``gpt-4o-mini`` collides with OpenAI's model id; LiteLLM
     # misroutes ``ollama/gpt-4o-mini`` through the OpenAI client. Use the
     # non-colliding parent tag (same weights on this host).

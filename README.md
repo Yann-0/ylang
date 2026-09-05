@@ -43,6 +43,8 @@ Add to `.cursor/mcp.json`:
 
 Full instructions: **[docs/installation.md](docs/installation.md)**
 
+Published docs (after GitHub Pages is enabled): https://yann-0.github.io/ylang/
+
 ## Documentation
 
 | Guide | Description |
@@ -50,8 +52,10 @@ Full instructions: **[docs/installation.md](docs/installation.md)**
 | [docs/README.md](docs/README.md) | Documentation index |
 | [Installation](docs/installation.md) | Setup on Linux, macOS, Windows |
 | [Configuration](docs/configuration.md) | Environment variables, model prioritization, routing |
+| [Models](docs/models.md) | Default model lists, Cursor aliases, provider keys |
 | [Architecture](docs/architecture.md) | Design, modules, data flow |
 | [MCP tools](docs/mcp-tools.md) | Full API reference (17 tools) |
+| [CLI](docs/cli.md) | `ylang` subcommands: usage, patterns, backup, doctor, … |
 | [Console](docs/console.md) | Admin UI guide with screenshots for every `/console` page |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
 | [Gateway](docs/gateway.md) | OpenAI HTTP face: `/v1/chat/completions`, `/v1/models`, `/usage`, `/health`; virtual `route-*` models |
@@ -68,6 +72,12 @@ Full instructions: **[docs/installation.md](docs/installation.md)**
 | `remember` / `recall_facts` | Scoped user facts |
 | `recall_usage` / `usage_summary` | Usage history and aggregates |
 | `detect_patterns` / `save_learned_template` | Learn from repeated usage |
+| `search_templates` | Hybrid / semantic template search |
+| `improver_analytics` | Improver funnel and polish/performance ratios |
+| `template_effectiveness_report` | Accept-rate effectiveness by template |
+| `optimization_suggestions` | Propose-only optimizer suggestions |
+| `record_prompt_edit` | Edit-distance / polish feedback |
+| `create_experiment_variant` | Create improver A/B experiment variants |
 
 Details: [docs/mcp-tools.md](docs/mcp-tools.md)
 
@@ -105,6 +115,14 @@ Copy [.env.example](.env.example) for all configuration options. See **[docs/con
 pip install -e ".[dev]"
 pytest
 ruff check .
+```
+
+Build the docs site locally:
+
+```bash
+pip install -e ".[docs]"
+mkdocs build --strict
+mkdocs serve
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/development.md).

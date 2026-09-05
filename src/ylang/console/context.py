@@ -88,6 +88,7 @@ class ConsoleContext:
         ]
 
     def nav_context(self) -> ConsoleNavContext:
+        """Build nav flags from effective feature settings and setup checks."""
         flags = effective_feature_flags(self.runtime_store.as_dict())
         checks = self.setup_checks()
         return ConsoleNavContext(

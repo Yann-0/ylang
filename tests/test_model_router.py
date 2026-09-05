@@ -50,9 +50,23 @@ def test_resolve_auto_sentinel_uses_activity_routing() -> None:
 
 def test_resolve_cursor_slug_alias() -> None:
     assert resolve_explicit_model("claude-4.6-sonnet-high-thinking") == (
-        "anthropic/claude-sonnet-4-6"
+        "anthropic/claude-sonnet-5"
     )
-    assert resolve_explicit_model("claude-sonnet-4-5") == "anthropic/claude-sonnet-4-6"
+    assert resolve_explicit_model("claude-sonnet-4-5") == "anthropic/claude-sonnet-5"
+    assert resolve_explicit_model("gpt-5.5-medium") == "openai/gpt-5.5"
+    assert resolve_explicit_model("gpt-5.3-codex-high-fast") == "openai/gpt-5.5"
+    assert resolve_explicit_model("gemini-3.1-pro") == "gemini/gemini-3.7-flash"
+    assert resolve_explicit_model("claude-4.6-opus-high-thinking") == (
+        "anthropic/claude-opus-5"
+    )
+
+
+def test_resolve_claude_prefix_rules_map_to_claude_5() -> None:
+    assert resolve_explicit_model("claude-sonnet-4-9-custom") == (
+        "anthropic/claude-sonnet-5"
+    )
+    assert resolve_explicit_model("claude-opus-4-9-custom") == "anthropic/claude-opus-5"
+    assert resolve_explicit_model("claude-fable-preview") == "anthropic/claude-fable-5"
 
 
 def test_resolve_gpt_4o_mini_slug_maps_to_local_ollama() -> None:
@@ -214,6 +228,7 @@ def test_attempt_chain_improve_ignores_cursor_slug_explicit(
         explicit_model="claude-sonnet-4-5",
     )
     assert chain[0] == "anthropic/claude-3-5-sonnet-latest"
+    assert "anthropic/claude-sonnet-5" not in chain
     assert "anthropic/claude-sonnet-4-6" not in chain
 
 
@@ -258,3 +273,54 @@ def test_attempt_chain_boosts_improver_accepted_model_for_code_not_improve(
     chain = router.build_attempt_chain("code")
     assert chain[0] == "openai/gpt-4o"
     assert "anthropic/claude-3-5-sonnet-latest" in chain
+
+
+def test_default_activity_model_list_heads() -> None:
+    from ylang.settings import DEFAULT_ACTIVITY_MODEL_LISTS
+
+    assert DEFAULT_ACTIVITY_MODEL_LISTS["code"][0] == "anthropic/claude-opus-5"
+    assert DEFAULT_ACTIVITY_MODEL_LISTS["reason"][0] == "anthropic/claude-fable-5"
+    assert DEFAULT_ACTIVITY_MODEL_LISTS["improve"][0] == "anthropic/claude-sonnet-5"
+    assert DEFAULT_ACTIVITY_MODEL_LISTS["search"][0] == "perplexity/sonar-pro"
+    assert DEFAULT_ACTIVITY_MODEL_LISTS["other"][0] == "anthropic/claude-sonnet-5"
+    assert "openai/gpt-5.5" in DEFAULT_ACTIVITY_MODEL_LISTS["code"]
+    assert "gemini/gemini-3.7-flash" in DEFAULT_ACTIVITY_MODEL_LISTS["other"]
+
+
+def test_gemini_skipped_without_key_then_fallback() -> None:
+    router = ModelRouter(
+        activity_model_lists={
+            "code": ["gemini/gemini-3.7-flash", "openai/gpt-5.5"],
+            "search": ["openai/gpt-5.5"],
+            "reason": ["openai/gpt-5.5"],
+            "improve": ["openai/gpt-5.5"],
+            "other": ["openai/gpt-5.5"],
+        },
+        provider_keys=ProviderKeys(openai="k"),
+        fallback_model="ollama/qwen2.5",
+    )
+    assert router.candidate_status("gemini/gemini-3.7-flash") == "skipped:no_key"
+    assert router.select_model("code") == "openai/gpt-5.5"
+    chain = router.build_attempt_chain("code")
+    assert chain[0] == "openai/gpt-5.5"
+    assert "gemini/gemini-3.7-flash" not in chain
+
+
+def test_gemini_available_with_key() -> None:
+    from ylang.settings import provider_from_litellm_model
+
+    assert provider_from_litellm_model("gemini/gemini-3.7-flash") == "gemini"
+    assert provider_from_litellm_model("google/gemini-3.7-flash") == "gemini"
+    router = ModelRouter(
+        activity_model_lists={
+            "code": ["gemini/gemini-3.7-flash"],
+            "search": ["gemini/gemini-3.7-flash"],
+            "reason": ["gemini/gemini-3.7-flash"],
+            "improve": ["gemini/gemini-3.7-flash"],
+            "other": ["gemini/gemini-3.7-flash"],
+        },
+        provider_keys=ProviderKeys(gemini="k"),
+        fallback_model="ollama/qwen2.5",
+    )
+    assert router.is_available("gemini/gemini-3.7-flash") is True
+    assert router.select_model("code") == "gemini/gemini-3.7-flash"

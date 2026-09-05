@@ -202,10 +202,12 @@ def resolve_explicit_model(model: str) -> str | None:
         return mapped
     if is_litellm_routable(stripped):
         return stripped
-    if lowered.startswith("claude-sonnet-4-"):
-        return "anthropic/claude-sonnet-4-6"
-    if lowered.startswith("claude-opus-4-"):
-        return "anthropic/claude-opus-4-6"
+    if lowered.startswith(("claude-sonnet-4-", "claude-sonnet-5-")):
+        return "anthropic/claude-sonnet-5"
+    if lowered.startswith(("claude-opus-4-", "claude-opus-5-")):
+        return "anthropic/claude-opus-5"
+    if lowered.startswith("claude-fable-"):
+        return "anthropic/claude-fable-5"
     logger.warning(
         "Ignoring non-LiteLLM model slug %r; using activity routing instead",
         model,

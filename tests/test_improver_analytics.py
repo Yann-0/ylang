@@ -366,7 +366,7 @@ def test_optimization_suggestions_skips_already_applied_runtime(
     overrides = {
         "learned_template_limit": "1",
         "improver_timeout_sec": "18",
-        "models_improve": "mistral/mistral-small-latest,openai/gpt-4o-mini",
+        "models_improve": "mistral/mistral-small-latest,anthropic/claude-haiku-4-5",
     }
     suggestions = generate_optimization_suggestions(
         store, UsageWindow.last_days(7), runtime_overrides=overrides
@@ -443,7 +443,7 @@ def test_optimization_suggestions_skips_matching_runtime(db_path: object) -> Non
     overrides = {
         "learned_template_limit": "1",
         "improver_timeout_sec": "18",
-        "models_improve": "mistral/mistral-small-latest,openai/gpt-4o-mini",
+        "models_improve": "mistral/mistral-small-latest,anthropic/claude-haiku-4-5",
     }
     suggestions = generate_optimization_suggestions(
         store,

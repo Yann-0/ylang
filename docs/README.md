@@ -8,8 +8,10 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 |----------|-------------|
 | [Installation](installation.md) | Virtualenv, editable install, first run |
 | [Configuration](configuration.md) | Environment variables, **model prioritization**, routing, API keys |
+| [Models](models.md) | Default activity lists, Cursor aliases, Gemini/OpenAI/Anthropic IDs |
 | [Architecture](architecture.md) | Module layout, data flow, design principles |
 | [MCP tools reference](mcp-tools.md) | Every tool: parameters, responses, examples |
+| [CLI](cli.md) | `ylang` subcommands: usage, patterns, backup, export, import, doctor, purge-traces, init |
 | [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement, per-message `ylang-off` bypass |
 | [Console](console.md) | **Full admin UI** — Overview, **Operator Hub** (`/console/control`), **Parameters** (`/console/settings`), workflows, APIs |
 | [Gateway](gateway.md) | OpenAI-compatible HTTP face: `/v1/chat/completions`, `/v1/models`, `/console`, `/health`; virtual `route-*` models; bearer auth; Cursor custom-endpoint setup |
@@ -24,7 +26,7 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 
 | Document | Description |
 |----------|-------------|
-| [CHANGELOG](../CHANGELOG.md) | Version history |
+| [CHANGELOG](https://github.com/Yann-0/ylang/blob/main/CHANGELOG.md) | Version history |
 | [Dead code audit](dead-code.md) | Unused exports and stub seams (**historical** audit; see architecture for current) |
 | [Audit and roadmap](audit-and-roadmap.md) | **Historical** snapshot (2026-06-30) — superseded by current code |
 | [Open backlog](backlog.md) | Active backlog items (not yet shipped) |

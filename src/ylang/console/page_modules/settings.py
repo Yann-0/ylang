@@ -124,9 +124,9 @@ def render_settings_page(
             chips = (
                 f'<p class="subtitle">Presets: '
                 f'<button type="button" class="btn-secondary model-chip" data-target="{escape(name)}" '
-                f'data-value="mistral/mistral-small-latest,openai/gpt-4o-mini">fast</button> '
+                f'data-value="mistral/mistral-small-latest,anthropic/claude-haiku-4-5">fast</button> '
                 f'<button type="button" class="btn-secondary model-chip" data-target="{escape(name)}" '
-                f'data-value="anthropic/claude-3-5-sonnet-latest,openai/gpt-4o">quality</button></p>'
+                f'data-value="anthropic/claude-sonnet-5,openai/gpt-5.5">quality</button></p>'
             )
         preferred_picker = ""
         if name == "retrieval_preferred_template_ids" and preferred_candidates:

@@ -94,7 +94,7 @@ Architecture principle (live in code): **one Engine, multiple thin faces**. Face
 | `apply_audit_log` | Governed apply history |
 | `schema_migrations` | Version ledger |
 
-**What usage does *not* store today:** trace_id, parent_trace_id, routing_reason, candidate list, fallback events, tool-call graph, prompt hash (beyond truncated improver sample), policy decision, evaluation score, retention/redaction metadata.
+**What usage stores for control-plane traces (migration 11+):** `trace_id`, `parent_trace_id`, `routing_reason_json`, candidate list, fallback events, and related columns on `usage` rows. See [02_TRACE_MODEL.md](02_TRACE_MODEL.md) and [database-schema.md](../database-schema.md).
 
 ---
 
@@ -172,7 +172,7 @@ No automatic self-modifying production router was found.
 | Unit/integration | `pytest -m "not llm_e2e"` |
 | Optional live LLM | `@llm_e2e` with Ollama |
 
-Hard control-plane exit gates (trace correctness, reproducible routing reason, privacy defaults, etc.) are **defined in `07_QA_GATES.md`** and largely **not yet implemented** — see `08_RUN_LOG.md`.
+Hard control-plane exit gates (trace correctness, reproducible routing reason, privacy defaults, etc.) are **defined in `07_QA_GATES.md`** and are **complete (all green)** — see `08_RUN_LOG.md` and the close-out suite on 2026-08-30.
 
 ---
 
@@ -180,11 +180,11 @@ Hard control-plane exit gates (trace correctness, reproducible routing reason, p
 
 Ylang already owns the hard parts of a **local AI control plane**: single completion path, usage economics, improver outcomes, governed proposals, experiments, and a browser operator surface. The evolution work is **observability + explainability + evaluation coherence**, not greenfield MCP.
 
-Primary gaps vs target:
+Primary gaps vs target (historical Y0 note — many items shipped; see gates):
 
-1. Canonical **trace** model (extend `usage`, don’t invent a parallel telemetry DB)  
-2. **Persisted routing explanations** (without secrets)  
-3. Explicit **signal taxonomy** for evaluation  
-4. **Parent/child** tool/agent observability where faces can see it  
-5. Console reorganized around **operator questions**  
-6. Hardened **local-first** defaults and privacy capture policy
+1. Canonical **trace** model — **shipped** (extend `usage`, migration 11)
+2. **Persisted routing explanations** — **shipped** (`routing_reason_json`)
+3. Explicit **signal taxonomy** for evaluation — see evaluation docs
+4. **Parent/child** tool/agent observability where faces can see it
+5. Console reorganized around **operator questions** — **shipped** (Today / Quality / Routing / Privacy hubs)
+6. Hardened **local-first** defaults and privacy capture policy — **shipped** defaults + doctor

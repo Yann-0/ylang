@@ -19,12 +19,12 @@ function applyPreset(preset) {
     if (el instanceof HTMLInputElement && el.type === "checkbox") el.checked = on;
   };
   if (preset === "fast") {
-    set("models_improve", "mistral/mistral-small-latest,openai/gpt-4o-mini");
+    set("models_improve", "mistral/mistral-small-latest,anthropic/claude-haiku-4-5");
     set("improver_timeout_sec", "8");
     set("learned_template_limit", "1");
     check("improver_critique", false);
   } else {
-    set("models_improve", "anthropic/claude-3-5-sonnet-latest,openai/gpt-4o,mistral/mistral-small-latest");
+    set("models_improve", "anthropic/claude-sonnet-5,openai/gpt-5.5,mistral/mistral-medium-latest,mistral/mistral-small-latest");
     set("improver_timeout_sec", "20");
     set("learned_template_limit", "3");
     check("improver_critique", true);
