@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **CI ruff** — pin lint selection to the pre-0.16 default set so GitHub Actions stays green on Ruff 0.16’s expanded defaults
+
 ## [0.6.0] - 2026-09-06
 
 ### Added

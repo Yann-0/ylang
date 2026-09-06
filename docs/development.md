@@ -35,7 +35,7 @@ ylang/
 | `pytest` | Run all tests |
 | `pytest -m "not llm_e2e"` | Default CI path (skip live Ollama smoke) |
 | `pytest tests/test_engine.py -v` | Run a single test file |
-| `ruff check .` | Lint |
+| `ruff check .` | Lint (classic Flake8 subset: `E4`, `E7`, `E9`, `F`) |
 | `ruff format .` | Format |
 | `pyright` | Static typecheck (`[tool.pyright]` in pyproject; CI non-blocking) |
 | `python -m ylang` | Start MCP server (stdio) |
@@ -45,7 +45,7 @@ ylang/
 
 There is no `--help` flag on the main entry point.
 
-Ruff and pyright target Python 3.12. Soft size limits: see [quality-charter.md](quality-charter.md).
+Ruff and pyright target Python 3.12. Lint selection is pinned in `pyproject.toml` so Ruff 0.16+ does not enable its expanded default rule set. Soft size limits: see [quality-charter.md](quality-charter.md).
 
 ## Testing
 

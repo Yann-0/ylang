@@ -21,7 +21,7 @@ dependencies = [
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
-    "ruff>=0.9",
+    "ruff>=0.9,<0.17",
     "httpx2>=2",
     "pyright>=1.1.390",
 ]
@@ -38,6 +38,11 @@ otel = [
 [tool.ruff]
 target-version = "py312"
 src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Pin the pre-0.16 default set (Flake8 F + a subset of E). Ruff 0.16 expanded
+# defaults from ~59 to 413 rules; this project never opted into that set.
+select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["E402"]
