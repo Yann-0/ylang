@@ -140,7 +140,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 ## Status
 
-**v0.5.2** — admin console (LAN-ready), governed proposals, template studio, MCP
+**v0.6.0** — explainable semantic routing, optional OTLP, Portal docs on GitHub
+Pages, admin console (LAN-ready), governed proposals, template studio, MCP
 (17 tools), OpenAI-compatible gateway, and CLI learning loop (`ylang patterns`,
 `ylang usage digest` with optional desktop notify).
 

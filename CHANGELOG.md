@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-06
+
 ### Added
 
 - **Explainable model resolution** — `ModelResolution` records requested alias, `alias_source` (`builtin`/`overlay`/`prefix`), semantic route, resolved provider/model, and a machine-readable `resolution_reason` on `routing_reason_json`
@@ -142,5 +144,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   activity; aggregates via `recall_usage` / `usage_summary` and the `GET /usage`
   Chart.js dashboard
 
-[Unreleased]: https://github.com/Yann-0/ylang/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Yann-0/ylang/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Yann-0/ylang/releases/tag/v0.6.0
 [0.1.0]: https://github.com/Yann-0/ylang/releases/tag/v0.1.0
