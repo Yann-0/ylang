@@ -7,13 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Explainable model resolution** — `ModelResolution` records requested alias, `alias_source` (`builtin`/`overlay`/`prefix`), semantic route, resolved provider/model, and a machine-readable `resolution_reason` on `routing_reason_json`
+- **Optional OTLP export** — `YLANG_OTEL_ENABLED` / `YLANG_OTEL_ENDPOINT` (disabled by default; `pip install 'ylang[otel]'`); batched async `BatchSpanProcessor`; prompt/completion content off unless `YLANG_OTEL_EXPORT_CONTENT=true`
+
 ### Changed
 
-- **Default activity models → Aug 2026 frontier** — `claude-opus-5` / `claude-sonnet-5` / `claude-fable-5`, `openai/gpt-5.5`, `gemini/gemini-3.7-flash`, `mistral-medium-latest` / Small 4; search leads with `perplexity/sonar-pro`
-- **Cursor aliases** — GPT-5.5 / Codex / Gemini / Claude 4.x slugs map to Claude 5 / GPT-5.5 / Gemini 3.7 Flash (no longer GPT-4o / Sonnet 4.6)
+- **Semantic routing vs concrete models** — activity buckets stay `code`/`search`/`reason`/`improve`/`other`; vendor ids are tested policy defaults, not a permanently-latest frontier
+- **Aliases are compatibility mappings** — traces distinguish `compatibility_alias` from identity (`gemini-3.1-pro` → `gemini/gemini-3.7-flash` is a mapping, not equivalence); overlay remaps are logged and tagged `alias_source=overlay`
+- **Cost tie-break** — LiteLLM `0.0` is unknown, not free; `cost_tiebreak` only when a known positive unit cost wins
+- **Operator override** — runtime/console `models_*` list edits vs process baseline record `resolution_reason=operator_override`
+- **Default activity models** — current tested candidate order: `claude-opus-5` / `claude-sonnet-5` / `claude-fable-5`, `openai/gpt-5.5`, `gemini/gemini-3.7-flash`, `mistral-medium-latest` / Small 4; search leads with `perplexity/sonar-pro`
+- **Cursor aliases** — compatibility mappings from GPT-5.5 / Codex / Gemini / Claude 4.x slugs onto current policy routes (not identity)
 - **Gemini provider** — `GEMINI_API_KEY` / `GOOGLE_API_KEY` gate `gemini/` models
 - **Console presets** — quality uses Sonnet 5 + GPT-5.5; fast uses Mistral Small + Haiku 4.5
-- **Docs** — `docs/models.md`, `docs/cli.md`, README MCP table (17 tools), GitHub Pages (MkDocs)
+- **Docs** — configuration reference, Portal screenshots, GitHub Pages (`docs/publishing.md`)
 
 ### Added
 

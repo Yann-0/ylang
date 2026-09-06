@@ -61,20 +61,25 @@ def main(argv: list[str] | None = None) -> int:
 
     pages = [
         ("login", "/console/login"),
+        ("today", "/console/today"),
+        ("quality", "/console/quality"),
+        ("routing", "/console/routing"),
+        ("control", "/console/control"),
         ("overview", "/console"),
         ("usage", "/console/usage"),
         ("improver", "/console/improver"),
         ("templates", "/console/templates"),
         ("facts", "/console/facts"),
         ("patterns", "/console/patterns"),
-        ("experiments", "/console/experiments"),
         ("proposals", "/console/proposals"),
+        ("privacy", "/console/privacy"),
+        ("experiments", "/console/experiments"),
         ("feedback", "/console/feedback"),
+        ("settings", "/console/settings"),
         ("data", "/console/data?table=usage"),
         ("advisor", "/console/advisor"),
-        ("setup", "/console/setup"),
-        ("settings", "/console/settings"),
         ("ops", "/console/ops"),
+        ("setup", "/console/setup"),
         ("health", "/console/health"),
     ]
 

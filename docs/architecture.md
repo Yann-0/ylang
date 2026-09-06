@@ -6,7 +6,7 @@ Ylang follows a **single core engine, multiple thin faces** design. Business log
 
 1. **MCP server** — stdio (local Cursor subprocess) or HTTP (`/mcp`); improver, templates, facts, usage analytics, pattern tools.
 2. **OpenAI-compatible gateway** — on the same HTTP process: `POST /v1/chat/completions`, `GET /v1/models`, `GET /usage`, `GET /health`. Virtual models `route-code`, `route-search`, `route-reason`, and `route-other` map to activity-based routing; other model strings passthrough to named providers.
-3. **Admin console** — `/console/*` (session cookie or Bearer); Operator Hub (`/console/control`) includes the **Optimize Ylang** wizard; Parameters, Templates, Feedback, and governed proposals. See [console.md](console.md).
+3. **Admin console (Portal)** — `/console/*` (session cookie or Bearer); Operator Hub (`/console/control`) includes the **Optimize Ylang** wizard; Parameters, Templates, Feedback, and governed proposals. See [portal.md](portal.md).
 
 Stdio transport runs MCP only (no `/v1/*` or `/console/*` routes). See [gateway.md](gateway.md) for Cursor custom-endpoint setup.
 
@@ -77,14 +77,16 @@ src/ylang/
 │   └── patterns.py      # ylang patterns suggest (learned templates)
 ├── core/
 │   ├── engine.py        # LiteLLM completion + usage logging (stream + tools)
-│   ├── model_router.py  # Activity-based model selection, fallback chain
+│   ├── model_router.py  # Semantic activity → concrete LiteLLM route
+│   ├── model_aliases.py # Compatibility aliases (builtin / overlay / prefix)
 │   ├── config_parsers.py # Shared parse_model_list / parse_bool_flag
 │   ├── sqlite_rows.py   # SqliteRow + cell_* converters for typed rows
 │   ├── runtime_settings.py  # SQLite overrides + merge_settings
 │   ├── db.py            # Shared SQLite connection (WAL, busy timeout)
 │   ├── stores.py        # open_stores() — one connection, three stores
 │   ├── memory.py        # Scoped facts (remember / recall)
-│   └── types.py         # Activity, Message, CompletionResult
+│   ├── routing_reason.py # Explainable routing_reason_json payloads
+│   └── types.py         # Activity, ModelResolution, CompletionResult
 ├── improver/
 │   ├── improver.py      # Improver class + cache / orchestration
 │   ├── parse.py         # LLM JSON/prose payload parsing
@@ -121,6 +123,7 @@ src/ylang/
 │   ├── mapping.py       # Virtual route-* model resolution
 │   └── openai.py        # Request parsing and response shaping
 ├── importer/            # CSV public-prompt import (CLI + MCP tool)
+├── telemetry/           # Optional OTLP export (disabled by default)
 └── mcp/
     ├── server.py        # FastMCP wiring and transport
     ├── tools.py         # register_tools orchestrator
@@ -181,7 +184,11 @@ sequenceDiagram
 
 ## Model routing
 
-`ModelRouter` builds an **attempt chain** per request:
+`ModelRouter` selects a **concrete LiteLLM route** behind a **stable semantic
+activity** (`code`, `search`, `reason`, `improve`, `other`). Vendor model names
+are the current tested policy defaults, not a permanently-latest frontier.
+
+Attempt chain per request:
 
 1. Start from activity's model list (or explicit `model` parameter).
 2. For **`improve:*`**, Cursor slugs (`claude-sonnet-4-*`, `composer`, `auto`, …)
@@ -193,12 +200,26 @@ sequenceDiagram
    so configured `models_improve` order stays authoritative).
 7. Append `fallback_model` (default `ollama/qwen2.5`) at the end.
 
+`ModelRouter.resolve()` returns a `ModelResolution` (requested alias, semantic
+route, provider/model, machine-readable `resolution_reason`). Engine persists
+that on `routing_reason_json`. Aliases are compatibility mappings, not identity.
+
+`ModelRouter.select_model()` uses `select_from_quality_band()`: unknown/`0.0`
+LiteLLM cost is never treated as free. Runtime `models_*` edits vs the
+construction-time baseline set `resolution_reason=operator_override`.
+
 `Engine.complete` / `complete_stream` **hot-reload** runtime SQLite overrides
 (`RuntimeSettingsStore`) into the router when the engine was built via
 `Engine.from_settings`. Improver context retrieval also hard-blocks templates
 with 0% accept rate and ≥3 injections (see `library/effectiveness.py`).
 
-See `src/ylang/core/model_router.py` for implementation details.
+Optional OTLP export (`ylang/telemetry/`) is disabled by default, never
+replaces the local usage store, and uses **batched async** export
+(`BatchSpanProcessor`) so a slow collector cannot stall completions.
+Content export stays off unless `YLANG_OTEL_EXPORT_CONTENT` is set and
+capture level is `redacted` or `full_local`. Install `pip install 'ylang[otel]'`.
+
+See `src/ylang/core/model_router.py` and [models.md](models.md).
 
 ## Storage model
 
@@ -277,7 +298,7 @@ Optional Ollama smoke tests use `@pytest.mark.llm_e2e`.
 
 ## Admin console (HTTP) — third face
 
-When `YLANG_TRANSPORT=http`, the same process serves `/console/*` (session cookie or Bearer). This is the **third face** alongside MCP and the OpenAI gateway — same core stores and engine, browser UX for operators. See [console.md](console.md).
+When `YLANG_TRANSPORT=http`, the same process serves `/console/*` (session cookie or Bearer). This is the **third face** alongside MCP and the OpenAI gateway — same core stores and engine, browser UX for operators. See [portal.md](portal.md).
 
 Operator Hub (`/console/control`) includes the **Optimize Ylang** wizard (`#optimize-wizard`: diagnose → propose → apply → measure) plus KPIs and top applyable proposals.
 

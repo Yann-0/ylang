@@ -37,8 +37,11 @@ theme:
   features:
     - navigation.sections
     - navigation.expand
+    - navigation.top
+    - toc.follow
     - content.code.copy
     - search.suggest
+    - search.highlight
 
 markdown_extensions:
   - admonition
@@ -52,18 +55,24 @@ markdown_extensions:
   - toc:
       permalink: true
 
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Yann-0/ylang
+
 nav:
   - Home: README.md
   - Installation: installation.md
   - Configuration: configuration.md
+  - Portal: portal.md
   - Models: models.md
   - Architecture: architecture.md
   - MCP tools: mcp-tools.md
   - CLI: cli.md
   - Cursor integration: cursor-integration.md
-  - Console: console.md
   - Gateway: gateway.md
   - Deployment: deployment.md
+  - Publishing (GitHub Pages): publishing.md
   - Development: development.md
   - Database schema: database-schema.md
   - Quality charter: quality-charter.md

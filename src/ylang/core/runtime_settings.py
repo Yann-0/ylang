@@ -50,6 +50,10 @@ RESTART_REQUIRED_KEYS: frozenset[str] = frozenset(
         "anthropic_api_key",
         "mistral_api_key",
         "perplexity_api_key",
+        "gemini_api_key",
+        "otel_enabled",
+        "otel_endpoint",
+        "otel_export_content",
     }
 )
 

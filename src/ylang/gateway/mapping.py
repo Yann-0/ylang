@@ -1,8 +1,10 @@
 """OpenAI model-name mapping into core Engine routing parameters.
 
-Virtual ``route-*`` ids map to activity buckets. Any other ``model`` string is
-treated as an explicit passthrough slug with ``activity=other`` (see
-``resolve_gateway_model``). The improver is not a gateway route.
+Virtual ``route-*`` ids map to activity buckets (stable semantic routes). Any
+other ``model`` string is treated as an explicit passthrough slug with
+``activity=other`` (see ``resolve_gateway_model``). Compatibility aliases are
+applied later by ``ModelRouter.lookup_explicit_model``. The improver is not a
+gateway route.
 """
 
 from __future__ import annotations
@@ -37,7 +39,8 @@ def resolve_gateway_model(model: str) -> ResolvedRoute:
 
     Virtual ``route-*`` names select an activity bucket with no explicit model.
     All other strings pass through as ``explicit_model`` under ``activity=other``;
-    ``ModelRouter.resolve_explicit_model`` translates Cursor slugs when possible.
+    ``ModelRouter.lookup_explicit_model`` translates Cursor slugs as
+    compatibility mappings when possible.
     """
     activity = VIRTUAL_ROUTE_MODELS.get(model)
     if activity is not None:

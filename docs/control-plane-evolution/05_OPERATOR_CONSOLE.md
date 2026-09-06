@@ -79,7 +79,8 @@ Answers: Is policy behaving as intended? Where is money wasted?
 - Model distribution  
 - Fallback rate / cooldown hits  
 - Provider failures  
-- Avoidable cloud cost (budget bypass attempts, expensive ties)  
+- Avoidable cloud cost (budget bypass attempts, expensive ties)
+- What the client asked for vs which semantic route and concrete model ran (`requested_alias`, `resolution_reason`)
 
 #### PROPOSALS
 

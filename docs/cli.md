@@ -88,4 +88,4 @@ See `ylang patterns apply --help` for exact flags.
 - [Configuration](configuration.md) — env vars and routing
 - [Models](models.md) — default lists and aliases
 - [Deployment](deployment.md) — systemd and HTTP transport
-- [Console](console.md) — browser operator UI
+- [Portal](portal.md) — browser operator UI

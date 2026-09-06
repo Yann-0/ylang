@@ -114,7 +114,7 @@ Written on every `Engine.complete()` or `Engine.complete_stream()` call, except 
 | `mcp_tool` | TEXT | MCP tool that triggered the call |
 | `selected_route` | TEXT | Virtual route label (e.g. `route-code`) |
 | `candidate_models_json` | TEXT | JSON attempt chain |
-| `routing_reason_json` | TEXT | Structured explainable routing payload |
+| `routing_reason_json` | TEXT | Structured explainable routing payload (`resolution_reason`, `requested_alias`, `alias_source`, `semantic_route`, `selected_provider`, `selected_model`, `steps[]`) |
 | `fallback_events_json` | TEXT | Ordered fallback events with error classes |
 | `tool_calls_json` | TEXT | Observable tool call names (args by capture_level) |
 | `error_class` | TEXT | Stable error class when failed |
@@ -198,7 +198,7 @@ Hot-reloadable configuration overrides editable from the admin console without r
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `key` | TEXT PK | Setting name (see [configuration.md](configuration.md#runtime-settings-console)) |
+| `key` | TEXT PK | Setting name (see [configuration.md](configuration.md#runtime-settings-portal-parameters)) |
 | `value` | TEXT | Serialized override value |
 | `updated_at` | TEXT | ISO 8601 UTC |
 

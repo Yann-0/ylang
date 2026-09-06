@@ -1,13 +1,18 @@
 {
+  "claude-3.5-sonnet-high-thinking": "anthropic/claude-sonnet-5",
+  "claude-4.6-opus-high-thinking": "anthropic/claude-opus-5",
+  "claude-4.6-sonnet-high-thinking": "anthropic/claude-sonnet-5",
+  "claude-4.6-sonnet-medium-thinking": "anthropic/claude-sonnet-5",
+  "claude-opus-5": "anthropic/claude-opus-5",
   "claude-sonnet-4-5": "anthropic/claude-sonnet-5",
   "claude-sonnet-4-6": "anthropic/claude-sonnet-5",
   "claude-sonnet-5": "anthropic/claude-sonnet-5",
-  "claude-opus-5": "anthropic/claude-opus-5",
+  "composer": "anthropic/claude-sonnet-5",
   "composer-2.5-fast": "anthropic/claude-sonnet-5",
-  "gpt-5.3-codex-high-fast": "openai/gpt-5.5",
-  "gpt-5.5-medium": "openai/gpt-5.5",
   "gemini-3.1-pro": "gemini/gemini-3.7-flash",
   "gpt-4o-mini": "ollama/qwen-coder-14b",
+  "gpt-5.3-codex-high-fast": "openai/gpt-5.5",
+  "gpt-5.5-medium": "openai/gpt-5.5",
   "ollama/gpt-4o-mini": "ollama/qwen-coder-14b",
   "ylang-mini": "ollama/qwen-coder-14b"
 }

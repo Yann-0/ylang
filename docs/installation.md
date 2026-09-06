@@ -38,6 +38,12 @@ For tests and linting:
 pip install -e ".[dev]"
 ```
 
+Optional OpenTelemetry libraries (export stays off until `YLANG_OTEL_ENABLED`):
+
+```bash
+pip install -e ".[otel]"
+```
+
 ## Verify installation
 
 ```bash

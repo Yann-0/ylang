@@ -171,10 +171,10 @@ Gateway traffic does **not** run the improver (`improver_fired=False`).
 Any `model` string that is **not** a virtual `route-*` id is treated as an explicit passthrough:
 
 1. The gateway maps it to `activity=other` and passes the raw string to the Engine as `explicit_model`.
-2. `ModelRouter.resolve_explicit_model()` translates it to LiteLLM form when possible:
-   - Cursor / local aliases first (e.g. `gpt-4o-mini` / `ollama/gpt-4o-mini` → `ollama/qwen-coder-14b`, `claude-sonnet-4-6` → `anthropic/claude-sonnet-5`, `gpt-5.5-medium` → `openai/gpt-5.5`)
-   - Already LiteLLM-routable: `provider/model` (e.g. `openai/gpt-5.5`, `anthropic/claude-opus-5`, `mistral/mistral-medium-latest`, `gemini/gemini-3.7-flash`, `ollama/qwen2.5`)
-   - Prefix rules: `claude-sonnet-4|5-*` → `anthropic/claude-sonnet-5`, `claude-opus-4|5-*` → `anthropic/claude-opus-5`
+2. `ModelRouter.lookup_explicit_model()` classifies the string:
+   - Compatibility aliases first (e.g. `gpt-4o-mini` / `ollama/gpt-4o-mini` → `ollama/qwen-coder-14b`, `claude-sonnet-4-6` → `anthropic/claude-sonnet-5`, `gpt-5.5-medium` → `openai/gpt-5.5`, `gemini-3.1-pro` → `gemini/gemini-3.7-flash`). The requested slug is **not** the same model as the resolved route; traces record `resolution_reason=compatibility_alias` and `alias_source` (`builtin` / `overlay` / `prefix`).
+   - Already LiteLLM-routable: `provider/model` (e.g. `openai/gpt-5.5`, `anthropic/claude-opus-5`, `mistral/mistral-medium-latest`, `gemini/gemini-3.7-flash`, `ollama/qwen2.5`) → `resolution_reason=explicit_model`
+   - Prefix compatibility: `claude-sonnet-4|5-*` → `anthropic/claude-sonnet-5`, `claude-opus-4|5-*` → `anthropic/claude-opus-5`
    - Unrecognized slugs: warning logged; activity routing proceeds without the explicit model
 
    **Note:** An Ollama tag named like an OpenAI model (`gpt-4o-mini`) must be aliased to a non-colliding LiteLLM id. Otherwise LiteLLM routes through the OpenAI client and Cursor shows *User Provided API Key Rate Limit Exceeded* when the cloud key is throttled.
@@ -194,6 +194,7 @@ sequenceDiagram
     participant Rtr as model_router
     participant LLM as LiteLLM
     participant DB as usage store
+    participant OTel as optional OTLP
 
     Client->>Auth: Authorization: Bearer token
     Auth->>GW: POST /v1/chat/completions
@@ -204,9 +205,10 @@ sequenceDiagram
         Map-->>GW: activity=other + explicit model
     end
     GW->>Eng: complete() or complete_stream()
-    Eng->>Rtr: build_attempt_chain
+    Eng->>Rtr: build_attempt_chain + resolve (semantic route + reason)
     Eng->>LLM: completion (all providers via LiteLLM)
-    Eng->>DB: write_usage (surface=gateway)
+    Eng->>DB: write_usage (surface=gateway, routing_reason_json)
+    Eng->>OTel: optional batched OTLP metadata span (disabled by default)
     GW-->>Client: OpenAI JSON or SSE chunks + [DONE]
 ```
 

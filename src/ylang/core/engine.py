@@ -21,6 +21,7 @@ from ylang.core.types import (
     Activity,
     CompletionResult,
     Message,
+    ModelResolution,
     StreamChunk,
     StreamCompletionError,
 )
@@ -46,6 +47,7 @@ from ylang.usage.store import UsageStore, dumps_json_list
 
 if TYPE_CHECKING:
     from ylang.settings import Settings
+    from ylang.telemetry.export import UsageSpanSink
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +83,7 @@ class Engine:
         quality_band: int | None = None,
         provider_cooldown_seconds: int | None = None,
         capture_level: CaptureLevel | None = None,
+        telemetry: UsageSpanSink | None = None,
     ) -> None:
         """Wire a usage store and routing surface label for completion logging.
 
@@ -96,6 +99,7 @@ class Engine:
             quality_band: Max rank offset for cost tie-break among available models.
             provider_cooldown_seconds: Cooldown after retryable provider failures.
             capture_level: Trace privacy tier; defaults to ``minimal``.
+            telemetry: Optional span sink (OTLP); local usage writes always run.
         """
         self._store = store
         self._surface = surface
@@ -120,6 +124,15 @@ class Engine:
             if provider_cooldown_seconds is not None:
                 router_kwargs["provider_cooldown_seconds"] = provider_cooldown_seconds
             self._router = ModelRouter(**router_kwargs)  # type: ignore[arg-type]
+        if telemetry is not None:
+            self._telemetry = telemetry
+        else:
+            from ylang.telemetry.export import NoOpUsageSpanSink
+
+            self._telemetry = NoOpUsageSpanSink()
+        self._otel_export_content = False
+        if base_settings is not None:
+            self._otel_export_content = bool(base_settings.otel_export_content)
 
     @property
     def router(self) -> ModelRouter:
@@ -140,12 +153,15 @@ class Engine:
         settings: Settings,
     ) -> Engine:
         """Build an engine from a loaded Settings instance."""
+        from ylang.telemetry.export import exporter_from_settings
+
         return cls(
             store,
             surface=surface,
             router=ModelRouter.from_settings(settings, usage_store=store),
             base_settings=settings,
             capture_level=settings.capture_level,
+            telemetry=exporter_from_settings(settings),
         )
 
     def _refresh_routing(self) -> None:
@@ -226,6 +242,7 @@ class Engine:
         last_exc: BaseException | None = None
         success = False
         fallback_events: list[dict[str, Any]] = []
+        attempt_index = 0
 
         for index, candidate in enumerate(attempt_chain):
             api_key = api_key_for_model(candidate, self._router.provider_keys)
@@ -246,6 +263,7 @@ class Engine:
                     tool_choice=tool_choice,
                 )
                 success = True
+                attempt_index = index
                 break
             except Exception as exc:
                 last_exc = exc
@@ -295,6 +313,7 @@ class Engine:
                 parent_trace_id=parent_trace_id,
                 mcp_tool=mcp_tool,
                 selected_route=selected_route,
+                attempt_index=attempt_index,
                 session_id=session_id,
                 workspace=workspace,
                 context_sources_json=context_sources_json,
@@ -360,6 +379,7 @@ class Engine:
         emitted = False
         fallback_events: list[dict[str, Any]] = []
         tool_calls: list[dict[str, Any]] = []
+        attempt_index = 0
 
         try:
             for index, candidate in enumerate(attempt_chain):
@@ -388,6 +408,7 @@ class Engine:
                     completion_tokens = stream_usage.completion_tokens
                     cost = stream_usage.cost
                     success = True
+                    attempt_index = index
                     return
                 except Exception as exc:
                     last_exc = exc
@@ -444,6 +465,7 @@ class Engine:
                 parent_trace_id=parent_trace_id,
                 mcp_tool=mcp_tool,
                 selected_route=selected_route,
+                attempt_index=attempt_index,
                 session_id=session_id,
                 workspace=workspace,
                 context_sources_json=context_sources_json,
@@ -485,6 +507,7 @@ class Engine:
         parent_trace_id: str | None,
         mcp_tool: str | None,
         selected_route: str | None,
+        attempt_index: int = 0,
         session_id: str | None = None,
         workspace: str | None = None,
         context_sources_json: str | None = None,
@@ -495,6 +518,13 @@ class Engine:
         template_version: int | None = None,
     ) -> None:
         """Persist one usage row with control-plane trace fields."""
+        resolution = self._router.resolve(
+            activity,
+            explicit_model=explicit_model,
+            selected=model_used,
+            attempt_chain=attempt_chain,
+            attempt_index=attempt_index,
+        )
         reason = routing_reason_json(
             self._router,
             activity,
@@ -502,6 +532,9 @@ class Engine:
             selected=model_used,
             explicit_model=explicit_model,
             fallback_events=fallback_events,
+            selected_route=selected_route,
+            attempt_index=attempt_index,
+            resolution=resolution,
         )
         sample, body = prompt_body_for_capture(improver_input_sample, capture_level)
         prompt_hash = None
@@ -579,6 +612,69 @@ class Engine:
             cost_actual=cost_actual,
             template_version=template_version,
         )
+        self._emit_telemetry(
+            activity=activity,
+            model_used=model_used,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost=cost,
+            latency_ms=latency_ms,
+            success=success,
+            trace_id=trace_id,
+            session_id=session_id,
+            workspace=workspace,
+            selected_route=selected_route,
+            capture_level=capture_level,
+            prompt_body_redacted=body,
+            tool_calls=tool_calls,
+            resolution=resolution,
+        )
+
+    def _emit_telemetry(
+        self,
+        *,
+        activity: Activity | str,
+        model_used: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        cost: float,
+        latency_ms: int,
+        success: bool,
+        trace_id: str,
+        session_id: str | None,
+        workspace: str | None,
+        selected_route: str | None,
+        capture_level: CaptureLevel,
+        prompt_body_redacted: str | None,
+        tool_calls: list[dict[str, Any]],
+        resolution: ModelResolution,
+    ) -> None:
+        """Best-effort OTLP export; never fails the completion path."""
+        from ylang.telemetry.export import completion_span_attributes
+
+        try:
+            attributes = completion_span_attributes(
+                surface=self._surface,
+                activity=str(activity),
+                model_used=model_used,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cost=cost,
+                latency_ms=latency_ms,
+                success=success,
+                trace_id=trace_id,
+                session_id=session_id,
+                workspace=workspace,
+                selected_route=selected_route,
+                resolution=resolution,
+                export_content=self._otel_export_content,
+                capture_level=capture_level,
+                prompt_body_redacted=prompt_body_redacted,
+                tool_calls=tool_calls,
+            )
+            self._telemetry.emit(attributes)
+        except Exception:
+            logger.warning("telemetry export failed", exc_info=True)
 
 
 def _should_try_next_model(exc: BaseException) -> bool:

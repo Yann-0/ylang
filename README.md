@@ -8,10 +8,11 @@
 ## What it does
 
 - **Improves prompts** — Expands rough requests into structured specs; aware of Cursor modes (`agent`, `plan`, `debug`, `ask`, `multitask`)
-- **OpenAI-compatible gateway** — Routes real chat traffic through Ylang's quality-first activity routing (`route-code`, `route-search`, etc.) on HTTP transport
+- **OpenAI-compatible gateway** — Routes real chat traffic through Ylang's **semantic activity routing** (`route-code`, `route-search`, etc.) then a concrete LiteLLM model from the current tested policy
 - **Template library** — Versioned local prompts with public import from awesome-chatgpt-prompts lineage
 - **Remembers facts** — Scoped user facts injected into improvement context
-- **Tracks usage** — Every LLM call logged to SQLite with cost and latency
+- **Tracks usage** — Every LLM call logged to SQLite with cost, latency, and explainable `routing_reason_json` (`resolution_reason`, requested alias, semantic route)
+- **Optional OTLP** — Metadata-only export (`pip install 'ylang[otel]'`); off by default; prompt bodies stay local unless you opt in
 - **Detects patterns** — Suggests learned templates from repeated improver usage
 
 All data stays on your machine unless you send it to an LLM provider you configure.
@@ -43,7 +44,13 @@ Add to `.cursor/mcp.json`:
 
 Full instructions: **[docs/installation.md](docs/installation.md)**
 
-Published docs (after GitHub Pages is enabled): https://yann-0.github.io/ylang/
+Published docs (GitHub Pages): **https://yann-0.github.io/ylang/**
+
+- Configuration: https://yann-0.github.io/ylang/configuration/
+- Portal: https://yann-0.github.io/ylang/portal/
+
+Enable Pages (Actions source) once; every push to `main` that touches `docs/`
+rebuilds the site. See [docs/publishing.md](docs/publishing.md).
 
 ## Documentation
 
@@ -51,12 +58,12 @@ Published docs (after GitHub Pages is enabled): https://yann-0.github.io/ylang/
 |-------|-------------|
 | [docs/README.md](docs/README.md) | Documentation index |
 | [Installation](docs/installation.md) | Setup on Linux, macOS, Windows |
-| [Configuration](docs/configuration.md) | Environment variables, model prioritization, routing |
-| [Models](docs/models.md) | Default model lists, Cursor aliases, provider keys |
+| [Configuration](docs/configuration.md) | Environment variables, env-file discovery, runtime vs restart, OTLP |
+| [Models](docs/models.md) | Semantic routes, tested defaults, Cursor aliases, `resolution_reason` |
+| [Portal](docs/portal.md) | Admin UI (`/console/*`) with screenshots of every page |
 | [Architecture](docs/architecture.md) | Design, modules, data flow |
 | [MCP tools](docs/mcp-tools.md) | Full API reference (17 tools) |
 | [CLI](docs/cli.md) | `ylang` subcommands: usage, patterns, backup, doctor, … |
-| [Console](docs/console.md) | Admin UI guide with screenshots for every `/console` page |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
 | [Gateway](docs/gateway.md) | OpenAI HTTP face: `/v1/chat/completions`, `/v1/models`, `/usage`, `/health`; virtual `route-*` models |
 | [Deployment](docs/deployment.md) | HTTP transport, systemd |

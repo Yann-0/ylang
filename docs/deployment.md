@@ -80,16 +80,17 @@ sudo systemctl enable --now ylang
 sudo systemctl status ylang
 ```
 
-**Hot-reload vs restart:** Console **Parameters** (`runtime_settings` in SQLite) apply on the next request — no restart. Env-file changes (`ylang.env`) and **code deploys** need a process restart:
+**Hot-reload vs restart:** Console **Parameters** (`runtime_settings` in SQLite) apply on the next request — no restart. Changing activity lists there tags traces `operator_override` versus the env baseline captured at process start. Env-file changes (`ylang.env`, including `YLANG_OTEL_*` and `YLANG_MODEL_ALIASES_PATH`) and **code deploys** need a process restart:
 
 ```bash
 sudo systemctl restart ylang
 ```
 
-After readiness / Control Center / template-archive deploys, confirm:
+After a code deploy or env change, confirm the unit and health:
 
 ```bash
-curl -s http://127.0.0.1:8787/health
+sudo systemctl status ylang --no-pager
+curl -sS http://127.0.0.1:8787/health
 # With auth: GET /console/control → 200 and “Effective config” / “Store inventory”
 ```
 

@@ -41,9 +41,12 @@ Every field below has an explicit purpose. Fields marked **Phase A** are require
 | `mcp_tool` | Tool that triggered work | **Missing** (improver uses activity label) | A |
 | `selected_route` | Virtual route or activity route label | Partial (`route-code` → activity) | A |
 | `candidate_models_json` | Attempt chain considered | Built in router; **not persisted** | A |
-| `selected_provider` | Derived provider name | Derivable from `model_used` | A |
-| `selected_model` | Model that answered | `usage.model_used` | — |
-| `routing_reason_json` | Structured explain payload (see Y2) | Startup report only | A |
+| `selected_provider` | LiteLLM prefix of the attempted model | **`routing_reason_json.selected_provider`** | A |
+| `selected_model` | Model that answered | `usage.model_used` and `routing_reason_json.selected_model` | — |
+| `requested_model` / `requested_alias` | What the client asked for | **`routing_reason_json`** | A |
+| `semantic_route` / `resolved_route` | Stable activity bucket | **`routing_reason_json`** | A |
+| `resolution_reason` | Machine-readable why (alias, explicit, fallback, …) | **`routing_reason_json.resolution_reason`** | A |
+| `routing_reason_json` | Structured explain payload (see Y2) | Engine write path | A |
 | `fallback_events_json` | Ordered failed attempts + reason class | Logs only | A |
 | `prompt_tokens` | Input tokens | `usage.prompt_tokens` | — |
 | `completion_tokens` | Output tokens | Engine has it; **not in usage schema** | A |
@@ -154,6 +157,18 @@ Parent/child:
 - Gateway tool round-trips: child traces for follow-up completions with `parent_trace_id`.
 - MCP `improve_prompt`: single trace; `mcp_tool=improve_prompt`.
 - Client-supplied `X-Ylang-Parent-Trace` (optional, Phase B) for agent correlation — never invent hidden agent thoughts.
+
+---
+
+### Optional OTLP side channel
+
+Local SQLite traces remain first-class. When `YLANG_OTEL_ENABLED=true`, Engine
+also emits a **batched** OTLP span with the same `trace_id` and routing metadata
+(provider, model, semantic route, `resolution_reason`, `requested_alias` /
+`alias_source`, tokens, cost, latency, status). Prompt/completion/tool
+**payloads** stay off unless `YLANG_OTEL_EXPORT_CONTENT` is explicitly enabled.
+Collector failures are non-fatal and do not stall `Engine.complete`. See
+[configuration.md](../configuration.md#opentelemetry-otlp).
 
 ---
 

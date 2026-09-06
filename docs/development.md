@@ -10,6 +10,8 @@ cd ylang/app
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
+# Optional OpenTelemetry extra (disabled at runtime unless YLANG_OTEL_ENABLED):
+# pip install -e ".[otel]"
 ```
 
 ## Project layout
@@ -78,6 +80,8 @@ OLLAMA_HOST=http://localhost:11434 pytest -q -m llm_e2e
 | `tests/test_engine.py` | Engine completion, fallback chain |
 | `tests/test_engine_stream.py` | Gateway streaming via `complete_stream()` |
 | `tests/test_model_router.py` | Activity routing, cooldown, budget, preferences |
+| `tests/test_model_resolution.py` | Aliases, `ModelResolution`, operator_override, known-cost tie-break |
+| `tests/test_telemetry_otlp.py` | OTLP disabled-by-default, privacy, in-memory sink |
 | `tests/test_auth.py` | Bearer token middleware |
 | `tests/test_gateway_routes.py` | `/v1/chat/completions`, `/v1/models` |
 | `tests/test_gateway_mapping.py` | Virtual and passthrough model mapping |
@@ -100,7 +104,7 @@ pytest --cov=ylang --cov-report=term-missing
 |--------|---------|
 | `scripts/e2e_improve_prompt.py` | Manual improver e2e against live LLM |
 | `scripts/gateway_load_test.py` | Concurrent gateway load probe (mocked or `--live URL TOKEN`) |
-| `scripts/capture-console-screenshots.py` | Full-page PNGs of every `/console` route → `docs/images/console/` (Playwright) |
+| `scripts/capture-console-screenshots.py` | Full-page PNGs of every `/console` route → `docs/images/console/` (Playwright). Commit PNGs so GitHub Pages can show them. |
 | `scripts/import-public-prompts.sh` | Shell wrapper for public prompt import |
 | `scripts/populate-public-prompts-via-mcp.py` | Import via MCP tool |
 

@@ -1,12 +1,75 @@
 # Configuration
 
-Ylang loads configuration from **environment variables** at startup via `Settings.load()` in `src/ylang/settings.py`. Copy [.env.example](../.env.example) as a starting point.
+This is the **complete operator reference** for how Ylang is configured: env
+files, process environment, SQLite runtime overrides (Portal **Parameters**),
+provider keys, routing, privacy, hooks, and optional telemetry.
 
-For production systemd deployments, use an environment file (e.g. `/srv/ylang/ylang.env`) referenced by `EnvironmentFile=` in the unit — see [deployment.md](deployment.md).
+Canonical loaders:
 
-## Authority order
+| Piece | Code |
+|-------|------|
+| Typed settings | `Settings.load()` in `src/ylang/settings.py` |
+| Env-file discovery | `src/ylang/core/env_file.py` |
+| Runtime merge | `merge_settings()` / `get_effective_settings()` in `src/ylang/core/runtime_settings.py` |
+| Activity lists | `DEFAULT_ACTIVITY_MODEL_LISTS` + `YLANG_MODELS_*` |
+| Aliases | `src/ylang/core/model_aliases.py` |
 
-Effective settings used by the engine, improver, and console resolve in this order:
+Starting points:
+
+- Template: [`.env.example`](https://github.com/Yann-0/ylang/blob/main/.env.example)
+- Production systemd: `/srv/ylang/ylang.env` via `EnvironmentFile=` — [deployment.md](deployment.md)
+- Live edits without restart: Portal **Parameters** (`/console/settings`) — [portal.md](portal.md)
+
+---
+
+## How configuration is loaded
+
+```text
+process environment (already set)
+        ↓
+first readable env file (does not override existing keys)
+        ↓
+Settings.load()  →  typed Settings (env baseline)
+        ↓
+runtime_settings SQLite  →  merge_settings()  →  effective Settings
+        ↓
+Engine / ModelRouter / Portal / MCP tools
+```
+
+### Env-file discovery
+
+`Settings.load()` calls `load_discovered_env_file()`. The **first readable**
+file wins. Keys already present in the process environment are **not**
+overwritten (`override=False`).
+
+Search order (`env_file_candidates()`):
+
+1. `YLANG_ENV_FILE` if set (explicit path)
+2. `/srv/ylang/ylang.env` (systemd host layout)
+3. `<package-parent>/ylang.env` (repo wrapper `/srv/ylang/ylang.env` when the
+   package lives in `app/`)
+4. `~/.config/ylang/ylang.env`
+
+Syntax: `KEY=VALUE` or `export KEY=VALUE`. `#` comments. Optional single or
+double quotes around values.
+
+**Systemd** still injects `EnvironmentFile=/srv/ylang/ylang.env` into the
+process **before** Python starts, so those keys are already in `os.environ`
+and the discovery loader is a no-op for them. Discovery matters for CLI
+(`ylang usage …`) and MCP stdio when you have not exported the file yourself.
+
+```bash
+set -a && source /srv/ylang/ylang.env && set +a
+ylang usage digest --last-days 7
+```
+
+Never commit real keys. `chmod 600` (single user) or `640` + group `ylang`
+(shared CLI) — see [deployment.md](deployment.md#shared-cli-access).
+
+### Authority order
+
+Effective settings used by the engine, improver, and portal resolve in this
+order:
 
 ```mermaid
 flowchart LR
@@ -18,47 +81,81 @@ flowchart LR
 
 | Layer | Source | When applied | Examples |
 |-------|--------|--------------|----------|
-| 1. Env | Process environment / `EnvironmentFile` | Process start | `YLANG_MODELS_IMPROVE`, `YLANG_AUTH_TOKEN` |
-| 2. Runtime | Console Parameters / MCP `runtime_settings` table | Hot-reload without restart | `models_improve`, `improver_timeout_sec`, feature flags |
-| 3. Effective | `merge_settings(base, overrides)` / `get_effective_settings()` | Every request that needs live config | Console pages, improver context, gateway routing |
+| 1. Env | Process environment / `EnvironmentFile` / discovered env file | Process start | `YLANG_MODELS_IMPROVE`, `YLANG_AUTH_TOKEN` |
+| 2. Runtime | Portal Parameters / `runtime_settings` table | Hot-reload without restart | `models_improve`, `improver_timeout_sec`, feature flags |
+| 3. Effective | `merge_settings(base, overrides)` | Every request that needs live config | Portal pages, improver context, gateway routing |
 
-Restart-required keys (transport, auth token, provider API keys, storage path) remain env-only — see `RESTART_REQUIRED_KEYS` in `core/runtime_settings.py`. Shared parsers live in `core/config_parsers.py` (`parse_model_list`, `parse_bool_flag`).
+Restart-required keys (transport, auth token, provider API keys, storage path,
+OTLP) remain env-only — `RESTART_REQUIRED_KEYS` in `core/runtime_settings.py`.
+Shared parsers live in `core/config_parsers.py` (`parse_model_list`,
+`parse_bool_flag`).
+
+Boolean flags accept `1` / `true` / `yes` / `on` (case-insensitive) as true
+and `0` / `false` / `no` / `off` as false.
+
+### Hot-reload vs restart
+
+| Change | How | Restart? |
+|--------|-----|----------|
+| Portal Parameters keys (`models_*`, timeouts, flags, budget, …) | SQLite `runtime_settings` | **No** — next request |
+| `YLANG_MODELS_*` in `ylang.env` | Env file | **Yes** (`systemctl restart ylang`) |
+| API keys, host, port, storage path, auth token | Env file | **Yes** |
+| `YLANG_OTEL_*`, `YLANG_MODEL_ALIASES_PATH` | Env file | **Yes** |
+| New Python code / docs screenshots on the **service** | Git tree + editable install | **Yes** for the HTTP process |
+
+Runtime `models_*` that differ from the lists captured when the router was
+constructed (env baseline at process start) tag traces
+`resolution_reason=operator_override`. See [models.md](models.md).
 
 ## Quick reference — all variables
 
-| Variable | Default | Section |
-|----------|---------|---------|
-| `YLANG_STORAGE_PATH` | `~/.ylang/ylang.db` | [Storage](#storage) |
-| `YLANG_TRANSPORT` | `stdio` | [MCP transport](#mcp-transport) |
-| `YLANG_HOST` | `0.0.0.0` | [MCP transport](#mcp-transport) |
-| `YLANG_PORT` | `8787` | [MCP transport](#mcp-transport) |
-| `YLANG_AUTH_TOKEN` | *(none)* | [MCP transport](#mcp-transport) |
-| `YLANG_RATE_LIMIT_PER_MINUTE` | `0` | [Runtime settings (console)](#runtime-settings-console) |
-| `OPENAI_API_KEY` | *(none)* | [Provider API keys](#llm-provider-api-keys) |
-| `ANTHROPIC_API_KEY` | *(none)* | [Provider API keys](#llm-provider-api-keys) |
-| `MISTRAL_API_KEY` | *(none)* | [Provider API keys](#llm-provider-api-keys) |
-| `PERPLEXITY_API_KEY` | *(none)* | [Provider API keys](#llm-provider-api-keys) |
-| `YLANG_MODELS_CODE` | see [defaults](#default-model-lists) | [Model prioritization](#model-prioritization) |
-| `YLANG_MODELS_SEARCH` | see [defaults](#default-model-lists) | [Model prioritization](#model-prioritization) |
-| `YLANG_MODELS_REASON` | see [defaults](#default-model-lists) | [Model prioritization](#model-prioritization) |
-| `YLANG_MODELS_IMPROVE` | see [defaults](#default-model-lists) | [Model prioritization](#model-prioritization) |
-| `YLANG_MODELS_OTHER` | see [defaults](#default-model-lists) | [Model prioritization](#model-prioritization) |
-| `YLANG_FALLBACK_MODEL` | `ollama/qwen2.5` | [Fallback and resilience](#fallback-and-resilience) |
-| `YLANG_QUALITY_BAND` | `0` | [Quality band and cost tie-break](#quality-band-and-cost-tie-break) |
-| `YLANG_PROVIDER_COOLDOWN_SECONDS` | `60` | [Fallback and resilience](#fallback-and-resilience) |
-| `YLANG_DAILY_BUDGET_USD` | *(none)* | [Daily budget cap](#daily-budget-cap) |
-| `YLANG_CAPTURE_LEVEL` | `minimal` | Trace privacy: `off` \| `minimal` \| `redacted` \| `full_local` |
-| `YLANG_LEARNED_TEMPLATE_LIMIT` | `2` | [Improver context](#improver-context) |
-| `YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT` | `0.5` | [Improver analytics](#improver-analytics-and-optimization) |
-| `YLANG_PATTERN_DETECTOR` | `lexical` | [Improver analytics](#improver-analytics-and-optimization) |
-| `YLANG_CAPTURE_EDIT_FEEDBACK` | *(unset; sessionStart → `1`)* | [Improver analytics](#improver-analytics-and-optimization) |
-| `YLANG_IMPROVER_CRITIQUE` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
-| `YLANG_IMPROVER_TIMEOUT_SEC` | `12` | [Improver analytics](#improver-analytics-and-optimization) |
-| `YLANG_EXPERIMENTS` | *(unset)* | [Improver analytics](#improver-analytics-and-optimization) |
-| `YLANG_HOOK_DISABLED` | *(unset)* | [Cursor hook overrides](#cursor-hook-overrides) |
-| `YLANG_HOOK_MODEL` | `auto` | [Cursor hook overrides](#cursor-hook-overrides) |
-| `YLANG_HOOK_TIMEOUT_SEC` | `15` | [Cursor hook overrides](#cursor-hook-overrides) |
-| `YLANG_MCP_URL` | from `~/.cursor/mcp.json` | [Cursor hook overrides](#cursor-hook-overrides) |
+| Variable | Default | Restart? | Section |
+|----------|---------|----------|---------|
+| `YLANG_ENV_FILE` | discovery order | no* | [Env-file discovery](#env-file-discovery) |
+| `YLANG_STORAGE_PATH` | `~/.ylang/ylang.db` | **yes** | [Storage](#storage) |
+| `YLANG_TRANSPORT` | `stdio` | **yes** | [MCP transport](#mcp-transport) |
+| `YLANG_HOST` | `0.0.0.0` | **yes** | [MCP transport](#mcp-transport) |
+| `YLANG_PORT` | `8787` | **yes** | [MCP transport](#mcp-transport) |
+| `YLANG_AUTH_TOKEN` | *(none)* | **yes** | [MCP transport](#mcp-transport) |
+| `YLANG_AUTH_TOKEN_PREVIOUS` | *(none)* | **yes** | [MCP transport](#mcp-transport) |
+| `YLANG_RATE_LIMIT_PER_MINUTE` | `0` | no (runtime wins) | [HTTP rate limit](#http-rate-limit) |
+| `YLANG_LOG_FORMAT` | text stderr | **yes** | [Logging](#logging) |
+| `OPENAI_API_KEY` | *(none)* | **yes** | [Provider API keys](#llm-provider-api-keys) |
+| `ANTHROPIC_API_KEY` | *(none)* | **yes** | [Provider API keys](#llm-provider-api-keys) |
+| `MISTRAL_API_KEY` | *(none)* | **yes** | [Provider API keys](#llm-provider-api-keys) |
+| `PERPLEXITY_API_KEY` | *(none)* | **yes** | [Provider API keys](#llm-provider-api-keys) |
+| `GEMINI_API_KEY` | *(none)* | **yes** | [Provider API keys](#llm-provider-api-keys) |
+| `GOOGLE_API_KEY` | *(none)* | **yes** | Alias for Gemini when `GEMINI_API_KEY` unset |
+| `YLANG_MODELS_CODE` | see [defaults](#default-model-lists) | **yes** (env); runtime `models_code` no | [Model prioritization](#model-prioritization) |
+| `YLANG_MODELS_SEARCH` | see [defaults](#default-model-lists) | **yes** / runtime `models_search` | [Model prioritization](#model-prioritization) |
+| `YLANG_MODELS_REASON` | see [defaults](#default-model-lists) | **yes** / runtime `models_reason` | [Model prioritization](#model-prioritization) |
+| `YLANG_MODELS_IMPROVE` | see [defaults](#default-model-lists) | **yes** / runtime `models_improve` | [Model prioritization](#model-prioritization) |
+| `YLANG_MODELS_OTHER` | see [defaults](#default-model-lists) | **yes** / runtime `models_other` | [Model prioritization](#model-prioritization) |
+| `YLANG_MODEL_ALIASES_PATH` | `deploy/ylang.models.json` | **yes** | [Cursor model slug aliases](#cursor-model-slug-aliases) |
+| `YLANG_FALLBACK_MODEL` | `ollama/qwen2.5` | env yes / runtime `fallback_model` no | [Fallback and resilience](#fallback-and-resilience) |
+| `YLANG_QUALITY_BAND` | `0` | env yes / runtime `quality_band` no | [Quality band and cost tie-break](#quality-band-and-cost-tie-break) |
+| `YLANG_PROVIDER_COOLDOWN_SECONDS` | `60` | env yes / runtime no | [Fallback and resilience](#fallback-and-resilience) |
+| `YLANG_DAILY_BUDGET_USD` | *(none)* | env yes / runtime `daily_budget_usd` no | [Daily budget cap](#daily-budget-cap) |
+| `YLANG_CAPTURE_LEVEL` | `minimal` | env yes / runtime `capture_level` no | [Trace privacy](#trace-privacy) |
+| `YLANG_OTEL_ENABLED` | `false` | **yes** | [OpenTelemetry (OTLP)](#opentelemetry-otlp) |
+| `YLANG_OTEL_ENDPOINT` | *(none)* | **yes** | [OpenTelemetry (OTLP)](#opentelemetry-otlp) |
+| `YLANG_OTEL_EXPORT_CONTENT` | `false` | **yes** | [OpenTelemetry (OTLP)](#opentelemetry-otlp) |
+| `YLANG_LEARNED_TEMPLATE_LIMIT` | mode default | runtime `learned_template_limit` | [Improver context](#improver-context) |
+| `YLANG_RETRIEVAL_EFFECTIVENESS_WEIGHT` | `0.5` | process env | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_RETRIEVAL_PREFERRED_TEMPLATE_IDS` | *(none)* | env / runtime `retrieval_preferred_template_ids` | [Improver context](#improver-context) |
+| `YLANG_PATTERN_DETECTOR` | `lexical` | env / runtime `pattern_detector` | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_CAPTURE_EDIT_FEEDBACK` | sessionStart → `1` | hook process | [Cursor hook overrides](#cursor-hook-overrides) |
+| `YLANG_EDIT_FEEDBACK` | *(unset)* | hook alias | [Cursor hook overrides](#cursor-hook-overrides) |
+| `YLANG_IMPROVER_CRITIQUE` | *(unset)* | env / runtime | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_IMPROVER_TIMEOUT_SEC` | `12` | env / runtime | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_EXPERIMENTS` | *(unset)* | env / runtime | [Improver analytics](#improver-analytics-and-optimization) |
+| `YLANG_HOOK_DISABLED` | *(unset)* | hook process | [Cursor hook overrides](#cursor-hook-overrides) |
+| `YLANG_HOOK_MODEL` | `auto` | hook process | [Cursor hook overrides](#cursor-hook-overrides) |
+| `YLANG_HOOK_TIMEOUT_SEC` | `15` | hook process | [Cursor hook overrides](#cursor-hook-overrides) |
+| `YLANG_MCP_URL` | from `~/.cursor/mcp.json` | hook process | [Cursor hook overrides](#cursor-hook-overrides) |
+| `OLLAMA_API_BASE` / `OLLAMA_HOST` | `http://localhost:11434` | LiteLLM (not Settings) | [Local Ollama fallback](#local-ollama-fallback) |
+
+\* `YLANG_ENV_FILE` is read at process start; changing it requires restart of that process.
 
 Deprecated (single-model): `YLANG_MODEL_CODE`, `YLANG_MODEL_SEARCH`, `YLANG_MODEL_REASON`, `YLANG_MODEL_OTHER` — use the `YLANG_MODELS_*` list form instead.
 
@@ -70,7 +167,62 @@ Deprecated (single-model): `YLANG_MODEL_CODE`, `YLANG_MODEL_SEARCH`, `YLANG_MODE
 |----------|---------|-------------|
 | `YLANG_STORAGE_PATH` | `~/.ylang/ylang.db` | Path to the SQLite database file |
 
-All templates, usage rows, and facts are stored in this single file. Ylang does not upload data to any Ylang-operated cloud service.
+All templates, usage rows, facts, runtime overrides, and traces are stored in
+this single SQLite file (WAL mode). Ylang does not upload data to any
+Ylang-operated cloud. Production systemd uses
+`YLANG_STORAGE_PATH=/srv/ylang/data/ylang.db` (`ProtectSystem=strict` only
+allows writes under `/srv/ylang/data`).
+
+See [database-schema.md](database-schema.md).
+
+---
+
+## Trace privacy
+
+| Variable / key | Default | Description |
+|----------------|---------|-------------|
+| `YLANG_CAPTURE_LEVEL` | `minimal` | Env baseline (restart to change env) |
+| runtime `capture_level` | same | Hot-reload from Parameters |
+
+Tiers (`src/ylang/usage/capture.py`):
+
+| Level | What is stored |
+|-------|----------------|
+| `off` | Usage/cost/latency metadata; no prompt hash or body |
+| `minimal` | **Default.** Prompt **hash**, routing reason, tool **names**, no bodies |
+| `redacted` | Hash + redacted prompt preview (secrets stripped, truncated) |
+| `full_local` | Larger local body (still secret-stripped); never leaves the host unless you enable OTLP content export |
+
+OTLP prompt export additionally requires `YLANG_OTEL_EXPORT_CONTENT=true` **and**
+`redacted` or `full_local`. Completions and tool **payloads** are never exported
+on the OTLP channel.
+
+Portal **Privacy** (`/console/privacy`) shows the effective capture level,
+retention days, and a count of sensitive traces. Purge with
+`ylang purge-traces`.
+
+---
+
+## Logging
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `YLANG_LOG_FORMAT` | *(unset = text)* | Set to `json` for one JSON object per stderr line (`src/ylang/core/logging_config.py`) |
+
+Restart required. Useful behind systemd/journald. Does not change what is stored
+in SQLite.
+
+---
+
+## HTTP rate limit
+
+| Variable / key | Default | Description |
+|----------------|---------|-------------|
+| `YLANG_RATE_LIMIT_PER_MINUTE` | `0` (off) | Env baseline |
+| runtime `rate_limit_per_minute` | same | Hot-reload; **wins** over env when set |
+
+Per-client-IP sliding window on HTTP transport (`mcp/rate_limit.py`). `0`
+disables. Excess requests receive HTTP 429.
 
 ---
 
@@ -175,7 +327,10 @@ Followed by the [routing report](#reading-the-routing-report) for each activity.
 
 ## Model prioritization
 
-Ylang picks models in **quality-first** order: try the best model you configured, fall through on failure, end on the local fallback floor.
+Ylang picks models by **semantic activity** first, then walks the current
+**tested default candidate order** (or your overrides). Concrete vendor ids
+are policy implementation choices — not a promise that each entry is always
+the newest provider release. See [models.md](models.md).
 
 ### Activities
 
@@ -207,7 +362,9 @@ console overrides to `models_improve` hot-reload on each completion (no restart)
 
 ### Default model lists
 
-When no `YLANG_MODELS_*` override is set (see also **[models.md](models.md)**):
+When no `YLANG_MODELS_*` override is set, these are the **current policy defaults**
+(see also **[models.md](models.md)**). They are the tested candidate order, not
+a permanently-latest frontier mapping.
 
 | Activity | Default order (index 0 = highest priority) |
 |----------|---------------------------------------------|
@@ -253,7 +410,7 @@ flowchart TD
     E --> G[Select highest-rank available model]
     F --> G
     G --> H{Quality band tie?}
-    H -->|multiple at same rank| I[Pick cheapest by LiteLLM cost data]
+    H -->|multiple at same rank| I[Pick cheapest known LiteLLM cost]
     H -->|one winner| J[Primary model]
     I --> J
     J --> K[Build attempt chain: explicit model + primary + rest of list + fallback]
@@ -264,14 +421,17 @@ flowchart TD
 2. **Personal preference** — models with more successful calls in the last 24h move earlier (see [Usage-based reorder](#usage-based-reorder)).
 3. **Budget filter** — if `YLANG_DAILY_BUDGET_USD` is exceeded, cloud models are removed; local `ollama/` models remain.
 4. **Primary selection** — highest-rank model that is available (key present, not in cooldown).
-5. **Cost tie-break** — among models within `YLANG_QUALITY_BAND` ranks of the best, pick the cheapest.
+5. **Cost tie-break** — among models within `YLANG_QUALITY_BAND` ranks of the best, pick the cheapest **known** LiteLLM unit cost. `0.0` means unknown, not free; unknown costs never win. If nobody has a known cost, keep quality order.
 6. **Attempt chain** — on failure (rate limit, 5xx, model not found), try the next available model in the list, then `YLANG_FALLBACK_MODEL`.
+7. **Operator override** — if a console/runtime `models_*` list differs from the lists captured when the router was constructed, traces record `resolution_reason=operator_override` (after constraints / quality / known-cost). Env `YLANG_MODELS_*` at process start is the baseline.
 
 ### Per-request explicit model
 
 MCP `improve_prompt` accepts a `model` argument. When set:
 
-- Known **Cursor slugs** (e.g. `claude-sonnet-4-5`) map to LiteLLM strings via [aliases](#cursor-model-slug-aliases).
+- Known **Cursor slugs** (e.g. `claude-sonnet-4-5`) are **compatibility mappings**
+  to LiteLLM strings via [aliases](#cursor-model-slug-aliases). The slug is not
+  the same model as the resolved route; traces record `resolution_reason=compatibility_alias`.
 - Known **LiteLLM strings** (e.g. `openai/gpt-5.5`) are tried **first** in the chain.
 - Unknown slugs are logged and ignored; activity routing takes over.
 
@@ -307,7 +467,7 @@ fallback floor: ollama/qwen2.5  available
 |----------|---------|-------------|
 | `YLANG_QUALITY_BAND` | `0` | Max rank distance from the best available model when breaking ties by cost |
 
-When multiple models are **available** at similar priority ranks, Ylang picks the **cheapest** (by LiteLLM `input_cost_per_token + output_cost_per_token`) among models within the quality band of the best rank.
+When multiple models are **available** at similar priority ranks, Ylang picks the **cheapest known** cost (LiteLLM `input_cost_per_token + output_cost_per_token`) among models within the quality band of the best rank. Missing cost data (`0.0`) is ignored so an unpriced model cannot beat a known cheaper one. If the whole band is unpriced, the first (quality-order) model stays selected and the reason is **not** `cost_tiebreak`.
 
 | Value | Behavior |
 |-------|----------|
@@ -339,7 +499,7 @@ When a cloud provider returns a retryable error, **all models from that provider
 
 ---
 
-## Runtime settings (console)
+## Runtime settings (Portal Parameters)
 
 Hot-reloadable overrides are stored in SQLite (`runtime_settings`) and editable at `GET/POST /console/settings` (**Parameters**) without restart. The Parameters page groups keys into **Routing**, **Improver**, **Limits**, and **Flags** (digest toggles live under Flags), with restart-required env values as a read-only footer. They merge with env-based `Settings` on each request. For integer knobs such as `learned_template_limit` and `rate_limit_per_minute`, runtime overrides take precedence over env vars (`YLANG_LEARNED_TEMPLATE_LIMIT`, `YLANG_RATE_LIMIT_PER_MINUTE`).
 
@@ -351,7 +511,7 @@ Optimization suggestions and the Advisor can propose concrete `setting_key`/`set
 |-----|-------------|
 | `daily_budget_usd` | Rolling 24h spend cap (overrides `YLANG_DAILY_BUDGET_USD` at runtime) |
 | `quality_band`, `fallback_model`, `provider_cooldown_seconds` | Router tuning |
-| `models_code`, `models_search`, `models_reason`, `models_improve`, `models_other` | Comma-separated model lists |
+| `models_code`, `models_search`, `models_reason`, `models_improve`, `models_other` | Comma-separated model lists. Changing these vs process baseline tags traces `operator_override`. |
 | `pattern_detector` | `lexical` or `semantic` |
 | `learned_template_limit` | Max learned templates in improver context (mode defaults: agent/plan/debug/multitask=`1`, ask=`0`) |
 | `retrieval_preferred_template_ids` | Comma-separated template ids given a retrieval score boost in improver context |
@@ -362,7 +522,7 @@ Optimization suggestions and the Advisor can propose concrete `setting_key`/`set
 | `usage_digest_last_at` | ISO timestamp; updated automatically when digest CLI runs |
 | `capture_level` | Trace privacy tier (`off` / `minimal` / `redacted` / `full_local`; default `minimal`) |
 
-Restart-required values (host, port, storage path, API keys) remain env-only. See [console.md](console.md).
+Restart-required values (host, port, storage path, API keys) remain env-only. See [portal.md](portal.md).
 
 ---
 
@@ -450,7 +610,21 @@ The improver logs `improve:{cursor_mode}` (e.g. `improve:agent`), not the MCP `t
 
 ## Cursor model slug aliases
 
-When the gateway (or hooks) pass a Cursor IDE slug as `model`, the router maps it to LiteLLM. Full table and rationale: **[models.md](models.md)**.
+When the gateway (or hooks) pass a Cursor IDE slug as `model`, the router applies
+a **compatibility mapping** to a currently supported LiteLLM route. That is not
+identity: `gemini-3.1-pro` is not Gemini 3.7 Flash; Ylang accepted the client
+slug and resolved it to the tested Gemini candidate.
+
+Example trace fields:
+
+```text
+requested_alias = gemini-3.1-pro
+resolved_route = search
+selected_model = gemini/gemini-3.7-flash
+resolution_reason = compatibility_alias
+```
+
+Full table and rationale: **[models.md](models.md)**.
 
 | Cursor slug | LiteLLM model |
 |-------------|---------------|
@@ -464,7 +638,9 @@ When the gateway (or hooks) pass a Cursor IDE slug as `model`, the router maps i
 | `claude-opus-4-*` / `claude-opus-5-*` (prefix) | `anthropic/claude-opus-5` |
 | `claude-fable-*` (prefix) | `anthropic/claude-fable-5` |
 
-Aliases are applied **before** LiteLLM-routable checks, so local rewrites can override a colliding `ollama/…` tag. Use `openai/gpt-4o-mini` when you want real OpenAI. Unknown slugs fall back to activity routing. Full table: `src/ylang/core/model_aliases.py` / `deploy/ylang.models.json`.
+Aliases are applied **before** LiteLLM-routable checks, so local rewrites can override a colliding `ollama/…` tag. Use `openai/gpt-4o-mini` when you want real OpenAI. Unknown slugs fall back to activity routing.
+
+**Overlay observability:** Python `DEFAULT_CURSOR_SLUG_ALIASES` is canonical. Bundled `deploy/ylang.models.json` must match it exactly. `YLANG_MODEL_ALIASES_PATH` (or the bundled file) may add or remap keys; those hits are tagged `alias_source=overlay` and logged at INFO. Identical values are silent. Overlay path is env-only (restart required). Full table: `src/ylang/core/model_aliases.py`.
 
 ---
 
@@ -593,6 +769,41 @@ Skip the hook during gateway testing: `export YLANG_HOOK_DISABLED=1` in your she
 
 ---
 
+## OpenTelemetry (OTLP)
+
+Optional export of **completion metadata** to an OTLP collector. The local
+SQLite usage/trace store remains the default and keeps working with OTLP off.
+
+```text
+                 ┌── Ylang local usage/trace store  (always on)
+Ylang trace ─────┤
+                 └── optional OTLP exporter         (off by default)
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `YLANG_OTEL_ENABLED` | `false` | Set `true` / `1` / `on` to export spans |
+| `YLANG_OTEL_ENDPOINT` | *(none)* | OTLP HTTP traces URL, e.g. `http://localhost:4318/v1/traces` |
+| `YLANG_OTEL_EXPORT_CONTENT` | `false` | **Sensitive.** When true *and* `YLANG_CAPTURE_LEVEL` is `redacted` or `full_local`, include the already-redacted prompt preview. Completions and tool **payloads** are never exported. |
+
+Install the optional extra: `pip install 'ylang[otel]'`. If OTLP is enabled but
+the extra is missing, or the collector is down, Ylang logs a warning and
+continues — successful LLM calls are not failed.
+
+Export uses OpenTelemetry **`BatchSpanProcessor`** (async queue, ~1s flush,
+5s export timeout). A slow collector cannot add latency to `Engine.complete`.
+
+Env-only (restart required). Prompt contents, completion contents, tool
+payloads, API keys, and Authorization headers are **off** unless you
+explicitly enable content export as above.
+
+Exported attributes include activity / semantic route, surface, provider,
+model, `resolution_reason`, `requested_alias` / `alias_source` when set,
+token counts, cost, latency, status, and `trace_id` / session / workspace
+correlation. Ylang reuses the same `trace_id` already stored on the usage row.
+
+---
+
 ## Programmatic access
 
 ```python
@@ -612,5 +823,8 @@ See [architecture.md](architecture.md) for how settings flow into `Engine` and `
 ## Related docs
 
 - [deployment.md](deployment.md) — systemd and `ylang.env`
+- [portal.md](portal.md) — Ylang Portal (admin UI) and Parameters
+- [models.md](models.md) — semantic routes, aliases, `resolution_reason`
 - [mcp-tools.md](mcp-tools.md) — `improve_prompt` `model` parameter
 - [architecture.md](architecture.md) — routing internals
+- [publishing.md](publishing.md) — GitHub Pages

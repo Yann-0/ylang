@@ -230,6 +230,22 @@ class Settings(BaseModel):
             "Default minimal stores hashes and reason codes, not raw prompt bodies."
         ),
     )
+    otel_enabled: bool = Field(
+        default=False,
+        description="When true, export completion metadata to an optional OTLP collector.",
+    )
+    otel_endpoint: str | None = Field(
+        default=None,
+        description="OTLP HTTP traces endpoint (e.g. http://localhost:4318/v1/traces).",
+    )
+    otel_export_content: bool = Field(
+        default=False,
+        description=(
+            "When true AND capture_level is redacted/full_local, include redacted "
+            "prompt bodies in OTLP. Completions and tool payloads stay omitted. "
+            "Potentially sensitive; off by default."
+        ),
+    )
 
     @classmethod
     def load(cls) -> Settings:
@@ -269,6 +285,15 @@ class Settings(BaseModel):
             kwargs["daily_budget_usd"] = float(raw_budget)
         if raw_capture := os.environ.get("YLANG_CAPTURE_LEVEL"):
             kwargs["capture_level"] = parse_capture_level(raw_capture)
+        from ylang.core.config_parsers import parse_bool_flag
+
+        if (flag := parse_bool_flag(os.environ.get("YLANG_OTEL_ENABLED"))) is not None:
+            kwargs["otel_enabled"] = flag
+        if raw_otel_endpoint := os.environ.get("YLANG_OTEL_ENDPOINT"):
+            stripped_endpoint = raw_otel_endpoint.strip()
+            kwargs["otel_endpoint"] = stripped_endpoint or None
+        if (flag := parse_bool_flag(os.environ.get("YLANG_OTEL_EXPORT_CONTENT"))) is not None:
+            kwargs["otel_export_content"] = flag
 
         settings = cls(**kwargs)
         _warn_missing_provider_keys(provider_keys)
