@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **CI ruff** — pin lint selection to the pre-0.16 default set so GitHub Actions stays green on Ruff 0.16’s expanded defaults
+- **CI Node 20 deprecation** — bump `actions/checkout` to v7 and `actions/setup-python` to v7 (Node 24 runtime)
 
 ## [0.6.0] - 2026-09-06
 
