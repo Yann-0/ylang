@@ -20,7 +20,12 @@ def _parse_model_output(raw: str) -> tuple[str, list[Change]]:
     data = _loads_improver_payload(_extract_json_payload(raw))
     improved = str(data.get("improved", ""))
     changes: list[Change] = []
-    for item in data.get("changes", []):
+    raw_changes = data.get("changes", [])
+    if not isinstance(raw_changes, list):
+        raw_changes = []
+    for item in raw_changes:
+        if not isinstance(item, dict):
+            continue
         kind = str(item.get("kind", ""))
         if kind not in _ALLOWED_KINDS:
             msg = f"invalid change kind: {kind}"

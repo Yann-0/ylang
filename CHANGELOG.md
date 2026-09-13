@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-12
+
+### Added
+
+- **Prompt intelligence** — allowlisted sources (`prompts-chat`, `github-awesome-copilot`, `fabric-patterns`) refresh into candidate quarantine with provenance, license policy, static risk/quality triage, and staged dedup
+- **CLI** — `ylang prompts sources|refresh|candidates|metrics` (usable without the Portal)
+- **Portal** — Sources and Candidates pages; template provenance panel
+- **Prompt intelligence evaluation** — candidate-vs-current reports persist accept/cost/latency plus a body diff; promote captures a baseline; metrics report improved/regressed/pending. Untrusted candidates stay off the live retrieval path
+- **Adapter layout contract** — a GitHub tree that matches zero prompt files is a refresh error, not an empty success
+
+### Changed
+
+- **CI pyright** is blocking (full-repo typecheck is green)
+- **`import_public_prompts`** writes candidates instead of auto-inserting `seed` templates; an arbitrary URL is never registered as a scheduled source
+- Default catalog URL is the prompts.chat lineage (`f/prompts.chat`) rather than a naked CSV import into the active library
+
 ### Fixed
 
 - **CI ruff** — pin lint selection to the pre-0.16 default set so GitHub Actions stays green on Ruff 0.16’s expanded defaults
@@ -149,6 +165,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   activity; aggregates via `recall_usage` / `usage_summary` and the `GET /usage`
   Chart.js dashboard
 
-[Unreleased]: https://github.com/Yann-0/ylang/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Yann-0/ylang/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Yann-0/ylang/releases/tag/v0.7.0
 [0.6.0]: https://github.com/Yann-0/ylang/releases/tag/v0.6.0
 [0.1.0]: https://github.com/Yann-0/ylang/releases/tag/v0.1.0

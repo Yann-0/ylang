@@ -72,7 +72,7 @@ See [audit-and-roadmap.md](./audit-and-roadmap.md) for the original audit (histo
 
 ### Phase 6 (2026-07-05) — v0.3.0
 
-- [x] GitHub Actions CI (pytest + ruff; pyright non-blocking)
+- [x] GitHub Actions CI (pytest + ruff; pyright blocking as of 0.7.0)
 - [x] Schema migrations framework + FTS5 index
 - [x] `GET /health` endpoint
 - [x] Optional HTTP rate limiting (`YLANG_RATE_LIMIT_PER_MINUTE`)

@@ -66,7 +66,7 @@ Architecture principle (live in code): **one Engine, multiple thin faces**. Face
 | Auth | **Live** | Bearer + HttpOnly session cookie; `/health` + login/static public |
 | Rate limit | **Live** | Optional per-IP middleware |
 | CLI ops | **Live** | backup / export / import / doctor |
-| CI | **Live** | Ruff + pytest (`not llm_e2e`); pyright continue-on-error |
+| CI | **Live** | Ruff + pytest (`not llm_e2e`); pyright blocking |
 | Canonical **trace ID / routing reason / parent-child** | **Live** | Migration v11 + Engine write path |
 | Operator “Today / Quality / Routing / Privacy” home | **Live** | `/console/today`, `/quality`, `/routing`, `/privacy` |
 | Public cloud storage by Ylang | **Absent (intentional)** | Local SQLite only |
@@ -168,7 +168,7 @@ No automatic self-modifying production router was found.
 | Gate | Tooling |
 |------|---------|
 | Lint | `ruff check .` |
-| Types | `pyright` (CI continue-on-error) |
+| Types | `pyright` (CI blocking) |
 | Unit/integration | `pytest -m "not llm_e2e"` |
 | Optional live LLM | `@llm_e2e` with Ollama |
 

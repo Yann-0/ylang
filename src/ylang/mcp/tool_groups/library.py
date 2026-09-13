@@ -101,17 +101,26 @@ def register_library_tools(server: FastMCP, deps: YlangDeps) -> None:
 
     @server.tool()
     def import_public_prompts(url: str | None = None) -> dict[str, Any]:
-        """Import a public prompts CSV into the local library (default: awesome-chatgpt-prompts)."""
+        """Refresh public prompts into candidate quarantine (not auto-promoted).
+
+        Omit ``url`` to refresh the allowlisted prompts.chat source. An arbitrary
+        URL is a one-shot CSV import and is never registered as a scheduled source.
+        """
         source_url = url or DEFAULT_PROMPTS_URL
         try:
-            result = import_prompts(deps.library, url=source_url)
+            result = import_prompts(deps.library, url=url)
         except (OSError, ValueError) as exc:
             return {"ok": False, "error": str(exc), "source_url": source_url}
         return {
-            "ok": True,
+            "ok": result.ok,
             "imported": result.imported,
             "skipped": result.skipped,
+            "new": result.new,
+            "changed": result.changed,
+            "source_id": result.source_id,
             "source_url": source_url,
+            "candidates": True,
+            "error": result.error,
         }
 
     @server.tool()

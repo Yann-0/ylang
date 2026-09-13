@@ -107,7 +107,7 @@ class FeedbackStore:
         )
         self._connection.commit()
         return FeedbackEvent(
-            id=int(cursor.lastrowid),
+            id=int(cursor.lastrowid or 0),
             timestamp=when,
             event_type=event_type,
             original_text=original_text,

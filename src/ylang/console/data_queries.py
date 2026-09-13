@@ -27,6 +27,10 @@ _BROWSE_TABLES: tuple[str, ...] = (
     "feedback_events",
     "prompt_experiments",
     "apply_audit_log",
+    "prompt_sources",
+    "prompt_source_items",
+    "prompt_refresh_runs",
+    "template_provenance",
 )
 
 # (label, table) — primary domain shortcuts shown above raw table browse
@@ -37,6 +41,8 @@ DATA_DOMAIN_VIEWS: tuple[tuple[str, str], ...] = (
     ("Feedback", "feedback_events"),
     ("Cache", "improver_cache"),
     ("Audit", "apply_audit_log"),
+    ("Sources", "prompt_sources"),
+    ("Candidates", "prompt_source_items"),
 )
 
 

@@ -379,6 +379,31 @@ def _suggestions_from_feedback(
     ]
 
 
+def _suggestions_pending_candidates(store: UsageStore) -> list[OptimizationSuggestion]:
+    """Propose review of quarantined public prompt candidates (never auto-apply)."""
+    try:
+        from ylang.importer.metrics import pending_review_count
+
+        count = pending_review_count(store._connection)
+    except (OSError, sqlite3.Error, AttributeError, TypeError):
+        return []
+    if count <= 0:
+        return []
+    return [
+        OptimizationSuggestion(
+            suggestion_id="prompt-candidates-pending",
+            kind="prompt_intelligence",
+            title=f"{count} public prompt candidate(s) awaiting review",
+            description=(
+                "Review with `ylang prompts candidates list` or the Portal Candidates page. "
+                "Internet prompts are never auto-promoted."
+            ),
+            evidence=f"{count} items in candidate_new/changed/quarantined/reviewed.",
+            priority="medium",
+        )
+    ]
+
+
 def generate_optimization_suggestions(
     store: UsageStore,
     window: UsageWindow,
@@ -409,6 +434,7 @@ def generate_optimization_suggestions(
     suggestions.extend(_suggestions_template_effectiveness(store, templates))
     suggestions.extend(_suggestions_from_patterns(store, window, templates))
     suggestions.extend(_suggestions_from_feedback(feedback))
+    suggestions.extend(_suggestions_pending_candidates(store))
 
     if runtime_overrides:
         suggestions = [

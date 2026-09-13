@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Import the public awesome-chatgpt-prompts CSV into the production ylang.db.
+# Refresh prompts.chat into candidate quarantine (not auto-promoted).
 set -euo pipefail
 
 DB_PATH="${YLANG_STORAGE_PATH:-/srv/ylang/data/ylang.db}"
@@ -11,13 +11,13 @@ if [[ ! -x "${VENV_PYTHON}" ]]; then
 fi
 
 if [[ "${EUID}" -eq 0 ]]; then
-  exec -u ylang "${VENV_PYTHON}" -m ylang.importer --db "${DB_PATH}" "$@"
+  exec -u ylang "${VENV_PYTHON}" -m ylang prompts refresh prompts-chat "$@"
 fi
 
 if [[ -w "${DB_PATH}" ]]; then
-  exec "${VENV_PYTHON}" -m ylang.importer --db "${DB_PATH}" "$@"
+  exec "${VENV_PYTHON}" -m ylang prompts refresh prompts-chat "$@"
 fi
 
 echo "Need write access to ${DB_PATH}. Try:" >&2
-echo "  sudo -u ylang ${VENV_PYTHON} -m ylang.importer --db ${DB_PATH}" >&2
+echo "  sudo -u ylang ${VENV_PYTHON} -m ylang prompts refresh prompts-chat" >&2
 exit 1

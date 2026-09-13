@@ -265,10 +265,10 @@ class ModelRouter:
             activity: list(models)
             for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
         }
-        self._activity_model_lists = {
-            activity: normalize_model_list(models)
-            for activity, models in raw_lists.items()
-        }
+        activity_lists: dict[Activity, list[str]] = {}
+        for activity, models in raw_lists.items():
+            activity_lists[activity] = normalize_model_list(models)
+        self._activity_model_lists = activity_lists
         self._provider_keys = provider_keys or ProviderKeys()
         self._fallback_model = fallback_model
         self._quality_band = quality_band
@@ -303,10 +303,10 @@ class ModelRouter:
 
     def apply_settings(self, settings: Settings) -> None:
         """Refresh hot-reloadable routing fields from effective settings."""
-        self._activity_model_lists = {
-            activity: normalize_model_list(models)
-            for activity, models in settings.activity_model_lists.items()
-        }
+        activity_lists: dict[Activity, list[str]] = {}
+        for activity, models in settings.activity_model_lists.items():
+            activity_lists[activity] = normalize_model_list(models)
+        self._activity_model_lists = activity_lists
         overridden: set[Activity] = set()
         for activity, models in self._activity_model_lists.items():
             if models != self._baseline_activity_model_lists.get(activity):

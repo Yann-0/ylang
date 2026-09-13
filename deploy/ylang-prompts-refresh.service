@@ -1,0 +1,9 @@
+[Unit]
+Description=Ylang prompt source refresh (opt-in)
+
+[Service]
+Type=oneshot
+User=ylang
+Group=ylang
+EnvironmentFile=-/srv/ylang/ylang.env
+ExecStart=/srv/ylang/.venv/bin/python -m ylang prompts refresh --all

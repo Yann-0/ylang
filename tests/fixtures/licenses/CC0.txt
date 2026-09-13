@@ -1,0 +1,4 @@
+CC0 1.0 Universal
+
+Creative Commons Zero (CC0) public domain dedication.
+The prompt content and data in this repository is dedicated to the public domain under CC0 1.0.

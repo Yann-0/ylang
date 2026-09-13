@@ -4,10 +4,35 @@ from __future__ import annotations
 
 import json
 import secrets
+from typing import Any
 
 from ylang.core.runtime_settings import RuntimeSettingsStore, effective_int_setting
 from ylang.library.patterns import DetectedPattern, TemplateProposal
 from ylang.settings import Settings
+
+
+def _form_int(form: Any, key: str, default: int = 0) -> int:
+    """Coerce a multipart form value to int, ignoring UploadFile uploads."""
+    raw = form.get(key, default)
+    if isinstance(raw, bool):
+        return int(raw)
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        return int(raw)
+    return default
+
+
+def _form_float(form: Any, key: str, default: float = 0.0) -> float:
+    """Coerce a multipart form value to float, ignoring UploadFile uploads."""
+    raw = form.get(key, default)
+    if isinstance(raw, bool):
+        return float(raw)
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    if isinstance(raw, str) and raw.strip():
+        return float(raw)
+    return default
 
 
 def _valid_tokens(settings: Settings) -> list[str]:

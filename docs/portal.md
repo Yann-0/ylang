@@ -98,6 +98,8 @@ their flags are on.
 | Usage | `/console/usage` | Core | 7-day Chart.js cost/request dashboard |
 | Improver | `/console/improver` | Core | Funnel + template effectiveness |
 | Templates | `/console/templates` | Library | Prompt library studio |
+| Candidates | `/console/candidates` | Library | Review/reject/promote public candidates |
+| Sources | `/console/sources` | Library | Allowlisted catalogs, license, last refresh |
 | Facts | `/console/facts` | Library | Local memory for improver context |
 | Patterns | `/console/patterns` | Library | Detect repeated prompts → learned templates |
 | Proposals | `/console/proposals` | Optimize | Review/apply optimization proposals |
@@ -350,6 +352,25 @@ Collapsed by default (`#template-create`); open via the **New template** link ab
 | `POST` | `/console/templates/archive-toxic` | Quarantine (archive) all toxic 0%-accept templates |
 | `POST` | `/console/api/improve-template` | `{name, body, params, instruction?}` |
 | `POST` | `/console/api/render-template` | `{body, param_values}` |
+
+Promoted public candidates show an **Upstream provenance** panel (source, revision, candidate link). See [prompt-intelligence.md](prompt-intelligence.md).
+
+## Sources
+
+**Route:** `GET /console/sources`
+
+Allowlisted catalogs only (license, enabled, last refresh, revision, error).
+Enable/disable and refresh from this page. Scheduled refresh stays off until
+you enable a source. This is not a marketplace.
+
+## Candidates
+
+**Route:** `GET /console/candidates`
+
+Review queue: name, task, source, state, risk, duplicate, quality. Actions:
+Review, Reject, Promote (high-risk requires acknowledging risk), Evaluate vs
+current (local accept/cost/latency plus body diff; inactive experiment, no
+auto-traffic).
 
 ---
 

@@ -33,11 +33,11 @@ ylang/
 | Command | Purpose |
 |---------|---------|
 | `pytest` | Run all tests |
-| `pytest -m "not llm_e2e"` | Default CI path (skip live Ollama smoke) |
+| `pytest -m "not llm_e2e and not network"` | Default CI path (skip live Ollama and GitHub) |
 | `pytest tests/test_engine.py -v` | Run a single test file |
 | `ruff check .` | Lint (classic Flake8 subset: `E4`, `E7`, `E9`, `F`) |
 | `ruff format .` | Format |
-| `pyright` | Static typecheck (`[tool.pyright]` in pyproject; CI non-blocking) |
+| `pyright` | Static typecheck (`[tool.pyright]` in pyproject; CI blocking) |
 | `python -m ylang` | Start MCP server (stdio) |
 | `ylang` | Same as `python -m ylang` (console script from `pyproject.toml`) |
 | `pip install -e ".[docs]" && mkdocs build --strict` | Build GitHub Pages docs site |
@@ -131,13 +131,14 @@ Current runtime deps: `mcp`, `litellm`, `pydantic`. HTTP transport also requires
 
 ## Importer CLI
 
-Separate from the MCP server:
+Public catalogs refresh into candidate quarantine (`ylang prompts`). Covered by
+`tests/test_importer.py` and `tests/test_prompt_intelligence.py`. MCP
+`import_public_prompts` is the same candidate path.
 
 ```bash
+ylang prompts refresh prompts-chat
 python -m ylang.importer --help
 ```
-
-Imports public prompt CSVs into the library database. Covered by `tests/test_importer.py` and callable via MCP `import_public_prompts`.
 
 ## Local database inspection
 
@@ -150,7 +151,7 @@ See [database-schema.md](database-schema.md) for table definitions.
 
 ## Release checklist
 
-- [ ] `pytest` and `ruff check .` pass
+- [ ] `pytest -m "not llm_e2e and not network"` and `ruff check .` pass
 - [ ] Version bumped in `src/ylang/__init__.py` and `pyproject.toml` if releasing
 - [ ] [mcp-tools.md](mcp-tools.md) and [configuration.md](configuration.md) updated for behavior changes
 - [ ] [CHANGELOG](CHANGELOG.md) entry (when maintaining a changelog)

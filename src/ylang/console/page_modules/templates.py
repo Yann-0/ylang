@@ -254,6 +254,7 @@ def render_templates_page(
     selected_params: list[TemplateParam] | None = None,
     version_rows: list[tuple[int, str, str]] | None = None,
     message: str | None = None,
+    provenance_html: str = "",
 ) -> str:
     """Render template browser with search, filters, pagination, edit, and usage counts."""
     from ylang.console.template_list import per_page_options
@@ -418,6 +419,7 @@ def render_templates_page(
   {delete_form}
 </div>
 {version_table}
+{provenance_html}
 """
 
     unused_checked = " checked" if filters.unused_only else ""

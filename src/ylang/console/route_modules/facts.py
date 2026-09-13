@@ -22,6 +22,9 @@ from ylang.console.fact_list import (
 from ylang.console.pages import (
     render_facts_page,
 )
+from ylang.console.route_helpers import (
+    _form_int,
+)
 
 
 def register_facts_routes(ctx: ConsoleContext) -> None:
@@ -140,7 +143,7 @@ def register_facts_routes(ctx: ConsoleContext) -> None:
     @ctx.server.custom_route("/console/facts/update", methods=["POST"])
     async def console_facts_update(request: Request) -> Response:
         form = await request.form()
-        fact_id = int(form.get("fact_id", 0))
+        fact_id = _form_int(form, "fact_id")
         return_query = str(form.get("return_query", "")).strip()
         suffix = f"&{return_query}" if return_query else ""
         try:
@@ -169,7 +172,7 @@ def register_facts_routes(ctx: ConsoleContext) -> None:
     @ctx.server.custom_route("/console/facts/delete", methods=["POST"])
     async def console_facts_delete(request: Request) -> Response:
         form = await request.form()
-        fact_id = int(form.get("fact_id", 0))
+        fact_id = _form_int(form, "fact_id")
         return_query = str(form.get("return_query", "")).strip()
         suffix = f"&{return_query}" if return_query else ""
         removed = ctx.deps.memory.forget(fact_id)

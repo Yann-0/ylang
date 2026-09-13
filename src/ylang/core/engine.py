@@ -677,13 +677,32 @@ class Engine:
             logger.warning("telemetry export failed", exc_info=True)
 
 
+def _litellm_error_type(name: str) -> type[BaseException] | None:
+    """Return a LiteLLM exception class when the runtime exports it."""
+    candidate = getattr(litellm, name, None)
+    if isinstance(candidate, type) and issubclass(candidate, BaseException):
+        return candidate
+    return None
+
+
+def _is_named_llm_error(exc: BaseException, *names: str) -> bool:
+    """Match LiteLLM errors by exported type or class name (stub-safe)."""
+    if type(exc).__name__ in names:
+        return True
+    for name in names:
+        exc_type = _litellm_error_type(name)
+        if exc_type is not None and isinstance(exc, exc_type):
+            return True
+    return False
+
+
 def _should_try_next_model(exc: BaseException) -> bool:
     """Return True when the attempt chain should continue to the next candidate."""
     if _is_retryable_llm_error(exc):
         return True
-    if isinstance(exc, litellm.NotFoundError):
+    if _is_named_llm_error(exc, "NotFoundError"):
         return True
-    if isinstance(exc, litellm.BadRequestError):
+    if _is_named_llm_error(exc, "BadRequestError"):
         message = str(exc)
         return "Provider NOT provided" in message or "model" in message.lower()
     return False
@@ -691,14 +710,12 @@ def _should_try_next_model(exc: BaseException) -> bool:
 
 def _is_retryable_llm_error(exc: BaseException) -> bool:
     """Return True for rate limits and server errors that should fall through."""
-    if isinstance(
+    if _is_named_llm_error(
         exc,
-        (
-            litellm.RateLimitError,
-            litellm.ServiceUnavailableError,
-            litellm.BadGatewayError,
-            litellm.InternalServerError,
-        ),
+        "RateLimitError",
+        "ServiceUnavailableError",
+        "BadGatewayError",
+        "InternalServerError",
     ):
         return True
     status_code = getattr(exc, "status_code", None)

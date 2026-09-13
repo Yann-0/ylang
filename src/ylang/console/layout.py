@@ -140,6 +140,8 @@ _NAV_CORE = (
 )
 _NAV_LIBRARY = (
     ("templates", "/console/templates", "Templates"),
+    ("candidates", "/console/candidates", "Candidates"),
+    ("sources", "/console/sources", "Sources"),
     ("facts", "/console/facts", "Facts"),
     ("patterns", "/console/patterns", "Patterns"),
 )

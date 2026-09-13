@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from typing import Literal, TypedDict
 from urllib.parse import quote
 
 from starlette.responses import RedirectResponse, Response
@@ -14,7 +15,16 @@ _CONSOLE_PUBLIC_PATHS = frozenset({"/console/login"})
 _CONSOLE_PUBLIC_PREFIXES = ("/console/static/",)
 
 
-def session_cookie_kwargs(*, secure: bool = False) -> dict[str, str | bool]:
+class SessionCookieKwargs(TypedDict):
+    """Keyword arguments accepted by Starlette cookie helpers."""
+
+    httponly: bool
+    samesite: Literal["lax"]
+    path: str
+    secure: bool
+
+
+def session_cookie_kwargs(*, secure: bool = False) -> SessionCookieKwargs:
     """Return Starlette ``set_cookie`` kwargs safe for HTTP LAN console access.
 
     Uses ``path=/`` so the session is sent on all console routes regardless of

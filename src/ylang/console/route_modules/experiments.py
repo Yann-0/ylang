@@ -15,6 +15,9 @@ from ylang.console.context import (
 from ylang.console.pages import (
     render_experiments_page,
 )
+from ylang.console.route_helpers import (
+    _form_float,
+)
 from ylang.core.runtime_settings import (
     effective_feature_flags,
 )
@@ -35,7 +38,7 @@ def register_experiments_routes(ctx: ConsoleContext) -> None:
                 experiment_id=str(form.get("experiment_id", "")),
                 variant_id=str(form.get("variant_id", "")),
                 config_hash=str(form.get("config_hash", "control")),
-                traffic_pct=float(form.get("traffic_pct", 50)),
+                traffic_pct=_form_float(form, "traffic_pct", 50),
             )
             return RedirectResponse("/console/experiments", status_code=303)
         variants = store.list_all()

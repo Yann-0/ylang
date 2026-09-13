@@ -28,7 +28,7 @@ Effective settings resolve **env (`Settings.load`) → runtime SQLite overrides 
 ## Safety net
 
 - `ruff check .` and `pytest -m "not llm_e2e"` before declaring a quality wave done.
-- Static typecheck (`pyright`) in CI (non-blocking or blocking as configured in the workflow).
+- Static typecheck (`pyright`) in CI (blocking).
 - Prefer typed exceptions / log+re-raise on hot paths; do not break LLM fallback `except` seams without tests.
 
 ## Contributing

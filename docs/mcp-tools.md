@@ -201,13 +201,18 @@ On SQLite/FTS errors returns `{ok: false, error, templates: []}`.
 
 ## import_public_prompts
 
-Import a public prompts CSV into the local library. **Idempotent** — existing `template_id`s are skipped.
+Refresh an allowlisted public prompt catalog into **candidate quarantine**.
+Existing template ids are not auto-created. Promote with
+`ylang prompts candidates promote`.
+
+Omit `url` to refresh `prompts-chat`. An arbitrary URL is a one-shot CSV
+import and is **not** registered as a scheduled source.
 
 ### Parameters
 
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
-| `url` | string | no | awesome-chatgpt-prompts URL | CSV source URL |
+| `url` | string | no | prompts.chat CSV URL | Optional one-shot CSV URL |
 
 ### Response
 
@@ -216,11 +221,15 @@ Import a public prompts CSV into the local library. **Idempotent** — existing 
   "ok": true,
   "imported": 42,
   "skipped": 10,
-  "source_url": "https://..."
+  "new": 42,
+  "changed": 0,
+  "source_id": "prompts-chat",
+  "source_url": "https://...",
+  "candidates": true
 }
 ```
 
-CLI equivalent: `python -m ylang.importer` or `scripts/import-public-prompts.sh`.
+CLI equivalent: `ylang prompts refresh prompts-chat`.
 
 ---
 

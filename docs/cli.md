@@ -83,6 +83,28 @@ ylang patterns apply --window-days 30 --index 0
 
 See `ylang patterns apply --help` for exact flags.
 
+## `ylang prompts`
+
+Prompt intelligence: allowlisted source refresh and candidate review. Public
+prompts are never auto-promoted. See [prompt-intelligence.md](prompt-intelligence.md).
+
+```bash
+ylang prompts sources list
+ylang prompts sources enable prompts-chat
+ylang prompts refresh prompts-chat
+ylang prompts refresh --all
+ylang prompts candidates list
+ylang prompts candidates show prompts-chat:character
+ylang prompts candidates diff prompts-chat:character
+ylang prompts candidates reject <id>
+ylang prompts candidates promote <id>
+ylang prompts candidates evaluate <id> [--vs TEMPLATE]
+ylang prompts metrics
+```
+
+High-risk candidates require `--acknowledge-risk`. `--all` refreshes only
+**enabled** scheduled sources (`manual-import` is never included).
+
 ## Related docs
 
 - [Configuration](configuration.md) — env vars and routing

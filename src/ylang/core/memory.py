@@ -129,7 +129,7 @@ class MemoryStore:
         )
         self._connection.commit()
         return RememberResult(
-            id=int(cursor.lastrowid),
+            id=int(cursor.lastrowid or 0),
             fact=validated_fact,
             scope=validated_scope,
             created_at=created_at,

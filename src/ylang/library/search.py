@@ -5,8 +5,11 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections import Counter
+from collections.abc import Callable
 
-from ylang.library.types import TemplateSummary
+from ylang.library.types import Template, TemplateSummary
+
+_RecallBody = Callable[[str], Template | None]
 
 _TOKEN_RE = re.compile(r"[a-z0-9']{3,}")
 
@@ -100,7 +103,7 @@ def search_templates_semantic(
     query: str,
     *,
     limit: int = 20,
-    recall_body: callable,
+    recall_body: _RecallBody,
 ) -> list[tuple[str, float]]:
     """Rank templates by TF-IDF overlap when FTS returns no hits."""
     ranked: list[tuple[str, float]] = []
@@ -123,7 +126,7 @@ def search_templates_hybrid(
     query: str,
     *,
     summaries: list[TemplateSummary],
-    recall_body: callable,
+    recall_body: _RecallBody,
     limit: int = 20,
 ) -> list[tuple[str, float]]:
     """Try FTS first; fall back to TF-IDF semantic ranking."""
@@ -142,7 +145,7 @@ def rebuild_fts_from_library(
     connection: sqlite3.Connection,
     summaries: list[TemplateSummary],
     *,
-    recall_body: callable,
+    recall_body: _RecallBody,
 ) -> None:
     """Rebuild the FTS index from all templates (maintenance helper)."""
     ensure_fts_index(connection)

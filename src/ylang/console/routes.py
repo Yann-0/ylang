@@ -17,6 +17,7 @@ from ylang.console.route_modules.proposals import register_proposals_routes
 from ylang.console.route_modules.settings_control import register_settings_control_routes
 from ylang.console.route_modules.static_auth import register_static_auth_routes
 from ylang.console.route_modules.templates import register_templates_routes
+from ylang.console.route_modules.prompts import register_prompt_intelligence_routes
 from ylang.core.engine import Engine
 from ylang.core.runtime_settings import RuntimeSettingsStore
 from ylang.mcp.deps import YlangDeps
@@ -47,6 +48,7 @@ def register_console_routes(
     register_overview_routes(ctx)
     register_settings_control_routes(ctx)
     register_templates_routes(ctx)
+    register_prompt_intelligence_routes(ctx)
     register_facts_routes(ctx)
     register_patterns_routes(ctx)
     register_experiments_routes(ctx)

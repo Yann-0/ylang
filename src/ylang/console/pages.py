@@ -30,16 +30,22 @@ from ylang.console.page_modules.proposals import (
 from ylang.console.page_modules.ops import (
     render_ops_page,
 )
+from ylang.console.page_modules.prompts import (
+    render_candidates_page,
+    render_sources_page,
+)
 
 __all__ = [
-    render_overview_page,
-    render_control_page,
-    render_usage_page,
-    render_settings_page,
-    render_templates_page,
-    render_facts_page,
-    render_patterns_page,
-    render_experiments_page,
-    render_proposals_page,
-    render_ops_page,
+    "render_overview_page",
+    "render_control_page",
+    "render_usage_page",
+    "render_settings_page",
+    "render_templates_page",
+    "render_facts_page",
+    "render_patterns_page",
+    "render_experiments_page",
+    "render_proposals_page",
+    "render_ops_page",
+    "render_sources_page",
+    "render_candidates_page",
 ]

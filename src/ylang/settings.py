@@ -295,7 +295,7 @@ class Settings(BaseModel):
         if (flag := parse_bool_flag(os.environ.get("YLANG_OTEL_EXPORT_CONTENT"))) is not None:
             kwargs["otel_export_content"] = flag
 
-        settings = cls(**kwargs)
+        settings = cls.model_validate(kwargs)
         _warn_missing_provider_keys(provider_keys)
         return settings
 
@@ -354,7 +354,7 @@ def _load_provider_keys() -> ProviderKeys:
 def _load_activity_model_lists() -> dict[Activity, list[str]]:
     from ylang.core.model_router import normalize_model_list
 
-    lists = {
+    lists: dict[Activity, list[str]] = {
         activity: list(models)
         for activity, models in DEFAULT_ACTIVITY_MODEL_LISTS.items()
     }
@@ -371,9 +371,10 @@ def _load_activity_model_lists() -> dict[Activity, list[str]]:
                 _ACTIVITY_MODEL_LIST_ENV_VARS[activity],
             )
             lists[activity] = [override]
-    return {
-        activity: normalize_model_list(models) for activity, models in lists.items()
-    }
+    normalized: dict[Activity, list[str]] = {}
+    for activity, models in lists.items():
+        normalized[activity] = normalize_model_list(models)
+    return normalized
 
 
 def _warn_missing_provider_keys(provider_keys: ProviderKeys) -> None:

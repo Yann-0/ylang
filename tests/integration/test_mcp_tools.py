@@ -478,10 +478,14 @@ async def test_list_templates_source_filter(mcp_server: Any) -> None:
     assert len(seed_rows["templates"]) == 3
 
 
-async def test_import_public_prompts_from_fixture(mcp_server: Any) -> None:
-    """import_public_prompts loads CSV rows into the connected library."""
+async def test_import_public_prompts_from_fixture(
+    mcp_server: Any, ylang_deps: Any
+) -> None:
+    """import_public_prompts loads CSV rows as candidates, not active templates."""
     from pathlib import Path
     from unittest.mock import patch
+
+    from ylang.importer.refresh import open_source_store
 
     fixture = Path(__file__).parent.parent / "fixtures" / "sample_prompts.csv"
     with patch(
@@ -497,11 +501,16 @@ async def test_import_public_prompts_from_fixture(mcp_server: Any) -> None:
     assert result["ok"] is True
     assert result["imported"] == 3
     assert result["skipped"] == 0
+    assert result["candidates"] is True
 
     listed = await call_mcp_tool(mcp_server, "list_templates", {"source": "seed"})
     ids = {item["template_id"] for item in listed["templates"]}
-    assert "character" in ids
-    assert "job-interviewer" in ids
+    assert "character" not in ids
+
+    store = open_source_store(ylang_deps.library)
+    item = store.get_item("manual-import:character")
+    assert item is not None
+    assert item.candidate_state == "candidate_new"
 
 
 async def test_list_templates_invalid_source(mcp_server: Any) -> None:

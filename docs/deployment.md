@@ -351,9 +351,30 @@ ylang usage digest --last-days 7 --no-notify
 ```
 
 For desktop notify from cron, the job must run in a user session with
-`DISPLAY` (or `WAYLAND_DISPLAY`) exported and `notify-send` installed
+`DISPLAY` or `WAYLAND_DISPLAY` exported and `notify-send` installed
 (e.g. `libnotify-bin`). Headless service users skip notify gracefully and
 still print the digest to stdout (capture with cron mail or a log redirect).
+
+### Scheduled prompt source refresh (opt-in)
+
+Public catalogs are **not** refreshed until you enable a source and add a
+local timer or cron job. Default installs stay off.
+
+```bash
+ylang prompts sources enable prompts-chat
+sudo cp deploy/ylang-prompts-refresh.service deploy/ylang-prompts-refresh.timer \
+  /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now ylang-prompts-refresh.timer
+```
+
+Cron equivalent:
+
+```cron
+0 6 * * 1 sg ylang -c 'set -a && source /srv/ylang/ylang.env && set +a && ylang prompts refresh --all'
+```
+
+See [prompt-intelligence.md](prompt-intelligence.md).
 
 Manual equivalent (if you cannot run the script):
 

@@ -201,6 +201,12 @@ Portal **Privacy** (`/console/privacy`) shows the effective capture level,
 retention days, and a count of sensitive traces. Purge with
 `ylang purge-traces`.
 
+### Public prompt catalogs
+
+Scheduled refresh contacts only allowlisted GitHub hosts. Imported text is
+quarantined until you promote it. Manual URL import does not register that URL
+as a scheduled source. See [prompt-intelligence.md](prompt-intelligence.md).
+
 ---
 
 ## Logging

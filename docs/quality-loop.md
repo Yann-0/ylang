@@ -112,4 +112,11 @@ Captured 2026-07-20 against `ylang` v0.5.2.
 | pyright 56 errors | Categorized; not near-zero enough to make CI blocking |
 | LLM `except Exception` | Required fail-open / fallback |
 
-**Stop rationale (Wave 4 not justified):** Improver concentration split into focused modules; pyright cut ~70% with shared row helpers + venv; orchestration soft limits already met since Wave 2; further work is incremental typing/HTML churn without user impact.
+**Stop rationale (Wave 4 not justified at the time):** Improver concentration split into focused modules; pyright cut ~70% with shared row helpers + venv; orchestration soft limits already met since Wave 2.
+
+## Wave 4 — Pyright blocking
+
+Remaining console/settings/LiteLLM typing debt was closed so `pyright` in
+CI is a hard gate (`continue-on-error` removed). Residual HTML size and
+fail-open LLM `except Exception` stay by design.
+

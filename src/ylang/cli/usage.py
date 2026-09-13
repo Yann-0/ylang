@@ -247,13 +247,25 @@ def print_improver_report(store: object, window: UsageWindow) -> None:
     perf_txt = f"{performance:.0%}" if isinstance(performance, float) else "—"
     print(f"Polish:     {polish_txt} (n={serialized.get('polish_sample_count', 0)})")
     print(f"Performance:{perf_txt}")
-    if serialized["by_mode"]:
+    by_mode = serialized.get("by_mode")
+    if isinstance(by_mode, dict) and by_mode:
         print("\nBy mode:")
-        for mode, stats in serialized["by_mode"].items():
+        for mode, stats in by_mode.items():
+            if not isinstance(stats, dict):
+                continue
+            fired = stats.get("fired", 0)
+            accept_rate = stats.get("accept_rate", 0.0)
+            avg_cost = stats.get("avg_cost", 0.0)
+            if not isinstance(fired, (int, float)):
+                continue
+            if not isinstance(accept_rate, (int, float)):
+                continue
+            if not isinstance(avg_cost, (int, float)):
+                continue
             print(
-                f"  {mode:12} fired={stats['fired']:>4} "
-                f"accept={stats['accept_rate']:.0%} "
-                f"avg_cost=${stats['avg_cost']:.4f}"
+                f"  {str(mode):12} fired={int(fired):>4} "
+                f"accept={float(accept_rate):.0%} "
+                f"avg_cost=${float(avg_cost):.4f}"
             )
     rows = template_effectiveness(store, window)  # type: ignore[arg-type]
     print("\nTemplate effectiveness (min 3 injections):")

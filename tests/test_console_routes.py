@@ -600,3 +600,40 @@ def test_console_static_chart(console_client: TestClient) -> None:
     response = console_client.get("/console/static/chart.umd.min.js")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/javascript") or response.content
+
+
+def test_console_sources_and_candidates(
+    console_client: TestClient, ylang_deps: YlangDeps
+) -> None:
+    from pathlib import Path
+
+    from ylang.importer import import_prompts
+
+    sources = console_client.get("/console/sources", headers=_AUTH_HEADERS)
+    assert sources.status_code == 200
+    assert "prompts-chat" in sources.text
+    assert "Refresh automatically" in sources.text
+    fixture = Path(__file__).parent / "fixtures" / "sample_prompts.csv"
+    import_prompts(ylang_deps.library, csv_path=fixture)
+    candidates = console_client.get("/console/candidates", headers=_AUTH_HEADERS)
+    assert candidates.status_code == 200
+    assert "Character" in candidates.text
+    detail = console_client.get(
+        "/console/candidates?id=prompts-chat:character",
+        headers=_AUTH_HEADERS,
+    )
+    assert "Promote" in detail.text
+    promote = console_client.post(
+        "/console/candidates/promote",
+        headers=_AUTH_HEADERS,
+        data={"item_id": "prompts-chat:character"},
+        follow_redirects=False,
+    )
+    assert promote.status_code == 303
+    templates = console_client.get(
+        "/console/templates?id=character",
+        headers=_AUTH_HEADERS,
+    )
+    assert templates.status_code == 200
+    assert "Upstream provenance" in templates.text
+

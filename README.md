@@ -9,7 +9,7 @@
 
 - **Improves prompts** — Expands rough requests into structured specs; aware of Cursor modes (`agent`, `plan`, `debug`, `ask`, `multitask`)
 - **OpenAI-compatible gateway** — Routes real chat traffic through Ylang's **semantic activity routing** (`route-code`, `route-search`, etc.) then a concrete LiteLLM model from the current tested policy
-- **Template library** — Versioned local prompts with public import from awesome-chatgpt-prompts lineage
+- **Template library** — Versioned local prompts; public catalogs refresh into candidate quarantine (promote explicitly)
 - **Remembers facts** — Scoped user facts injected into improvement context
 - **Tracks usage** — Every LLM call logged to SQLite with cost, latency, and explainable `routing_reason_json` (`resolution_reason`, requested alias, semantic route)
 - **Optional OTLP** — Metadata-only export (`pip install 'ylang[otel]'`); off by default; prompt bodies stay local unless you opt in
@@ -63,7 +63,8 @@ rebuilds the site. See [docs/publishing.md](docs/publishing.md).
 | [Portal](docs/portal.md) | Admin UI (`/console/*`) with screenshots of every page |
 | [Architecture](docs/architecture.md) | Design, modules, data flow |
 | [MCP tools](docs/mcp-tools.md) | Full API reference (17 tools) |
-| [CLI](docs/cli.md) | `ylang` subcommands: usage, patterns, backup, doctor, … |
+| [CLI](docs/cli.md) | `ylang` subcommands: usage, patterns, prompts, backup, doctor, … |
+| [Prompt intelligence](docs/prompt-intelligence.md) | Discover → candidate → promote → measure |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
 | [Gateway](docs/gateway.md) | OpenAI HTTP face: `/v1/chat/completions`, `/v1/models`, `/usage`, `/health`; virtual `route-*` models |
 | [Deployment](docs/deployment.md) | HTTP transport, systemd |
@@ -75,7 +76,7 @@ rebuilds the site. See [docs/publishing.md](docs/publishing.md).
 |------|-------------|
 | `improve_prompt` | Expand prompts into full specs; Cursor mode-aware |
 | `save_template` / `recall_template` / `list_templates` | Local versioned template library |
-| `import_public_prompts` | Import public CSV prompts (idempotent) |
+| `import_public_prompts` | Refresh public catalogs into **candidate quarantine** (not auto-promoted) |
 | `remember` / `recall_facts` | Scoped user facts |
 | `recall_usage` / `usage_summary` | Usage history and aggregates |
 | `detect_patterns` / `save_learned_template` | Learn from repeated usage |
@@ -140,10 +141,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/development.md](docs/developmen
 
 ## Status
 
-**v0.6.0** — explainable semantic routing, optional OTLP, Portal docs on GitHub
-Pages, admin console (LAN-ready), governed proposals, template studio, MCP
-(17 tools), OpenAI-compatible gateway, and CLI learning loop (`ylang patterns`,
-`ylang usage digest` with optional desktop notify).
+**v0.7.0** — prompt intelligence (allowlisted sources, candidate quarantine,
+explicit promotion), plus v0.6 explainable semantic routing, optional OTLP,
+and Portal docs.
 
 ### Shipped
 
@@ -151,7 +151,7 @@ Pages, admin console (LAN-ready), governed proposals, template studio, MCP
 - Virtual route models (`route-code`, `route-search`, `route-reason`, `route-other`); streaming tool-call passthrough
 - HTTP transport + bearer auth on `/mcp`, `/v1/*`, and `/usage` (`YLANG_AUTH_TOKEN`); `/health` unauthenticated
 - Activity-based routing, fallback chain, cooldown, preference boost; **daily budget cap enforced** when `YLANG_DAILY_BUDGET_USD` is set
-- CLI learning loop (`ylang patterns suggest` / `apply`, `ylang usage digest` / `dashboard`)
+- CLI learning loop (`ylang patterns suggest` / `apply`, `ylang prompts`, `ylang usage digest` / `dashboard`)
 - Local digest via CLI/cron; optional `notify-send` when `usage_digest_enabled` and a display are available
 
 ### Planned

@@ -271,6 +271,148 @@ def _migrate_usage_trace_phase_b(connection: sqlite3.Connection) -> None:
             connection.execute(f"ALTER TABLE usage ADD COLUMN {column} {ddl}")
 
 
+@migration(14, "prompt_intelligence_sources")
+def _migrate_prompt_intelligence_sources(connection: sqlite3.Connection) -> None:
+    """Add prompt source/candidate tables without altering template origins."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_sources (
+            source_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            adapter TEXT NOT NULL,
+            canonical_url TEXT NOT NULL,
+            repo_url TEXT,
+            license_spdx TEXT NOT NULL,
+            license_url TEXT,
+            trust_tier TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            refresh_interval_hours INTEGER NOT NULL DEFAULT 168,
+            last_attempt_at TEXT,
+            last_success_at TEXT,
+            last_revision TEXT,
+            last_etag TEXT,
+            last_error TEXT,
+            policy_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS prompt_source_items (
+            item_id TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            upstream_item_id TEXT NOT NULL,
+            canonical_url TEXT,
+            source_revision TEXT,
+            content_hash TEXT NOT NULL,
+            normalized_fingerprint TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            params_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            candidate_state TEXT NOT NULL,
+            risk_level TEXT NOT NULL,
+            risk_reasons_json TEXT NOT NULL DEFAULT '[]',
+            quality_score INTEGER NOT NULL DEFAULT 0,
+            quality_reasons_json TEXT NOT NULL DEFAULT '[]',
+            task_family TEXT NOT NULL DEFAULT 'other',
+            model_hint TEXT,
+            duplicate_of_item_id TEXT,
+            duplicate_template_id TEXT,
+            linked_template_id TEXT,
+            linked_template_version INTEGER,
+            license_spdx TEXT,
+            adapter_version TEXT NOT NULL,
+            previous_body TEXT,
+            previous_content_hash TEXT,
+            UNIQUE (source_id, upstream_item_id),
+            FOREIGN KEY (source_id) REFERENCES prompt_sources(source_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_prompt_source_items_source
+            ON prompt_source_items (source_id, candidate_state);
+        CREATE INDEX IF NOT EXISTS idx_prompt_source_items_hash
+            ON prompt_source_items (content_hash);
+        CREATE INDEX IF NOT EXISTS idx_prompt_source_items_fingerprint
+            ON prompt_source_items (normalized_fingerprint);
+
+        CREATE TABLE IF NOT EXISTS template_provenance (
+            template_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            source_id TEXT NOT NULL,
+            upstream_revision TEXT,
+            content_hash TEXT NOT NULL,
+            canonical_url TEXT,
+            promoted_at TEXT NOT NULL,
+            PRIMARY KEY (template_id, version)
+        );
+
+        CREATE TABLE IF NOT EXISTS prompt_refresh_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_id TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            revision_before TEXT,
+            revision_after TEXT,
+            status TEXT NOT NULL,
+            new_count INTEGER NOT NULL DEFAULT 0,
+            changed_count INTEGER NOT NULL DEFAULT 0,
+            removed_count INTEGER NOT NULL DEFAULT 0,
+            duplicate_count INTEGER NOT NULL DEFAULT 0,
+            quarantined_count INTEGER NOT NULL DEFAULT 0,
+            error TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_prompt_refresh_runs_source
+            ON prompt_refresh_runs (source_id, started_at DESC);
+        """
+    )
+    from ylang.importer.source_store import PromptSourceStore
+
+    PromptSourceStore(connection).ensure_builtin_sources()
+
+
+@migration(15, "prompt_evaluation_baselines")
+def _migrate_prompt_evaluation_baselines(connection: sqlite3.Connection) -> None:
+    """Persist candidate evaluations and promote-time outcome snapshots."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_evaluation_snapshots (
+            item_id TEXT PRIMARY KEY,
+            vs_template_id TEXT,
+            vs_template_version INTEGER,
+            current_accept_rate REAL,
+            current_avg_cost REAL,
+            current_avg_latency_ms REAL,
+            current_injections INTEGER NOT NULL DEFAULT 0,
+            current_body_hash TEXT,
+            candidate_content_hash TEXT NOT NULL,
+            quality_score INTEGER NOT NULL DEFAULT 0,
+            risk_level TEXT NOT NULL,
+            body_diff_ratio REAL,
+            fixture_hash TEXT,
+            fixture_chars INTEGER,
+            experiment_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (item_id) REFERENCES prompt_source_items(item_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS prompt_promotion_baselines (
+            template_id TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            item_id TEXT NOT NULL,
+            accept_rate REAL,
+            avg_cost REAL,
+            avg_latency_ms REAL,
+            injections INTEGER NOT NULL DEFAULT 0,
+            captured_at TEXT NOT NULL,
+            PRIMARY KEY (template_id, version)
+        );
+        """
+    )
+
+
 def run_migrations(connection: sqlite3.Connection) -> int:
     """Apply pending migrations; return count applied."""
     connection.execute(

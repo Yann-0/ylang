@@ -91,6 +91,14 @@ def register_templates_routes(ctx: ConsoleContext) -> None:
                 selected_source = template.source
                 selected_params = list(template.params)
                 version_rows = ctx.deps.library.list_versions(selected_id)
+        provenance_html = ""
+        if selected_id:
+            from ylang.console.page_modules.prompts import render_provenance_panel
+            from ylang.importer.refresh import open_source_store
+
+            provenance_html = render_provenance_panel(
+                open_source_store(ctx.deps.library).provenance_for_template(selected_id)
+            )
         return ctx.render(
             lambda: render_templates_page(
                 list_page,
@@ -105,6 +113,7 @@ def register_templates_routes(ctx: ConsoleContext) -> None:
                 selected_params=selected_params,
                 version_rows=version_rows,
                 message=message,
+                provenance_html=provenance_html,
             )
         )
 

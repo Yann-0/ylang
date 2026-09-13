@@ -79,6 +79,20 @@ erDiagram
         TEXT result_json
         REAL expires_at
     }
+    prompt_sources {
+        TEXT source_id PK
+        TEXT adapter
+        TEXT license_spdx
+        INTEGER enabled
+        TEXT last_revision
+    }
+    prompt_source_items {
+        TEXT item_id PK
+        TEXT source_id
+        TEXT candidate_state
+        TEXT content_hash
+        TEXT linked_template_id
+    }
 ```
 
 ## Table: usage
@@ -171,6 +185,10 @@ Append-only version history per template.
 
 Index: `idx_template_versions_source` on `source`.
 
+`TemplateSource` remains `seed | user | learned`. Public catalog provenance lives
+in `prompt_sources` / `prompt_source_items` / `template_provenance` — see
+[prompt-intelligence.md](prompt-intelligence.md).
+
 ### Param JSON shape
 
 ```json
@@ -178,6 +196,22 @@ Index: `idx_template_versions_source` on `source`.
   {"name": "language", "description": "Programming language", "default": "python"}
 ]
 ```
+
+## Table: prompt_sources / prompt_source_items
+
+Allowlisted public catalogs and quarantined upstream items (migration 14).
+`prompt_sources` records adapter, license SPDX, enabled flag, ETag/revision,
+and last error. `prompt_source_items` holds candidate state, hashes, risk,
+quality, task family, and optional `linked_template_id`. Promotion writes
+`template_provenance`. Refresh summaries go to `prompt_refresh_runs`.
+Evaluate writes `prompt_evaluation_snapshots`. Promote captures
+`prompt_promotion_baselines` for later outcome deltas (migration 15).
+
+Candidate states: `candidate_new`, `candidate_changed`, `reviewed`, `promoted`,
+`rejected`, `removed_upstream`, `quarantined`.
+
+Built-in sources are inserted with `enabled=0`. See
+[prompt-intelligence.md](prompt-intelligence.md).
 
 ## Table: facts
 
@@ -227,6 +261,8 @@ Incremental changes use a versioned migration runner in `src/ylang/core/migratio
 (facts workspace, improver columns, FTS, feedback, experiments, runtime settings,
 improver cache, apply audit log, **usage trace columns (v11)**, **evaluation_json (v12)**,
 **usage Phase B columns (v13: session/workspace/context/retention)**,
+**prompt intelligence sources/candidates/provenance (v14)**,
+**prompt evaluation snapshots and promotion baselines (v15)**,
 and related indexes).
 New installs still get `CREATE TABLE IF NOT EXISTS` from stores; upgrades rely on
 numbered migrations.

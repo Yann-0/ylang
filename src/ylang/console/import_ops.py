@@ -16,7 +16,9 @@ def import_json_payload(
 ) -> tuple[int, int]:
     """Import templates and facts from an export payload. Returns (templates, facts) counts."""
     imported_templates = 0
-    for item in payload.get("templates", []):
+    templates_raw = payload.get("templates", [])
+    templates_list = templates_raw if isinstance(templates_raw, list) else []
+    for item in templates_list:
         if not isinstance(item, dict):
             continue
         params = [
@@ -56,7 +58,9 @@ def import_json_payload(
             )
         imported_templates += 1
     imported_facts = 0
-    for item in payload.get("facts", []):
+    facts_raw = payload.get("facts", [])
+    facts_list = facts_raw if isinstance(facts_raw, list) else []
+    for item in facts_list:
         if not isinstance(item, dict):
             continue
         memory.remember(

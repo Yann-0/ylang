@@ -75,6 +75,10 @@ nav:
   - Publishing (GitHub Pages): publishing.md
   - Development: development.md
   - Database schema: database-schema.md
+  - Prompt intelligence:
+      - Operator guide: prompt-intelligence.md
+      - Evolution (2026-09-12): strategy/YLANG_PROMPT_INTELLIGENCE_20260912.md
+      - Source policy: strategy/YLANG_PUBLIC_PROMPT_SOURCE_POLICY_20260912.md
   - Quality charter: quality-charter.md
   - Quality loop: quality-loop.md
   - Control plane:

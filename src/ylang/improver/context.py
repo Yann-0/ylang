@@ -19,6 +19,7 @@ from ylang.improver.registry import resolve_cursor_mode
 from ylang.library.effectiveness import build_effectiveness_scores
 from ylang.library.retrieval import select_learned_templates, select_reference_prompts
 from ylang.library.store import Library
+from ylang.library.types import TemplateSummary
 from ylang.usage.store import UsageStore
 
 _EMPTY_CONVERSATION = "(No prior conversation provided.)"
@@ -231,7 +232,7 @@ def _build_reference_prompts_block(
         preferred_ids=_preferred_template_ids(store),
     )
     seen: set[str] = set()
-    ordered: list[object] = []
+    ordered: list[TemplateSummary] = []
     for summary in learned + summaries:
         if summary.template_id in seen:
             continue

@@ -20,7 +20,7 @@ flowchart TB
         MCP["MCP server<br/>stdio / HTTP /mcp"]
         GW["OpenAI gateway<br/>/v1/* /usage /health"]
         CON["Admin console<br/>/console/*"]
-        CLI["CLI<br/>ylang usage / patterns"]
+        CLI["CLI<br/>ylang usage / patterns / prompts"]
     end
 
     subgraph domain["Domain packages"]
@@ -70,11 +70,12 @@ flowchart TB
 
 ```
 src/ylang/
-├── __main__.py          # Entry: MCP server, ylang usage, ylang patterns
+├── __main__.py          # Entry: MCP server, ylang usage, ylang patterns, ylang prompts
 ├── settings.py          # Typed config from environment
 ├── cli/
 │   ├── usage.py         # Aggregates and standalone HTML dashboard export
-│   └── patterns.py      # ylang patterns suggest (learned templates)
+│   ├── patterns.py      # ylang patterns suggest (learned templates)
+│   └── prompts.py      # ylang prompts sources/refresh/candidates
 ├── core/
 │   ├── engine.py        # LiteLLM completion + usage logging (stream + tools)
 │   ├── model_router.py  # Semantic activity → concrete LiteLLM route
@@ -122,7 +123,7 @@ src/ylang/
 │   ├── routes.py        # /v1/chat/completions, /v1/models, /usage, /health
 │   ├── mapping.py       # Virtual route-* model resolution
 │   └── openai.py        # Request parsing and response shaping
-├── importer/            # CSV public-prompt import (CLI + MCP tool)
+├── importer/            # Prompt intelligence: sources, candidates, promote
 ├── telemetry/           # Optional OTLP export (disabled by default)
 └── mcp/
     ├── server.py        # FastMCP wiring and transport
@@ -331,7 +332,10 @@ Edit-distance Feedback requires the **dual gate** (console `edit_feedback` + hoo
 - Usage logging on every LLM call; `GET /usage` dashboard and CLI export
 - Pattern detection (`detect_patterns`, `ylang patterns suggest` / `apply`) and learned-template improver context
 - Propose-only improver and optimization surfaces (`optimization_suggestions`, optional `YLANG_EXPERIMENTS=1`)
+- Prompt intelligence — allowlisted public sources refresh into candidate quarantine; explicit promote; provenance on template versions ([prompt-intelligence.md](prompt-intelligence.md))
 - Local usage digest CLI with optional desktop notify (`notify-send`)
+
+### Planned
 
 ### Planned
 
@@ -340,7 +344,7 @@ Edit-distance Feedback requires the **dual gate** (console `edit_feedback` + hoo
 - **Grouped/gated console nav** — intended IA above; live build may still list all links flat
 - **Email digest** — desktop notify is local-only
 
-Not in scope: optimizer with provenance, GitHub/KB sources, hosted team features.
+Not in scope: hosted team features, prompt marketplace, auto-promotion of internet prompts.
 
 ## Related docs
 

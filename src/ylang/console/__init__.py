@@ -7,10 +7,8 @@ from typing import Any
 __all__ = ["register_console_routes"]
 
 
-def __getattr__(name: str) -> Any:
-    if name == "register_console_routes":
-        from ylang.console.routes import register_console_routes
+def register_console_routes(*args: Any, **kwargs: Any) -> None:
+    """Register admin console routes on the HTTP app."""
+    from ylang.console.routes import register_console_routes as _register
 
-        return register_console_routes
-    msg = f"module {__name__!r} has no attribute {name!r}"
-    raise AttributeError(msg)
+    _register(*args, **kwargs)

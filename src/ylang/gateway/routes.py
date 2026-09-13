@@ -260,6 +260,12 @@ async def _stream_response(
             param="model",
             code="model_not_found",
         )
+    if chunks is None:
+        return openai_error_response(
+            "stream iterator missing",
+            status_code=500,
+            error_type="server_error",
+        )
 
     def event_stream() -> Iterator[str]:
         role_sent = False

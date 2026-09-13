@@ -2,6 +2,9 @@
 
 Defaults to a local ``.ylang/library.db`` path; production deployments typically
 pass ``--db`` pointing at the shared Ylang storage file.
+
+Internet prompts are imported as **candidates**. Prefer
+``ylang prompts refresh prompts-chat``.
 """
 
 from __future__ import annotations
@@ -9,13 +12,13 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from ylang.importer import DEFAULT_PROMPTS_URL, import_into_library
+from ylang.importer import import_into_library
 
 
 def main() -> None:
-    """Import a public prompt CSV into a local library database."""
+    """Import a public prompt CSV into candidate quarantine."""
     parser = argparse.ArgumentParser(
-        description="Import public prompts into Ylang library"
+        description="Import public prompts as candidates (not auto-promoted)"
     )
     parser.add_argument(
         "--db",
@@ -25,8 +28,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--url",
-        default=DEFAULT_PROMPTS_URL,
-        help="CSV URL or local file path",
+        default=None,
+        help="CSV URL (manual import; never becomes a scheduled source)",
     )
     parser.add_argument(
         "--csv",
@@ -40,7 +43,10 @@ def main() -> None:
         url=None if args.csv else args.url,
         csv_path=args.csv,
     )
-    print(f"imported={result.imported} skipped={result.skipped}")
+    print(
+        f"ok={result.ok} imported={result.imported} skipped={result.skipped} "
+        f"source={result.source_id} error={result.error or '-'}"
+    )
 
 
 if __name__ == "__main__":

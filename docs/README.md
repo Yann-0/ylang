@@ -12,7 +12,8 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 | [Models](models.md) | Activity buckets, tested defaults, Cursor aliases, `resolution_reason` / `alias_source` |
 | [Architecture](architecture.md) | Module layout, data flow, `ModelResolution`, telemetry |
 | [MCP tools reference](mcp-tools.md) | Every tool: parameters, responses, examples |
-| [CLI](cli.md) | `ylang` subcommands: usage, patterns, backup, export, import, doctor, purge-traces, init |
+| [CLI](cli.md) | `ylang` subcommands: usage, patterns, prompts, backup, export, import, doctor, purge-traces, init |
+| [Prompt intelligence](prompt-intelligence.md) | Allowlisted sources, candidates, promotion, trust boundary |
 | [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement, per-message `ylang-off` bypass |
 | [Console](console.md) | Short alias → [Portal](portal.md) |
 | [Publishing](publishing.md) | GitHub Pages (https://yann-0.github.io/ylang/) |
@@ -48,6 +49,7 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 - Optional OTLP metadata export (`YLANG_OTEL_*`, disabled by default; `pip install 'ylang[otel]'`)
 - **Daily budget cap enforced at runtime** when `YLANG_DAILY_BUDGET_USD` is set
 - Propose-only improver, template library, usage logging, facts, pattern detect/suggest/apply
+- Prompt intelligence (allowlisted sources → candidate quarantine → explicit promote)
 - Experiment framework with console outcomes view
 
 ### Planned
@@ -55,4 +57,4 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 - Governed auto-apply from experiment/analytics winners (still propose-only today)
 - Email (remote) digest delivery — local CLI/cron + `notify-send` shipped
 
-Not in scope: optimizer with provenance, GitHub/KB sources, hosted team features.
+Not in scope: hosted team features, prompt marketplace, auto-promotion of internet prompts.

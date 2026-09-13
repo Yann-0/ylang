@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from html import escape
 
 from ylang import __version__
@@ -21,8 +22,8 @@ def render_overview_page(
     *,
     health_ok: bool,
     version: str,
-    providers_configured: list[str],
-    providers_missing: list[str],
+    providers_configured: Sequence[str],
+    providers_missing: Sequence[str],
     budget_spent: float | None,
     budget_cap: float | None,
     funnel: ImproverFunnelSummary,

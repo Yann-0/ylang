@@ -27,7 +27,6 @@ jobs:
 
       - name: Pyright
         run: pyright
-        continue-on-error: true
 
       - name: Pytest
-        run: pytest -m "not llm_e2e"
+        run: pytest -m "not llm_e2e and not network"
