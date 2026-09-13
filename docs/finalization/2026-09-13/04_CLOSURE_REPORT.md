@@ -16,15 +16,12 @@ filled at the end of this pass.
 
 ## Quality gates
 
-Recorded after the versioned-injection follow-up (see session log).
-
 | Check | Result |
 |-------|--------|
-| `ruff check .` | required PASS |
-| `pyright` | required PASS |
-| `pytest -m "not llm_e2e and not network"` | required PASS |
-| `mkdocs build --strict` | required PASS |
-| `YLANG_NETWORK_TESTS=1 pytest -m network` | optional live contracts |
+| `ruff check .` | PASS |
+| `pyright` | PASS (0 errors) |
+| `pytest -m "not llm_e2e and not network"` | **539 passed**, 5 deselected, 3 warnings |
+| `mkdocs build --strict` | PASS |
 
 Paid `--mode execute --authorize-paid` was **not** run. Default CI remains offline.
 
