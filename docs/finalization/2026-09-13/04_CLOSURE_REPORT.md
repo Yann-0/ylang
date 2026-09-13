@@ -10,7 +10,7 @@ filled at the end of this pass.
 |-------|-------|
 | Start SHA | `475a028184ab0d4263062a596c415aa7135ce981` (`feat(prompts): ship prompt intelligence ingest and 0.7.0`) |
 | Branch | `fix/prompt-intelligence-closure-20260913` |
-| Final commit SHA | filled after commit |
+| Final commit SHA | `8c2fe32e2b177d0c3a9770cc57b067beb78841f9` |
 | Package version | `0.7.0` (not bumped; Unreleased in CHANGELOG) |
 | Untracked user file preserved | `.cursor/ylang-improved-prompt.md` (not committed) |
 
