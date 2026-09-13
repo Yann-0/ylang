@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Versioned improver injections** — new improve events store `id@version` in `improver_context_templates` (MCP and Portal); measure_template attributes per-id versions; legacy bare ids stay unknown
+- **Large-catalog refresh warning** — stderr note when a refresh touches ≥500 items (prompts-chat ~2169); no silent truncation
+
+### Changed
+
+- **Prompt intelligence fail-closed** — unknown/missing license policy blocks scheduled ingest; truncated trees and partial downloads preserve last-known-good; refreshes are serialized and honor per-source intervals
+- **Live source honesty** — `github-awesome-copilot` is incompatible as of 2026-09-13 (no `*.prompt.md`); agents/skills are not converted into ordinary prompts and the source cannot be enabled
+- **Evaluate default stays inspect** — zero paid calls; `--mode execute` requires `--authorize-paid` and `--budget-usd > 0` (or `--simulated`); Portal button is inspect-only
+- **Outcome attribution** — post-promotion metrics use exact template version and observation window; unversioned events stay unknown; observational trends are labeled separately from controlled execute evidence
+
 ## [0.7.0] - 2026-09-12
 
 ### Added

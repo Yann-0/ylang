@@ -77,8 +77,10 @@ nav:
   - Database schema: database-schema.md
   - Prompt intelligence:
       - Operator guide: prompt-intelligence.md
+      - Evaluation methodology: evaluation-methodology.md
       - Evolution (2026-09-12): strategy/YLANG_PROMPT_INTELLIGENCE_20260912.md
       - Source policy: strategy/YLANG_PUBLIC_PROMPT_SOURCE_POLICY_20260912.md
+      - Closure (2026-09-13): finalization/2026-09-13/README.md
   - Quality charter: quality-charter.md
   - Quality loop: quality-loop.md
   - Control plane:

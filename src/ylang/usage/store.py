@@ -391,7 +391,7 @@ class UsageStore:
         self._connection.commit()
 
     def update_last_improver_context_templates(self, template_ids: list[str]) -> None:
-        """Attach reference template ids to the most recent usage row."""
+        """Attach reference template ids (optionally ``id@version``) to the latest row."""
         if not template_ids:
             return
         joined = ",".join(template_ids)

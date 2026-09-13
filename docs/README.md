@@ -14,6 +14,7 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 | [MCP tools reference](mcp-tools.md) | Every tool: parameters, responses, examples |
 | [CLI](cli.md) | `ylang` subcommands: usage, patterns, prompts, backup, export, import, doctor, purge-traces, init |
 | [Prompt intelligence](prompt-intelligence.md) | Allowlisted sources, candidates, promotion, trust boundary |
+| [Evaluation methodology](evaluation-methodology.md) | Inspect vs execute; versioned attribution |
 | [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement, per-message `ylang-off` bypass |
 | [Console](console.md) | Short alias → [Portal](portal.md) |
 | [Publishing](publishing.md) | GitHub Pages (https://yann-0.github.io/ylang/) |
@@ -23,7 +24,7 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 | [Database schema](database-schema.md) | SQLite tables and relationships |
 | [Quality charter](quality-charter.md) | Soft limits, principles, config authority |
 | [Quality loop](quality-loop.md) | Before/after metrics per improvement wave |
-| [Control plane evolution](control-plane-evolution/README.md) | Local-first AI Control Plane program (Y0–Y6, gates, run log) |
+| [Prompt intelligence closure 2026-09-13](finalization/2026-09-13/README.md) | Live sources, fail-closed ingest, inspect vs execute |
 
 ## Internal / historical
 

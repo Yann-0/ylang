@@ -79,14 +79,9 @@ def _serialize_summary(summary: TemplateSummary) -> dict[str, Any]:
 
 def _serialize_usage(record: UsageRecord) -> dict[str, Any]:
     from ylang.core.routing_reason import routing_one_liner
+    from ylang.usage.template_refs import template_ids_from_refs
 
-    context_templates: list[str] = []
-    if record.improver_context_templates:
-        context_templates = [
-            part.strip()
-            for part in record.improver_context_templates.split(",")
-            if part.strip()
-        ]
+    context_templates = template_ids_from_refs(record.improver_context_templates)
     payload: dict[str, Any] = {
         "id": record.id,
         "timestamp": record.timestamp.isoformat(),

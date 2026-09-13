@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import threading
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from ylang.importer.adapters.awesome_copilot import AwesomeCopilotAdapter, awesome_copilot_raw_url
@@ -16,10 +19,13 @@ from ylang.importer.adapters.prompts_chat import (
 from ylang.importer.ingest import ingest_parsed_items
 from ylang.importer.policy import (
     MAX_FILE_BYTES,
+    MAX_INGEST_ITEMS,
     MAX_RESPONSE_BYTES,
     MAX_TREE_BYTES,
+    REFRESH_LEASE_TTL_SEC,
     SourcePolicyError,
     is_scheduled_source,
+    license_policy_error,
     license_text_matches,
     scheduled_license_required,
 )
@@ -47,6 +53,14 @@ _REPO = {
     "fabric-patterns": ("danielmiessler", "Fabric"),
 }
 
+_LOCKS_GUARD = threading.Lock()
+_SOURCE_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _lock_for(source_id: str) -> threading.Lock:
+    with _LOCKS_GUARD:
+        return _SOURCE_LOCKS.setdefault(source_id, threading.Lock())
+
 
 def github_commits_url(owner: str, repo: str, ref: str = "main") -> str:
     """GitHub commits API URL used for revision / ETag checks."""
@@ -73,9 +87,14 @@ def _parse_sha(payload: bytes) -> str:
     raise ValueError(msg)
 
 
-def _parse_tree_paths(payload: bytes) -> list[str]:
+def parse_github_tree(payload: bytes) -> tuple[list[str], bool]:
+    """Return blob paths and whether GitHub truncated the tree listing."""
     data = json.loads(payload.decode("utf-8"))
-    tree = data.get("tree") if isinstance(data, dict) else None
+    if not isinstance(data, dict):
+        msg = "malformed GitHub tree payload"
+        raise ValueError(msg)
+    truncated = bool(data.get("truncated"))
+    tree = data.get("tree")
     if not isinstance(tree, list):
         msg = "malformed GitHub tree payload"
         raise ValueError(msg)
@@ -88,10 +107,23 @@ def _parse_tree_paths(payload: bytes) -> list[str]:
         path = node.get("path")
         if isinstance(path, str):
             paths.append(path)
+    return paths, truncated
+
+
+def _parse_tree_paths(payload: bytes) -> list[str]:
+    paths, truncated = parse_github_tree(payload)
+    if truncated:
+        raise SourcePolicyError(
+            "truncated",
+            "git tree listing is truncated; refusing incomplete ingest",
+        )
     return paths
 
 
 def _check_license(fetcher: Fetcher, source: PromptSource, revision: str) -> None:
+    policy_error = license_policy_error(source)
+    if policy_error:
+        raise SourcePolicyError("license", policy_error)
     if not scheduled_license_required(source):
         return
     owner, repo = _REPO[source.source_id]
@@ -192,11 +224,37 @@ def _fetch_tree_files(
                 content_kind="markdown",
             )
         except FetchError as exc:
-            if exc.code == "oversized":
-                continue
-            raise
+            raise SourcePolicyError(
+                "partial",
+                f"incomplete fetch for {path}: {exc}; last-known-good preserved",
+            ) from exc
         files[path] = response.text()
+    if len(files) != len(paths):
+        raise SourcePolicyError(
+            "partial",
+            "incomplete tree download; last-known-good preserved",
+        )
     return files
+
+
+def _parse_iso(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def refresh_interval_remaining(source: PromptSource, *, now: datetime | None = None) -> float | None:
+    """Hours remaining before the next scheduled refresh is due, or None if due."""
+    if source.refresh_interval_hours <= 0 or not source.last_success_at:
+        return None
+    anchor = now or datetime.now(timezone.utc)
+    last = _parse_iso(source.last_success_at)
+    elapsed = (anchor - last).total_seconds() / 3600.0
+    remaining = source.refresh_interval_hours - elapsed
+    if remaining <= 0:
+        return None
+    return remaining
 
 
 def refresh_source(
@@ -209,40 +267,113 @@ def refresh_source(
     revision: str | None = None,
     mark_removed: bool = True,
     require_enabled: bool = False,
+    force: bool = False,
 ) -> RefreshSummary:
     """Refresh one source into candidate quarantine. Never writes active templates."""
-    active_fetcher = fetcher or DEFAULT_FETCHER
-    source = store.get_source(source_id)
-    if source is None:
+    lock = _lock_for(source_id)
+    if not lock.acquire(blocking=False):
         return RefreshSummary(
             source_id=source_id,
-            status="error",
+            status="blocked",
             revision_before=None,
             revision_after=None,
-            error=f"unknown source: {source_id}",
+            error="refresh already in progress",
         )
-    if require_enabled and not source.enabled:
-        return RefreshSummary(
-            source_id=source_id,
-            status="unchanged",
-            revision_before=source.last_revision,
-            revision_after=source.last_revision,
-            error="source disabled",
+    owner = f"{os.getpid()}-{threading.get_ident()}-{source_id}"
+    leased = False
+    try:
+        source = store.get_source(source_id)
+        if source is None:
+            return RefreshSummary(
+                source_id=source_id,
+                status="error",
+                revision_before=None,
+                revision_after=None,
+                error=f"unknown source: {source_id}",
+            )
+        if require_enabled and not source.enabled:
+            return RefreshSummary(
+                source_id=source_id,
+                status="unchanged",
+                revision_before=source.last_revision,
+                revision_after=source.last_revision,
+                error="source disabled",
+            )
+        if require_enabled and not is_scheduled_source(source):
+            return RefreshSummary(
+                source_id=source_id,
+                status="unchanged",
+                revision_before=source.last_revision,
+                revision_after=source.last_revision,
+                error="manual sources are never scheduled",
+            )
+        if require_enabled and not force:
+            remaining = refresh_interval_remaining(source)
+            if remaining is not None:
+                return RefreshSummary(
+                    source_id=source_id,
+                    status="skipped",
+                    revision_before=source.last_revision,
+                    revision_after=source.last_revision,
+                    error=f"refresh interval not elapsed ({remaining:.1f}h remaining)",
+                )
+        if require_enabled and source.compatibility_status == "incompatible":
+            return RefreshSummary(
+                source_id=source_id,
+                status="blocked",
+                revision_before=source.last_revision,
+                revision_after=source.last_revision,
+                error=source.compatibility_note
+                or "source incompatible with v1 prompt adapter",
+            )
+        if not store.try_acquire_refresh_lease(
+            source_id, owner=owner, ttl_sec=REFRESH_LEASE_TTL_SEC
+        ):
+            return RefreshSummary(
+                source_id=source_id,
+                status="blocked",
+                revision_before=source.last_revision,
+                revision_after=source.last_revision,
+                error="refresh already in progress",
+            )
+        leased = True
+        return _refresh_source_locked(
+            store,
+            library,
+            source,
+            fetcher=fetcher,
+            parsed_items=parsed_items,
+            revision=revision,
+            mark_removed=mark_removed,
         )
-    if require_enabled and not is_scheduled_source(source):
-        return RefreshSummary(
-            source_id=source_id,
-            status="unchanged",
-            revision_before=source.last_revision,
-            revision_after=source.last_revision,
-            error="manual sources are never scheduled",
-        )
+    finally:
+        if leased:
+            store.release_refresh_lease(source_id, owner=owner)
+        lock.release()
 
+
+def _refresh_source_locked(
+    store: PromptSourceStore,
+    library: Library,
+    source: PromptSource,
+    *,
+    fetcher: Fetcher | None,
+    parsed_items: list[ParsedUpstreamItem] | None,
+    revision: str | None,
+    mark_removed: bool,
+) -> RefreshSummary:
+    active_fetcher = fetcher or DEFAULT_FETCHER
+    source_id = source.source_id
     store.mark_attempt(source_id)
     source = store.get_source(source_id) or source
 
     try:
         if parsed_items is not None:
+            if len(parsed_items) > MAX_INGEST_ITEMS:
+                raise SourcePolicyError(
+                    "budget",
+                    f"item count {len(parsed_items)} exceeds {MAX_INGEST_ITEMS}",
+                )
             rev = revision or content_revision_from_items(parsed_items)
             _check_license_if_needed(active_fetcher, source, rev)
             summary = ingest_parsed_items(
@@ -284,6 +415,21 @@ def refresh_source(
         else:
             files = _fetch_tree_files(active_fetcher, source, sha, adapter)  # type: ignore[arg-type]
         items = adapter.parse(files, revision=sha)
+        if len(items) > MAX_INGEST_ITEMS:
+            raise SourcePolicyError(
+                "budget",
+                f"item count {len(items)} exceeds {MAX_INGEST_ITEMS}",
+            )
+        if not items:
+            hint = getattr(adapter, "layout_hint", "expected source files")
+            note = (
+                f"source shape unexpected: 0 parsed items for {source_id} "
+                f"({len(files)} files). Expected: {hint}. "
+                "Refusing to convert agents/skills/tools into ordinary prompts."
+            )
+            store.set_compatibility(source_id, "incompatible", note, disable=True)
+            raise SourcePolicyError("layout", note)
+        store.set_compatibility(source_id, "eligible", None)
         summary = ingest_parsed_items(
             store,
             library,
@@ -297,6 +443,13 @@ def refresh_source(
         return summary
     except (FetchError, SourcePolicyError, ValueError, OSError, json.JSONDecodeError) as exc:
         store.mark_error(source_id, str(exc))
+        if isinstance(exc, SourcePolicyError) and exc.code in {"layout", "truncated"}:
+            store.set_compatibility(
+                source_id,
+                "incompatible",
+                str(exc),
+                disable=True,
+            )
         summary = RefreshSummary(
             source_id=source_id,
             status="blocked" if isinstance(exc, SourcePolicyError) else "error",
@@ -331,6 +484,7 @@ def refresh_all_enabled(
     library: Library,
     *,
     fetcher: Fetcher | None = None,
+    force: bool = False,
 ) -> list[RefreshSummary]:
     """Refresh sources with ``enabled=1``. Manual-import is never included."""
     summaries: list[RefreshSummary] = []
@@ -344,6 +498,7 @@ def refresh_all_enabled(
                 source.source_id,
                 fetcher=fetcher,
                 require_enabled=True,
+                force=force,
             )
         )
     return summaries

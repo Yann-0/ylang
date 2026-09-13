@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Literal
 
-POLICY_VERSION = "2026-09-12"
+POLICY_VERSION = "2026-09-13"
 ADAPTER_VERSION = "1"
 
 MANUAL_SOURCE_ID = "manual-import"
@@ -49,7 +49,11 @@ TaskFamily = Literal[
     "agent-orchestration",
     "other",
 ]
-RefreshStatus = Literal["success", "unchanged", "error", "blocked"]
+RefreshStatus = Literal["success", "unchanged", "error", "blocked", "skipped"]
+CompatibilityStatus = Literal["unverified", "eligible", "incompatible"]
+EvaluationMode = Literal["inspect", "execute"]
+EvidenceClass = Literal["observational", "controlled", "simulated"]
+AttributionKind = Literal["versioned", "mixed", "unknown"]
 
 ACTIVE_CANDIDATE_STATES: frozenset[str] = frozenset(
     {
@@ -91,6 +95,8 @@ class PromptSource:
     policy_version: str
     created_at: str
     updated_at: str
+    compatibility_status: CompatibilityStatus = "unverified"
+    compatibility_note: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +187,8 @@ class PromotionBaseline:
     avg_latency_ms: float | None
     injections: int
     captured_at: str
+    content_hash: str | None = None
+    observation_since: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +203,38 @@ class TemplateProvenance:
     content_hash: str
     canonical_url: str | None
     promoted_at: str
+
+
+@dataclass(frozen=True, slots=True)
+class EvaluationRun:
+    """One inspect or execute evaluation. Execute never promotes or grants tools."""
+
+    run_id: str
+    item_id: str
+    mode: EvaluationMode
+    evidence_class: EvidenceClass
+    vs_template_id: str | None
+    vs_template_version: int | None
+    vs_content_hash: str | None
+    candidate_content_hash: str
+    model: str | None
+    authorized: bool
+    budget_usd: float | None
+    cost_usd: float
+    baseline_output: str | None
+    candidate_output: str | None
+    baseline_error: str | None
+    candidate_error: str | None
+    baseline_latency_ms: int | None
+    candidate_latency_ms: int | None
+    baseline_prompt_tokens: int | None
+    candidate_prompt_tokens: int | None
+    baseline_completion_tokens: int | None
+    candidate_completion_tokens: int | None
+    evaluator_json: str
+    fixture_hash: str | None
+    created_at: str
+    note: str
 
 
 @dataclass(frozen=True, slots=True)

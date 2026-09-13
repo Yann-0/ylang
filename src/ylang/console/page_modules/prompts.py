@@ -26,6 +26,7 @@ def render_sources_page(
         rows = []
         for source in sources:
             enabled = "on" if source.enabled else "off"
+            compat = escape(source.compatibility_status)
             err = (
                 f'<span class="badge err">{escape(source.last_error[:80])}</span>'
                 if source.last_error
@@ -50,6 +51,7 @@ def render_sources_page(
                 "<tr>"
                 f"<td>{escape(source.source_id)}</td>"
                 f"<td>{escape(source.license_spdx)}</td>"
+                f"<td>{compat}</td>"
                 f"<td>{enabled}</td>"
                 f"<td>{escape(source.last_success_at or '—')}</td>"
                 f"<td><code>{escape((source.last_revision or '—')[:12])}</code></td>"
@@ -60,11 +62,13 @@ def render_sources_page(
         body = f"""
 {flash}
 <p class="subtitle">Refresh automatically; trust manually. Scheduled sources stay
-disabled until you enable them. Arbitrary URL imports never become scheduled sources.</p>
+disabled until you enable them. Incompatible sources cannot be enabled: Ylang will
+not convert agents, skills, or tool configs into ordinary prompts. Arbitrary URL
+imports never become scheduled sources.</p>
 <div class="panel">
 <table>
 <thead><tr>
-  <th>Source</th><th>License</th><th>Enabled</th><th>Last refresh</th>
+  <th>Source</th><th>License</th><th>Compat</th><th>Enabled</th><th>Last refresh</th>
   <th>Revision</th><th>Status</th><th></th>
 </tr></thead>
 <tbody>{''.join(rows)}</tbody>
@@ -146,14 +150,16 @@ def render_candidates_page(
   </form>
   <form method="post" action="/console/candidates/evaluate" class="inline-form">
     <input type="hidden" name="item_id" value="{escape(selected.item_id)}">
-    <button type="submit" class="btn-secondary">Evaluate vs current</button>
+    <button type="submit" class="btn-secondary">Inspect vs current (no LLM)</button>
   </form>
 </div>
 """
     body = f"""
 {flash}
 <p class="subtitle">Candidates are untrusted until you promote them. Promotion creates
-an immutable local template version and never grants tools from upstream metadata.</p>
+an immutable local template version and never grants tools from upstream metadata.
+Portal Evaluate is <strong>inspect only</strong> (zero paid calls). Bounded Engine
+execution is CLI: <code>ylang prompts candidates evaluate ID --mode execute</code>.</p>
 <div class="panel table-wrap">
 <table>
 <thead><tr>

@@ -1,5 +1,13 @@
 # Ylang — Prompt Intelligence Evolution
 
+> **Superseded in part (2026-09-13).** Live source compatibility, fail-closed
+> ingest, inspect vs execute evaluation, and versioned attribution are documented
+> in [prompt-intelligence.md](../prompt-intelligence.md) and
+> [finalization/2026-09-13](../finalization/2026-09-13/README.md). Treat claims
+> that awesome-copilot is a working bulk prompt import, that evaluate implies
+> quality improvement, or that all-time usage attaches to a new version as
+> **out of date**.
+
 **Date:** 2026-09-12  
 **Baseline branch:** `main`  
 **Baseline SHA:** `52aa77f10abd94ed0520b6fc10b0f06e14db80c7`  

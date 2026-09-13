@@ -45,9 +45,12 @@ def _commit_json(sha: str = SHA) -> str:
     return json.dumps({"sha": sha})
 
 
-def _tree(paths: list[str]) -> str:
+def _tree(paths: list[str], *, truncated: bool = False) -> str:
     return json.dumps(
-        {"tree": [{"path": path, "type": "blob", "sha": "x"} for path in paths]}
+        {
+            "truncated": truncated,
+            "tree": [{"path": path, "type": "blob", "sha": "x"} for path in paths],
+        }
     )
 
 
@@ -149,6 +152,8 @@ def test_migration_from_v0_6_preserves_templates(tmp_path: Path) -> None:
     assert "prompt_source_items" in tables
     assert "prompt_evaluation_snapshots" in tables
     assert "prompt_promotion_baselines" in tables
+    assert "prompt_evaluation_runs" in tables
+    assert "prompt_refresh_leases" in tables
     row = connection.execute(
         "SELECT name FROM templates WHERE template_id = 'keep-me'"
     ).fetchone()
@@ -705,7 +710,7 @@ def test_promote_baseline_then_metrics_delta(tmp_path: Path) -> None:
         assert baselines
         assert baselines[0].template_id == promoted.template_id
         assert baselines[0].accept_rate == 0.0
-        for index in range(3):
+        for _ in range(3):
             usage.write_usage(
                 surface="mcp",
                 activity="improve:agent",
@@ -716,17 +721,326 @@ def test_promote_baseline_then_metrics_delta(tmp_path: Path) -> None:
                 improver_accepted=True,
                 latency_ms=20,
                 success=True,
-                timestamp=now - timedelta(minutes=index),
+                timestamp=datetime.now(timezone.utc),
                 improver_context_templates="character",
                 improver_validated=True,
                 improver_changed=True,
                 cursor_mode="agent",
+                template_version=promoted.version,
             )
         from ylang.usage.aggregates import clear_aggregate_cache
+        from ylang.importer.metrics import promoted_outcome_deltas
 
         clear_aggregate_cache()
         metrics = collect_metrics(store, usage, library=library)
         assert metrics.promoted_improved == 1
         assert metrics.promoted_regressed == 0
+        deltas = promoted_outcome_deltas(store, library, usage)
+        assert deltas[0].evidence_class == "observational"
+        assert deltas[0].attribution == "versioned"
+        assert deltas[0].status == "improved"
+    finally:
+        library.close()
+
+
+def test_unversioned_post_promotion_stays_unknown(tmp_path: Path) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from ylang.importer.metrics import promoted_outcome_deltas
+    from ylang.usage.store import UsageStore
+
+    library = open_library(tmp_path / "db.sqlite")
+    store = open_source_store(library)
+    usage = UsageStore(library._connection)
+    usage._ensure_schema()
+    source = store.get_source("prompts-chat")
+    assert source is not None
+    try:
+        items = PromptsChatAdapter().parse(
+            {"prompts.csv": SAMPLE_CSV.read_text(encoding="utf-8")},
+            revision="sha-unk",
+        )
+        ingest_parsed_items(
+            store, library, source, items, revision="sha-unk", mark_removed=False
+        )
+        library.save(
+            "character",
+            name="Character",
+            body="old body",
+            params=[],
+            source="user",
+            visibility="public",
+        )
+        now = datetime.now(timezone.utc)
+        usage.write_usage(
+            surface="mcp",
+            activity="improve:agent",
+            model_used="test/model",
+            prompt_tokens=10,
+            cost=0.01,
+            improver_fired=True,
+            improver_accepted=False,
+            latency_ms=80,
+            success=True,
+            timestamp=now - timedelta(hours=1),
+            improver_context_templates="character",
+            improver_validated=True,
+            improver_changed=True,
+        )
+        promoted = promote_candidate(
+            store,
+            library,
+            "prompts-chat:character",
+            template_id="character",
+            usage_store=usage,
+        )
+        for _ in range(3):
+            usage.write_usage(
+                surface="mcp",
+                activity="improve:agent",
+                model_used="test/model",
+                prompt_tokens=10,
+                cost=0.01,
+                improver_fired=True,
+                improver_accepted=True,
+                latency_ms=20,
+                success=True,
+                timestamp=datetime.now(timezone.utc),
+                improver_context_templates="character",
+                improver_validated=True,
+                improver_changed=True,
+            )
+        deltas = promoted_outcome_deltas(store, library, usage)
+        assert deltas
+        assert deltas[0].status == "pending"
+        assert deltas[0].attribution == "unknown"
+        assert deltas[0].unversioned_events >= 1
+        assert promoted.version >= 1
+    finally:
+        library.close()
+
+
+def test_unknown_license_policy_blocks_scheduled_import(tmp_path: Path) -> None:
+    library = open_library(tmp_path / "db.sqlite")
+    store = open_source_store(library)
+    library._connection.execute(
+        "UPDATE prompt_sources SET license_spdx = 'unknown' WHERE source_id = 'prompts-chat'"
+    )
+    library._connection.commit()
+    try:
+        summary = refresh_source(
+            store, library, "prompts-chat", fetcher=_prompts_chat_fetcher()
+        )
+        assert summary.status == "blocked"
+        assert summary.error is not None
+        assert "license policy" in summary.error
+        assert store.list_items(source_id="prompts-chat") == []
+    finally:
+        library.close()
+
+
+def test_truncated_tree_does_not_mark_removed(tmp_path: Path) -> None:
+    library = open_library(tmp_path / "db.sqlite")
+    store = open_source_store(library)
+    owner, repo = "github", "awesome-copilot"
+    good = MapFetcher(
+        {
+            github_commits_url(owner, repo): _commit_json(),
+            github_license_url(owner, repo, SHA): MIT,
+            github_tree_url(owner, repo, SHA): _tree(["prompts/review-pr.prompt.md"]),
+            f"https://raw.githubusercontent.com/{owner}/{repo}/{SHA}/prompts/review-pr.prompt.md": COPILOT_PROMPT,
+        }
+    )
+    try:
+        first = refresh_source(
+            store, library, "github-awesome-copilot", fetcher=good
+        )
+        assert first.status == "success"
+        truncated = MapFetcher(
+            {
+                github_commits_url(owner, repo): _commit_json("deadbeef"),
+                github_license_url(owner, repo, "deadbeef"): MIT,
+                github_tree_url(owner, repo, "deadbeef"): _tree(
+                    ["prompts/review-pr.prompt.md"], truncated=True
+                ),
+            }
+        )
+        summary = refresh_source(
+            store, library, "github-awesome-copilot", fetcher=truncated
+        )
+        assert summary.status == "blocked"
+        assert summary.error is not None
+        assert "truncated" in summary.error
+        remaining = store.list_items(source_id="github-awesome-copilot")
+        assert remaining
+        assert remaining[0].candidate_state != "removed_upstream"
+        copilot = store.get_source("github-awesome-copilot")
+        assert copilot is not None
+        assert copilot.last_revision == SHA
+    finally:
+        library.close()
+
+
+def test_partial_oversized_does_not_delete_last_known_good(tmp_path: Path) -> None:
+    library = open_library(tmp_path / "db.sqlite")
+    store = open_source_store(library)
+    owner, repo = "github", "awesome-copilot"
+    good = MapFetcher(
+        {
+            github_commits_url(owner, repo): _commit_json(),
+            github_license_url(owner, repo, SHA): MIT,
+            github_tree_url(owner, repo, SHA): _tree(["prompts/review-pr.prompt.md"]),
+            f"https://raw.githubusercontent.com/{owner}/{repo}/{SHA}/prompts/review-pr.prompt.md": COPILOT_PROMPT,
+        }
+    )
+    try:
+        first = refresh_source(
+            store, library, "github-awesome-copilot", fetcher=good
+        )
+        assert first.status == "success"
+        sha2 = "feedface"
+        partial = MapFetcher(
+            {
+                github_commits_url(owner, repo): _commit_json(sha2),
+                github_license_url(owner, repo, sha2): MIT,
+                github_tree_url(owner, repo, sha2): _tree(
+                    ["prompts/review-pr.prompt.md"]
+                ),
+                f"https://raw.githubusercontent.com/{owner}/{repo}/{sha2}/prompts/review-pr.prompt.md": FetchError(
+                    "oversized", "too big"
+                ),
+            }
+        )
+        summary = refresh_source(
+            store, library, "github-awesome-copilot", fetcher=partial
+        )
+        assert summary.status == "blocked"
+        remaining = store.list_items(source_id="github-awesome-copilot")
+        assert remaining[0].candidate_state != "removed_upstream"
+        assert remaining[0].source_revision == SHA
+    finally:
+        library.close()
+
+
+def test_cannot_enable_incompatible_copilot(tmp_path: Path) -> None:
+    from ylang.importer.policy import SourcePolicyError
+
+    library = open_library(tmp_path / "db.sqlite")
+    store = open_source_store(library)
+    try:
+        source = store.get_source("github-awesome-copilot")
+        assert source is not None
+        assert source.compatibility_status == "incompatible"
+        with pytest.raises(SourcePolicyError, match="prompt.md"):
+            store.set_enabled("github-awesome-copilot", True)
+        enabled = store.get_source("github-awesome-copilot")
+        assert enabled is not None
+        assert enabled.enabled is False
+    finally:
+        library.close()
+
+
+def test_refresh_interval_skips_scheduled_source(tmp_path: Path) -> None:
+    library = open_library(tmp_path / "db.sqlite")
+    store = open_source_store(library)
+    try:
+        first = refresh_source(
+            store, library, "prompts-chat", fetcher=_prompts_chat_fetcher()
+        )
+        assert first.status == "success"
+        store.set_enabled("prompts-chat", True)
+        second = refresh_source(
+            store,
+            library,
+            "prompts-chat",
+            fetcher=_prompts_chat_fetcher(),
+            require_enabled=True,
+        )
+        assert second.status == "skipped"
+        assert second.error is not None
+        assert "interval" in second.error
+        forced = refresh_source(
+            store,
+            library,
+            "prompts-chat",
+            fetcher=_prompts_chat_fetcher(),
+            require_enabled=True,
+            force=True,
+        )
+        assert forced.status in {"success", "unchanged"}
+    finally:
+        library.close()
+
+
+def test_execute_requires_authorization_and_budget(tmp_path: Path) -> None:
+    from ylang.importer.evaluate import (
+        EvaluationAuthorizationError,
+        SimulatedCompleter,
+        evaluate_candidate,
+        execute_candidate_evaluation,
+    )
+    from ylang.usage.experiments import ExperimentStore
+
+    library = open_library(tmp_path / "db.sqlite")
+    store = open_source_store(library)
+    source = store.get_source("prompts-chat")
+    assert source is not None
+    try:
+        items = PromptsChatAdapter().parse(
+            {"prompts.csv": SAMPLE_CSV.read_text(encoding="utf-8")},
+            revision="sha-exec",
+        )
+        ingest_parsed_items(
+            store, library, source, items, revision="sha-exec", mark_removed=False
+        )
+        library.save(
+            "character",
+            name="Character",
+            body="You are a character.",
+            params=[],
+            source="user",
+            visibility="public",
+        )
+        item = store.get_item("prompts-chat:character")
+        assert item is not None
+        inspect = evaluate_candidate(
+            item,
+            library,
+            ExperimentStore(library._connection),
+            vs_template_id="character",
+            source_store=store,
+        )
+        assert inspect.mode == "inspect"
+        assert inspect.evidence_class == "observational"
+        with pytest.raises(EvaluationAuthorizationError, match="authorize-paid"):
+            execute_candidate_evaluation(
+                item,
+                library,
+                completer=SimulatedCompleter(),
+                fixtures=["hello"],
+                source_store=store,
+                vs_template_id="character",
+                authorize_paid=False,
+                budget_usd=1.0,
+                simulated=False,
+            )
+        run = execute_candidate_evaluation(
+            item,
+            library,
+            completer=SimulatedCompleter(),
+            fixtures=["hello"],
+            source_store=store,
+            vs_template_id="character",
+            simulated=True,
+        )
+        assert run.mode == "execute"
+        assert run.evidence_class == "simulated"
+        assert run.cost_usd == 0.0
+        assert run.baseline_output
+        assert run.candidate_output
+        payload = json.loads(run.evaluator_json)
+        assert payload["quality_improvement_demonstrated"] is False
+        assert payload["tools_granted"] is False
+        assert store.list_evaluation_runs(item.item_id)
     finally:
         library.close()

@@ -23,6 +23,6 @@ def test_select_blocks(db_path: object) -> None:
         source="user",
         tags=["block:constraints", "agent"],
     )
-    body, template_ids = select_blocks(library, cursor_mode="agent")
+    body, template_refs = select_blocks(library, cursor_mode="agent")
     assert "Run tests" in body
-    assert "constraints-agent" in template_ids
+    assert ("constraints-agent", 1) in template_refs

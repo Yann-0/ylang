@@ -7,7 +7,7 @@ import json
 from typing import TYPE_CHECKING
 
 from ylang.importer.convert import normalize_body
-from ylang.importer.evaluate import measure_template
+from ylang.importer.evaluate import measure_template_observational
 from ylang.importer.source_store import PromptSourceStore
 from ylang.importer.source_types import SourceItem
 from ylang.library.store import Library
@@ -117,7 +117,7 @@ def promote_candidate(
             f"refusing to overwrite seed template {target_id}; pass --template-id"
         )
     baseline = (
-        measure_template(library, usage_store, target_id)
+        measure_template_observational(library, usage_store, target_id)
         if existing is not None
         else None
     )

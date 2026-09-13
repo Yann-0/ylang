@@ -13,6 +13,7 @@ from ylang.console.page_modules.prompts import (
     render_sources_page,
 )
 from ylang.importer.evaluate import evaluate_candidate
+from ylang.importer.policy import SourcePolicyError
 from ylang.importer.promote import (
     PromotionError,
     candidate_diff_text,
@@ -42,9 +43,13 @@ def register_prompt_intelligence_routes(ctx: ConsoleContext) -> None:
     async def console_sources_enable(request: Request) -> Response:
         form = await request.form()
         source_id = str(form.get("source_id", ""))
-        _store().set_enabled(source_id, True)
+        try:
+            _store().set_enabled(source_id, True)
+            msg = f"enabled {source_id}"
+        except SourcePolicyError as exc:
+            msg = str(exc)
         return RedirectResponse(
-            f"/console/sources?msg={quote_plus('enabled ' + source_id)}",
+            f"/console/sources?msg={quote_plus(msg)}",
             status_code=303,
         )
 
@@ -156,7 +161,9 @@ def register_prompt_intelligence_routes(ctx: ConsoleContext) -> None:
             ctx.deps.store,
             source_store=store,
         )
-        parts = [f"evaluation {report.experiment_id} (inactive; no auto-traffic)"]
+        parts = [
+            f"inspect {report.experiment_id} (observational; zero provider calls; no auto-traffic)"
+        ]
         if report.current_template_id:
             parts.append(f"vs {report.current_template_id}")
         if report.current_accept_rate is not None:

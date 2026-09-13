@@ -34,6 +34,7 @@ ylang/
 |---------|---------|
 | `pytest` | Run all tests |
 | `pytest -m "not llm_e2e and not network"` | Default CI path (skip live Ollama and GitHub) |
+| `YLANG_NETWORK_TESTS=1 pytest -m network   # live GitHub source contracts; not default CI` | Optional live source contracts (not quality proofs) |
 | `pytest tests/test_engine.py -v` | Run a single test file |
 | `ruff check .` | Lint (classic Flake8 subset: `E4`, `E7`, `E9`, `F`) |
 | `ruff format .` | Format |
@@ -151,10 +152,11 @@ See [database-schema.md](database-schema.md) for table definitions.
 
 ## Release checklist
 
-- [ ] `pytest -m "not llm_e2e and not network"` and `ruff check .` pass
+- [ ] `ruff check .`, `pyright`, `pytest -m "not llm_e2e and not network"`, and `mkdocs build --strict` pass
 - [ ] Version bumped in `src/ylang/__init__.py` and `pyproject.toml` if releasing
 - [ ] [mcp-tools.md](mcp-tools.md) and [configuration.md](configuration.md) updated for behavior changes
 - [ ] [CHANGELOG](CHANGELOG.md) entry (when maintaining a changelog)
+- [ ] Do not treat `YLANG_NETWORK_TESTS=1 pytest -m network` or paid evaluate as release-quality proofs
 
 ## Related docs
 

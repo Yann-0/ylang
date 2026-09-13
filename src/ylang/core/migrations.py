@@ -413,6 +413,75 @@ def _migrate_prompt_evaluation_baselines(connection: sqlite3.Connection) -> None
     )
 
 
+@migration(16, "prompt_intelligence_fail_closed")
+def _migrate_prompt_intelligence_fail_closed(connection: sqlite3.Connection) -> None:
+    """Compatibility flags, refresh leases, and bounded evaluation runs."""
+    from ylang.importer.policy import COPILOT_INCOMPATIBLE_NOTE
+
+    if _table_exists(connection, "prompt_sources"):
+        if not _column_exists(connection, "prompt_sources", "compatibility_status"):
+            connection.execute(
+                "ALTER TABLE prompt_sources ADD COLUMN compatibility_status "
+                "TEXT NOT NULL DEFAULT 'unverified'"
+            )
+        if not _column_exists(connection, "prompt_sources", "compatibility_note"):
+            connection.execute(
+                "ALTER TABLE prompt_sources ADD COLUMN compatibility_note TEXT"
+            )
+        connection.execute(
+            """
+            UPDATE prompt_sources
+            SET compatibility_status = 'incompatible',
+                compatibility_note = ?,
+                enabled = 0
+            WHERE source_id = 'github-awesome-copilot'
+              AND compatibility_status = 'unverified'
+            """,
+            (COPILOT_INCOMPATIBLE_NOTE,),
+        )
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS prompt_refresh_leases (
+            source_id TEXT PRIMARY KEY,
+            owner TEXT NOT NULL,
+            acquired_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS prompt_evaluation_runs (
+            run_id TEXT PRIMARY KEY,
+            item_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            evidence_class TEXT NOT NULL,
+            vs_template_id TEXT,
+            vs_template_version INTEGER,
+            vs_content_hash TEXT,
+            candidate_content_hash TEXT NOT NULL,
+            model TEXT,
+            authorized INTEGER NOT NULL DEFAULT 0,
+            budget_usd REAL,
+            cost_usd REAL NOT NULL DEFAULT 0,
+            baseline_output TEXT,
+            candidate_output TEXT,
+            baseline_error TEXT,
+            candidate_error TEXT,
+            baseline_latency_ms INTEGER,
+            candidate_latency_ms INTEGER,
+            baseline_prompt_tokens INTEGER,
+            candidate_prompt_tokens INTEGER,
+            baseline_completion_tokens INTEGER,
+            candidate_completion_tokens INTEGER,
+            evaluator_json TEXT NOT NULL DEFAULT '{}',
+            fixture_hash TEXT,
+            created_at TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX IF NOT EXISTS idx_prompt_evaluation_runs_item
+            ON prompt_evaluation_runs (item_id, created_at DESC);
+        """
+    )
+
+
 def run_migrations(connection: sqlite3.Connection) -> int:
     """Apply pending migrations; return count applied."""
     connection.execute(

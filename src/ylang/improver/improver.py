@@ -27,6 +27,7 @@ from ylang.improver.registry import (
     recommend_parallelism,
     resolve_cursor_mode,
 )
+from ylang.usage.template_refs import format_template_refs
 from ylang.improver.salvage import (
     _ANCHOR_SALVAGE_REASONS,
     _FALLBACK_REJECTION_REASONS,
@@ -242,6 +243,7 @@ class Improver:
                 _safe_result(text, apply_default, resolved=resolved),
                 text,
                 resolved=resolved,
+                context=context,
             )
         cache_key = _improve_cache_key(text, tool, mode)
         if not accepted:
@@ -282,6 +284,7 @@ class Improver:
                 text,
                 resolved=resolved,
                 experiment_variant=experiment_variant,
+                context=context,
             )
         return self._process_improve_completion(
             text=text,
@@ -294,6 +297,7 @@ class Improver:
             deadline=deadline,
             timeout_sec=timeout_sec,
             experiment_variant=experiment_variant,
+            context=context,
         )
 
     def _run_improve_completion(
@@ -327,6 +331,9 @@ class Improver:
             resolved_workspace = context.workspace
 
         def _complete() -> CompletionResult:
+            single_version: int | None = None
+            if context is not None and len(context.reference_template_refs) == 1:
+                single_version = context.reference_template_refs[0][1]
             return self._engine.complete(
                 [
                     {"role": "system", "content": system_prompt},
@@ -346,6 +353,7 @@ class Improver:
                 context_sources_json=context_sources,
                 memory_fact_ids_json=memory_fact_ids,
                 mcp_server="ylang",
+                template_version=single_version,
             )
 
         if timeout_sec <= 0:
@@ -376,6 +384,7 @@ class Improver:
                     activity=activity,
                     experiment_variant=experiment_variant,
                     future=future,
+                    context=context,
                 )
 
     def _process_improve_completion(
@@ -391,6 +400,7 @@ class Improver:
         deadline: float | None,
         timeout_sec: float,
         experiment_variant: str | None,
+        context: ImproveContext | None = None,
     ) -> ImprovementResult:
         """Parse, validate, salvage, critique, and cache a successful completion."""
         try:
@@ -415,6 +425,7 @@ class Improver:
                     result=result,
                     model_used=completion.model_used,
                     experiment_variant=experiment_variant,
+                    context=context,
                 )
                 if salvaged is not None:
                     return salvaged
@@ -435,9 +446,14 @@ class Improver:
                         text,
                         resolved=resolved,
                         experiment_variant=experiment_variant,
+                        context=context,
                     )
             result = self._finalize(
-                result, text, resolved=resolved, experiment_variant=experiment_variant
+                result,
+                text,
+                resolved=resolved,
+                experiment_variant=experiment_variant,
+                context=context,
             )
             final = self._maybe_critique(
                 text,
@@ -458,6 +474,7 @@ class Improver:
                 resolved=resolved,
                 experiment_variant=experiment_variant,
                 exc=exc,
+                context=context,
             )
         except Exception as exc:
             # Model output can raise unexpected parse/shape errors; keep fail-open.
@@ -482,6 +499,7 @@ class Improver:
         result: ImprovementResult,
         model_used: str,
         experiment_variant: str | None,
+        context: ImproveContext | None = None,
     ) -> ImprovementResult | None:
         """Attempt salvage/fallback paths for a validation failure."""
         salvaged = _try_salvage(
@@ -514,6 +532,7 @@ class Improver:
                 text,
                 resolved=resolved,
                 experiment_variant=experiment_variant,
+                context=context,
             )
         if result.rejection_reason in _FALLBACK_REJECTION_REASONS:
             fallback = _fallback_short_prompt_expansion(
@@ -533,6 +552,7 @@ class Improver:
                     text,
                     resolved=resolved,
                     experiment_variant=experiment_variant,
+                    context=context,
                 )
         if result.rejection_reason:
             logger.warning(
@@ -551,6 +571,7 @@ class Improver:
         resolved: ResolvedCursorMode,
         experiment_variant: str | None,
         exc: BaseException,
+        context: ImproveContext | None = None,
     ) -> ImprovementResult:
         """Salvage or fail-open when model output cannot be parsed."""
         salvaged = _try_salvage_parse_failure(
@@ -570,6 +591,7 @@ class Improver:
                 text,
                 resolved=resolved,
                 experiment_variant=experiment_variant,
+                context=context,
             )
         logger.warning(
             "improve_prompt failed to parse model output (model=%s): %s",
@@ -587,6 +609,7 @@ class Improver:
             text,
             resolved=resolved,
             experiment_variant=experiment_variant,
+            context=context,
         )
 
     def _timeout_result(
@@ -601,6 +624,7 @@ class Improver:
         activity: str,
         experiment_variant: str | None,
         future: Future[CompletionResult],
+        context: ImproveContext | None = None,
     ) -> ImprovementResult:
         """Record a clean timeout usage row and scrub any late orphan writes."""
         logger.warning(
@@ -608,6 +632,12 @@ class Improver:
             timeout_sec,
             model,
         )
+        single_version: int | None = None
+        if context is not None and len(context.reference_template_refs) == 1:
+            single_version = context.reference_template_refs[0][1]
+        encoded_refs = ""
+        if context is not None and context.reference_template_refs:
+            encoded_refs = format_template_refs(context.reference_template_refs)
         self._engine.store.write_usage(
             surface=self._engine._surface,  # noqa: SLF001
             activity=activity,
@@ -625,6 +655,8 @@ class Improver:
             improver_task_class=detect_task_class(text),
             cursor_mode=resolved.mode,
             experiment_variant=experiment_variant,
+            improver_context_templates=encoded_refs or None,
+            template_version=single_version,
         )
         timeout_row_id = self._engine.store.latest_usage_id() or 0
 
@@ -662,6 +694,7 @@ class Improver:
                 text,
                 resolved=resolved,
                 experiment_variant=experiment_variant,
+                context=context,
             )
         return self._finalize(
             _safe_result(
@@ -674,6 +707,7 @@ class Improver:
             text,
             resolved=resolved,
             experiment_variant=experiment_variant,
+            context=context,
         )
 
     def _resolve_experiment(self, mode: str) -> tuple[str | None, str]:
@@ -698,6 +732,7 @@ class Improver:
         *,
         resolved: ResolvedCursorMode,
         experiment_variant: str | None = None,
+        context: ImproveContext | None = None,
     ) -> ImprovementResult:
         """Persist improver outcome metadata on the latest usage row."""
         changed = result.improved.strip() != original_text.strip()
@@ -709,6 +744,12 @@ class Improver:
             cursor_mode=resolved.mode,
             experiment_variant=experiment_variant,
         )
+        if context is not None and context.reference_template_refs:
+            encoded = format_template_refs(context.reference_template_refs)
+            if encoded:
+                self._engine.store.update_last_improver_context_templates(
+                    encoded.split(",")
+                )
         return result
 
     def _maybe_critique(

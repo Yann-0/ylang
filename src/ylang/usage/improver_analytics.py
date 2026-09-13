@@ -210,9 +210,9 @@ def _resolve_mode(row: UsageRecord) -> str:
 
 
 def _parse_template_ids(raw: str | None) -> list[str]:
-    if not raw:
-        return []
-    return [part.strip() for part in raw.split(",") if part.strip()]
+    from ylang.usage.template_refs import template_ids_from_refs
+
+    return template_ids_from_refs(raw)
 
 
 def _collect_template_injection_stats(

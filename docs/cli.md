@@ -92,18 +92,25 @@ prompts are never auto-promoted. See [prompt-intelligence.md](prompt-intelligenc
 ylang prompts sources list
 ylang prompts sources enable prompts-chat
 ylang prompts refresh prompts-chat
-ylang prompts refresh --all
+ylang prompts refresh --all              # due enabled sources; skips interval
+ylang prompts refresh --all --force
 ylang prompts candidates list
 ylang prompts candidates show prompts-chat:character
 ylang prompts candidates diff prompts-chat:character
 ylang prompts candidates reject <id>
 ylang prompts candidates promote <id>
-ylang prompts candidates evaluate <id> [--vs TEMPLATE]
+ylang prompts candidates evaluate <id> [--vs TEMPLATE] [--fixture-file PATH]
+ylang prompts candidates evaluate <id> --mode execute --simulated --vs T --fixture-file F
+ylang prompts candidates evaluate <id> --mode execute --authorize-paid --budget-usd 0.5 --model M --vs T --fixture-file F
 ylang prompts metrics
 ```
 
 High-risk candidates require `--acknowledge-risk`. `--all` refreshes only
-**enabled** scheduled sources (`manual-import` is never included).
+**enabled** scheduled sources whose interval is due (`manual-import` is never
+included). Default `evaluate` is **inspect** (zero paid calls). `--mode execute`
+without `--authorize-paid` / `--simulated` is refused. Incompatible sources
+cannot be enabled. See [prompt-intelligence.md](prompt-intelligence.md) and
+[evaluation-methodology.md](evaluation-methodology.md).
 
 ## Related docs
 

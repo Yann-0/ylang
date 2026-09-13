@@ -112,7 +112,7 @@ Written on every `Engine.complete()` or `Engine.complete_stream()` call, except 
 | `improver_fired` | INTEGER | 1 if improver initiated the call |
 | `improver_accepted` | INTEGER | 1 when improver suggestion was accepted |
 | `improver_input_sample` | TEXT | Truncated original prompt when improver fired (~200 chars); subject to capture_level |
-| `improver_context_templates` | TEXT | Comma-separated template ids injected into improver context |
+| `improver_context_templates` | TEXT | Comma-separated template injections; new events use `id@version` (legacy bare `id` = unknown version) |
 | `improver_validated` | INTEGER | 1 when improver output passed validation |
 | `improver_changed` | INTEGER | 1 when improved text differs from input |
 | `improver_rejection_reason` | TEXT | Validation rejection reason, if any |
@@ -144,7 +144,7 @@ Written on every `Engine.complete()` or `Engine.complete_stream()` call, except 
 | `mcp_server` | TEXT | MCP server name (defaults to `ylang` when `mcp_tool` is set) |
 | `retention_until` | TEXT | ISO UTC expiry for sensitive bodies (`redacted`/`full_local`) |
 | `cost_actual` | REAL | Optional actual billed cost when distinct from estimate |
-| `template_version` | INTEGER | Optional template version used for the call |
+| `template_version` | INTEGER | Optional scalar version when exactly one template was injected; prefer per-id `@version` in `improver_context_templates` when both exist |
 
 Indexes: `idx_usage_timestamp` on `timestamp`; `idx_usage_trace_id`; `idx_usage_parent_trace_id`.
 
@@ -204,8 +204,12 @@ Allowlisted public catalogs and quarantined upstream items (migration 14).
 and last error. `prompt_source_items` holds candidate state, hashes, risk,
 quality, task family, and optional `linked_template_id`. Promotion writes
 `template_provenance`. Refresh summaries go to `prompt_refresh_runs`.
-Evaluate writes `prompt_evaluation_snapshots`. Promote captures
-`prompt_promotion_baselines` for later outcome deltas (migration 15).
+Evaluate writes `prompt_evaluation_snapshots` (inspect) and append-only
+`prompt_evaluation_runs` (inspect and execute). Promote captures
+`prompt_promotion_baselines` for later **versioned** observational deltas
+(migration 15+16). Migration 16 adds `compatibility_status` /
+`compatibility_note` on `prompt_sources`, `prompt_refresh_leases`, and
+`prompt_evaluation_runs`.
 
 Candidate states: `candidate_new`, `candidate_changed`, `reviewed`, `promoted`,
 `rejected`, `removed_upstream`, `quarantined`.
@@ -263,6 +267,7 @@ improver cache, apply audit log, **usage trace columns (v11)**, **evaluation_jso
 **usage Phase B columns (v13: session/workspace/context/retention)**,
 **prompt intelligence sources/candidates/provenance (v14)**,
 **prompt evaluation snapshots and promotion baselines (v15)**,
+**fail-closed compatibility, refresh leases, evaluation runs (v16)**,
 and related indexes).
 New installs still get `CREATE TABLE IF NOT EXISTS` from stores; upgrades rely on
 numbered migrations.

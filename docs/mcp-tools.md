@@ -229,7 +229,9 @@ import and is **not** registered as a scheduled source.
 }
 ```
 
-CLI equivalent: `ylang prompts refresh prompts-chat`.
+CLI equivalent: `ylang prompts refresh prompts-chat` (inspect/import only; not
+a paid evaluation). `evaluate --mode execute` is CLI-only and is not exposed
+as an MCP tool.
 
 ---
 

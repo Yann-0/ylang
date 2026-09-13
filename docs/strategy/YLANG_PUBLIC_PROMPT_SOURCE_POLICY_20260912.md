@@ -1,5 +1,11 @@
 # Ylang — Public Prompt Source Policy
 
+> **Superseded in part (2026-09-13).** Live recheck: `github-awesome-copilot`
+> has no v1 `*.prompt.md` files and is **incompatible**; Ylang will not convert
+> agents/skills into prompts. Unknown license policy now **blocks** scheduled
+> ingest. See [prompt-intelligence.md](../prompt-intelligence.md) and
+> [finalization/2026-09-13/02_SOURCE_CONTRACTS.md](../finalization/2026-09-13/02_SOURCE_CONTRACTS.md).
+
 **Date:** 2026-09-12  
 **Companion:** `docs/strategy/YLANG_PROMPT_INTELLIGENCE_20260912.md`
 

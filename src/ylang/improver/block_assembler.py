@@ -28,8 +28,8 @@ def select_blocks(
     *,
     cursor_mode: str | None = None,
     max_chars: int = 3000,
-) -> tuple[str, tuple[str, ...]]:
-    """Assemble prompt blocks from tagged templates; return body and template ids."""
+) -> tuple[str, tuple[tuple[str, int], ...]]:
+    """Assemble prompt blocks; return body and ``(template_id, latest_version)`` refs."""
     summaries = library.list()
     by_type: dict[str, TemplateSummary] = {}
     for summary in summaries:
@@ -43,7 +43,7 @@ def select_blocks(
 
     ordered_types = [block_type for block_type in _BLOCK_TYPES if block_type in by_type]
     sections: list[str] = []
-    template_ids: list[str] = []
+    refs: list[tuple[str, int]] = []
     used = 0
     for block_type in ordered_types:
         summary = by_type[block_type]
@@ -55,9 +55,9 @@ def select_blocks(
         if used + len(section) + 2 > max_chars and sections:
             break
         sections.append(section)
-        template_ids.append(summary.template_id)
+        refs.append((summary.template_id, int(summary.latest_version)))
         used += len(section) + 2
 
     if not sections:
         return "", tuple()
-    return "\n\n".join(sections), tuple(template_ids)
+    return "\n\n".join(sections), tuple(refs)

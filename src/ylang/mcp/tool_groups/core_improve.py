@@ -58,10 +58,6 @@ def register_core_improve_tools(server: FastMCP, deps: YlangDeps) -> None:
             session_id=session_id,
             workspace=workspace,
         )
-        if use_context and context is not None and context.reference_template_ids:
-            deps.store.update_last_improver_context_templates(
-                list(context.reference_template_ids)
-            )
         payload = _serialize_improvement(result)
         if use_context and context is not None:
             payload["context_used"] = _serialize_context_used(context, conversation)

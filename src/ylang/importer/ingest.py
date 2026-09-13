@@ -222,7 +222,7 @@ def ingest_parsed_items(
                 errors += 1
 
         removed = 0
-        if mark_removed:
+        if mark_removed and errors == 0:
             existing_rows = store.list_items(source_id=source.source_id, limit=50_000)
             for row in existing_rows:
                 if row.upstream_item_id in seen_upstream:

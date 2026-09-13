@@ -24,6 +24,8 @@ def test_prompts_sources_list(
     assert "prompts-chat" in out
     assert "github-awesome-copilot" in out
     assert "fabric-patterns" in out
+    assert "compat=" in out
+    assert "incompatible" in out
 
 
 def test_prompts_candidates_workflow(
@@ -56,6 +58,12 @@ def test_prompts_candidates_workflow(
     evaluated = capsys.readouterr().out
     assert "prompt-candidate:" in evaluated
     assert '"current_injections"' in evaluated
+    assert '"mode": "inspect"' in evaluated
+    assert run_prompts_cli(
+        ["candidates", "evaluate", "prompts-chat:job-interviewer", "--mode", "execute"]
+    ) == 1
+    execute_err = capsys.readouterr().err
+    assert "inspect" not in execute_err.lower() or "authorize" in execute_err or "fixture" in execute_err
 
 
 def test_prompts_cannot_auto_promote_via_refresh(

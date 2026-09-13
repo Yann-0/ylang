@@ -8,9 +8,19 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
+from typing import Any
+
+from ylang.core.engine import Engine
 from ylang.core.stores import open_stores
-from ylang.importer.evaluate import evaluate_candidate
+from ylang.core.types import CompletionResult, Message
+from ylang.importer.evaluate import (
+    EvaluationAuthorizationError,
+    SimulatedCompleter,
+    evaluate_candidate,
+    execute_candidate_evaluation,
+)
 from ylang.importer.metrics import collect_metrics
+from ylang.importer.policy import SourcePolicyError
 from ylang.importer.promote import (
     PromotionError,
     candidate_diff_text,
@@ -19,9 +29,56 @@ from ylang.importer.promote import (
     review_candidate,
 )
 from ylang.importer.refresh import open_source_store, refresh_all_enabled, refresh_source
-from ylang.importer.source_types import REVIEW_QUEUE_STATES, PromptSource, SourceItem
+from ylang.importer.source_types import (
+    REVIEW_QUEUE_STATES,
+    PromptSource,
+    RefreshSummary,
+    SourceItem,
+)
 from ylang.settings import Settings
 from ylang.usage.experiments import ExperimentStore
+
+LARGE_CATALOG_WARN_THRESHOLD = 500
+
+
+def _warn_large_catalog(summary: RefreshSummary) -> None:
+    """Warn when a refresh ingested a large candidate set (no silent truncation)."""
+    total = summary.new + summary.changed + summary.unchanged
+    if total < LARGE_CATALOG_WARN_THRESHOLD:
+        return
+    print(
+        (
+            f"warning: {summary.source_id} refresh touched {total} items "
+            f"(new={summary.new} changed={summary.changed} unchanged={summary.unchanged}); "
+            "large catalogs are fully ingested — review candidates before promoting"
+        ),
+        file=sys.stderr,
+    )
+
+
+class _EngineCompleter:
+    """Adapt ``Engine.complete`` to the evaluation Completer protocol."""
+
+    def __init__(self, engine: Engine) -> None:
+        self._engine = engine
+
+    def complete(
+        self,
+        messages: list[Message],
+        activity: str,
+        *,
+        model: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        template_version: int | None = None,
+    ) -> CompletionResult:
+        """Delegate to the shared Engine without granting extra tools."""
+        return self._engine.complete(
+            messages,
+            activity,
+            model=model,
+            tools=tools,
+            template_version=template_version,
+        )
 
 
 def build_prompts_parser() -> argparse.ArgumentParser:
@@ -46,7 +103,12 @@ def build_prompts_parser() -> argparse.ArgumentParser:
         "--all",
         action="store_true",
         dest="refresh_all",
-        help="Refresh all enabled scheduled sources",
+        help="Refresh all enabled scheduled sources that are due",
+    )
+    refresh.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore per-source refresh intervals (scheduled --all only)",
     )
 
     candidates = groups.add_parser("candidates", help="Review quarantined candidates")
@@ -68,14 +130,37 @@ def build_prompts_parser() -> argparse.ArgumentParser:
     promote.add_argument("--template-id", default=None)
     evaluate = cand_sub.add_parser(
         "evaluate",
-        help="Register candidate vs current comparison (no auto-apply)",
+        help="Inspect (default, zero paid calls) or execute a bounded Engine comparison",
     )
     evaluate.add_argument("item_id")
     evaluate.add_argument("--vs", dest="vs_template_id", default=None)
     evaluate.add_argument(
         "--fixture-file",
         default=None,
-        help="Optional local sample input for structural comparison; never sent to a new provider",
+        help="Optional local sample. Inspect stores it locally; execute sends only this operator fixture",
+    )
+    evaluate.add_argument(
+        "--mode",
+        choices=("inspect", "execute"),
+        default="inspect",
+        help="inspect = static/observational (default). execute requires authorization.",
+    )
+    evaluate.add_argument(
+        "--authorize-paid",
+        action="store_true",
+        help="Required for --mode execute against a real provider",
+    )
+    evaluate.add_argument(
+        "--budget-usd",
+        type=float,
+        default=0.0,
+        help="Hard spend cap for --mode execute (default 0 = refuse paid calls)",
+    )
+    evaluate.add_argument("--model", default=None, help="Explicit model for execute")
+    evaluate.add_argument(
+        "--simulated",
+        action="store_true",
+        help="Use a local simulated completer (mechanics only, not prompt quality)",
     )
 
     groups.add_parser("metrics", help="Local source/candidate and promoted-usage metrics")
@@ -84,8 +169,10 @@ def build_prompts_parser() -> argparse.ArgumentParser:
 
 def _print_source_row(source: PromptSource) -> None:
     enabled = "on" if getattr(source, "enabled") else "off"
+    compat = source.compatibility_status
     print(
         f"{source.source_id:28} {enabled:3} {source.license_spdx:8} "
+        f"compat={compat:13} "
         f"rev={source.last_revision or '-'} "
         f"err={source.last_error or '-'}"
     )
@@ -124,7 +211,11 @@ def run_prompts_cli(argv: list[str] | None = None) -> int:
                     _print_source_row(source)
                 return 0
             if args.command == "enable":
-                updated = source_store.set_enabled(args.source_id, True)
+                try:
+                    updated = source_store.set_enabled(args.source_id, True)
+                except SourcePolicyError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 1
                 if updated is None:
                     print(f"unknown source: {args.source_id}", file=sys.stderr)
                     return 1
@@ -138,17 +229,21 @@ def run_prompts_cli(argv: list[str] | None = None) -> int:
             return 0
         if group == "refresh":
             if args.refresh_all:
-                summaries = refresh_all_enabled(source_store, stores.library)
+                summaries = refresh_all_enabled(
+                    source_store, stores.library, force=args.force
+                )
                 if not summaries:
                     print("No enabled scheduled sources. Enable with: ylang prompts sources enable <id>")
                     return 0
                 for summary in summaries:
                     print(json.dumps(asdict(summary), default=str))
+                    _warn_large_catalog(summary)
                 return 0 if all(item.status != "error" for item in summaries) else 1
             if not args.source_id:
                 parser.error("source_id or --all is required")
             summary = refresh_source(source_store, stores.library, args.source_id)
             print(json.dumps(asdict(summary), default=str))
+            _warn_large_catalog(summary)
             return 0 if summary.status in {"success", "unchanged"} else 1
         if group == "metrics":
             metrics = collect_metrics(
@@ -209,16 +304,50 @@ def run_prompts_cli(argv: list[str] | None = None) -> int:
                         print(f"fixture file not found: {fixture_path}", file=sys.stderr)
                         return 1
                     fixture_input = fixture_path.read_text(encoding="utf-8")
-                report = evaluate_candidate(
-                    item,
-                    stores.library,
-                    ExperimentStore(stores.store._connection),
-                    stores.store,
-                    vs_template_id=args.vs_template_id,
-                    fixture_input=fixture_input,
-                    source_store=source_store,
-                )
-                print(json.dumps(asdict(report), default=str, indent=2))
+                if args.mode == "inspect":
+                    if args.authorize_paid or args.simulated or args.budget_usd:
+                        print(
+                            "inspect mode ignores --authorize-paid/--budget-usd/--simulated; "
+                            "it never makes provider calls",
+                            file=sys.stderr,
+                        )
+                    report = evaluate_candidate(
+                        item,
+                        stores.library,
+                        ExperimentStore(stores.store._connection),
+                        stores.store,
+                        vs_template_id=args.vs_template_id,
+                        fixture_input=fixture_input,
+                        source_store=source_store,
+                    )
+                    print(json.dumps(asdict(report), default=str, indent=2))
+                    return 0
+                try:
+                    completer: SimulatedCompleter | _EngineCompleter
+                    if args.simulated:
+                        completer = SimulatedCompleter()
+                    else:
+                        completer = _EngineCompleter(
+                            Engine.from_settings(
+                                stores.store, surface="eval", settings=settings
+                            )
+                        )
+                    run = execute_candidate_evaluation(
+                        item,
+                        stores.library,
+                        completer=completer,
+                        fixtures=[fixture_input] if fixture_input else [],
+                        source_store=source_store,
+                        vs_template_id=args.vs_template_id,
+                        authorize_paid=args.authorize_paid,
+                        budget_usd=args.budget_usd,
+                        model=args.model,
+                        simulated=args.simulated,
+                    )
+                except EvaluationAuthorizationError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 1
+                print(json.dumps(asdict(run), default=str, indent=2))
                 return 0
         except PromotionError as exc:
             print(str(exc), file=sys.stderr)

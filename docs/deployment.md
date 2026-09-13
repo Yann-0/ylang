@@ -357,8 +357,11 @@ still print the digest to stdout (capture with cron mail or a log redirect).
 
 ### Scheduled prompt source refresh (opt-in)
 
-Public catalogs are **not** refreshed until you enable a source and add a
-local timer or cron job. Default installs stay off.
+Public catalogs are **not** refreshed until you enable an **eligible** source
+and add a local timer or cron job. Default installs stay off. Incompatible
+sources cannot be enabled. `--all` honors per-source `refresh_interval_hours`
+unless you pass `--force`. Only one refresh per source runs at a time (SQLite
+lease). See [prompt-intelligence.md](prompt-intelligence.md).
 
 ```bash
 ylang prompts sources enable prompts-chat
@@ -374,7 +377,19 @@ Cron equivalent:
 0 6 * * 1 sg ylang -c 'set -a && source /srv/ylang/ylang.env && set +a && ylang prompts refresh --all'
 ```
 
-See [prompt-intelligence.md](prompt-intelligence.md).
+### Rollback and recovery (prompt intelligence)
+
+Migration 16 is additive (`compatibility_status`, leases, `prompt_evaluation_runs`).
+To roll back application code, check out the previous SHA and keep the extra
+columns/tables; they are unused by 0.7.0 without this branch.
+
+- Disable sources (`ylang prompts sources disable …`) to stop scheduled fetch
+- Inspect evaluate has no paid side effects
+- Refresh leases expire after 600s and can be stolen
+- Truncated/partial/license failures leave last-known-good candidates in place
+- Restore a SQLite backup (`ylang backup`) if you need a pre-migration database
+
+Do not replay private usage history as execute fixtures.
 
 Manual equivalent (if you cannot run the script):
 

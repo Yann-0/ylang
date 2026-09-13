@@ -6,9 +6,11 @@ import json
 import sqlite3
 from typing import Any
 
-from ylang.importer.policy import BUILTIN_SOURCE_SPECS
+from ylang.importer.policy import BUILTIN_SOURCE_SPECS, COPILOT_INCOMPATIBLE_NOTE, SourcePolicyError
 from ylang.importer.source_types import (
     CandidateState,
+    CompatibilityStatus,
+    EvaluationRun,
     PromptSource,
     PromotionBaseline,
     RefreshSummary,
@@ -20,7 +22,8 @@ from ylang.importer.source_types import (
 _SOURCE_COLUMNS = (
     "source_id, name, adapter, canonical_url, repo_url, license_spdx, license_url, "
     "trust_tier, enabled, refresh_interval_hours, last_attempt_at, last_success_at, "
-    "last_revision, last_etag, last_error, policy_version, created_at, updated_at"
+    "last_revision, last_etag, last_error, policy_version, created_at, updated_at, "
+    "compatibility_status, compatibility_note"
 )
 
 
@@ -45,7 +48,21 @@ def _source_from_row(row: sqlite3.Row | tuple[Any, ...]) -> PromptSource:
         policy_version=str(values[15]),
         created_at=str(values[16]),
         updated_at=str(values[17]),
+        compatibility_status=_compatibility_status(values),
+        compatibility_note=(
+            str(values[19]) if len(values) > 19 and values[19] is not None else None
+        ),
     )
+
+
+def _compatibility_status(values: tuple[Any, ...]) -> CompatibilityStatus:
+    """Coerce a stored compatibility flag; unknown values become unverified."""
+    raw = str(values[18]) if len(values) > 18 and values[18] else "unverified"
+    if raw == "eligible":
+        return "eligible"
+    if raw == "incompatible":
+        return "incompatible"
+    return "unverified"
 
 
 def _item_from_row(row: sqlite3.Row | tuple[Any, ...]) -> SourceItem:
@@ -118,6 +135,21 @@ class PromptSourceStore:
                     now,
                 ),
             )
+        cols = {
+            str(row[1])
+            for row in self._connection.execute("PRAGMA table_info(prompt_sources)")
+        }
+        if "compatibility_status" in cols:
+            self._connection.execute(
+                """
+                UPDATE prompt_sources
+                SET compatibility_status = 'incompatible',
+                    compatibility_note = ?
+                WHERE source_id = 'github-awesome-copilot'
+                  AND compatibility_status = 'unverified'
+                """,
+                (COPILOT_INCOMPATIBLE_NOTE,),
+            )
         self._connection.commit()
 
     def list_sources(self) -> list[PromptSource]:
@@ -136,7 +168,20 @@ class PromptSourceStore:
         return _source_from_row(row) if row is not None else None
 
     def set_enabled(self, source_id: str, enabled: bool) -> PromptSource | None:
-        """Enable or disable scheduled refresh for a source."""
+        """Enable or disable scheduled refresh for a source.
+
+        Incompatible sources cannot be enabled: that would schedule ingestion of
+        agents/skills/tools as if they were ordinary prompts.
+        """
+        source = self.get_source(source_id)
+        if source is None:
+            return None
+        if enabled and source.compatibility_status == "incompatible":
+            raise SourcePolicyError(
+                "incompatible",
+                source.compatibility_note
+                or f"{source_id} is incompatible with the v1 prompt adapter",
+            )
         now = utcnow_iso()
         self._connection.execute(
             """
@@ -148,6 +193,37 @@ class PromptSourceStore:
         )
         self._connection.commit()
         return self.get_source(source_id)
+
+    def set_compatibility(
+        self,
+        source_id: str,
+        status: str,
+        note: str | None,
+        *,
+        disable: bool = False,
+    ) -> None:
+        """Record live layout compatibility. Optionally force-disable."""
+        now = utcnow_iso()
+        if disable:
+            self._connection.execute(
+                """
+                UPDATE prompt_sources
+                SET compatibility_status = ?, compatibility_note = ?,
+                    enabled = 0, updated_at = ?
+                WHERE source_id = ?
+                """,
+                (status, note, now, source_id),
+            )
+        else:
+            self._connection.execute(
+                """
+                UPDATE prompt_sources
+                SET compatibility_status = ?, compatibility_note = ?, updated_at = ?
+                WHERE source_id = ?
+                """,
+                (status, note, now, source_id),
+            )
+        self._connection.commit()
 
     def mark_attempt(self, source_id: str) -> None:
         """Record that a refresh was attempted."""
@@ -592,6 +668,101 @@ class PromptSourceStore:
             )
         return rows
 
+    def try_acquire_refresh_lease(
+        self, source_id: str, *, owner: str, ttl_sec: int
+    ) -> bool:
+        """Acquire a cross-process refresh lease. Expired leases are stolen."""
+        now = utcnow_iso()
+        self._connection.execute(
+            "DELETE FROM prompt_refresh_leases WHERE source_id = ? AND expires_at <= ?",
+            (source_id, now),
+        )
+        cursor = self._connection.execute(
+            """
+            INSERT OR IGNORE INTO prompt_refresh_leases (
+                source_id, owner, acquired_at, expires_at
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (source_id, owner, now, _iso_plus_seconds(now, ttl_sec)),
+        )
+        self._connection.commit()
+        return cursor.rowcount == 1
+
+    def release_refresh_lease(self, source_id: str, *, owner: str) -> None:
+        """Release a lease only if this owner still holds it."""
+        self._connection.execute(
+            "DELETE FROM prompt_refresh_leases WHERE source_id = ? AND owner = ?",
+            (source_id, owner),
+        )
+        self._connection.commit()
+
+    def save_evaluation_run(self, run: EvaluationRun) -> None:
+        """Persist an inspect or execute evaluation run (append-only)."""
+        self._connection.execute(
+            """
+            INSERT INTO prompt_evaluation_runs (
+                run_id, item_id, mode, evidence_class, vs_template_id,
+                vs_template_version, vs_content_hash, candidate_content_hash,
+                model, authorized, budget_usd, cost_usd, baseline_output,
+                candidate_output, baseline_error, candidate_error,
+                baseline_latency_ms, candidate_latency_ms,
+                baseline_prompt_tokens, candidate_prompt_tokens,
+                baseline_completion_tokens, candidate_completion_tokens,
+                evaluator_json, fixture_hash, created_at, note
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run.run_id,
+                run.item_id,
+                run.mode,
+                run.evidence_class,
+                run.vs_template_id,
+                run.vs_template_version,
+                run.vs_content_hash,
+                run.candidate_content_hash,
+                run.model,
+                int(run.authorized),
+                run.budget_usd,
+                run.cost_usd,
+                run.baseline_output,
+                run.candidate_output,
+                run.baseline_error,
+                run.candidate_error,
+                run.baseline_latency_ms,
+                run.candidate_latency_ms,
+                run.baseline_prompt_tokens,
+                run.candidate_prompt_tokens,
+                run.baseline_completion_tokens,
+                run.candidate_completion_tokens,
+                run.evaluator_json,
+                run.fixture_hash,
+                run.created_at,
+                run.note,
+            ),
+        )
+        self._connection.commit()
+
+    def list_evaluation_runs(self, item_id: str, *, limit: int = 20) -> list[EvaluationRun]:
+        """Return recent evaluation runs for a candidate, newest first."""
+        cursor = self._connection.execute(
+            """
+            SELECT run_id, item_id, mode, evidence_class, vs_template_id,
+                   vs_template_version, vs_content_hash, candidate_content_hash,
+                   model, authorized, budget_usd, cost_usd, baseline_output,
+                   candidate_output, baseline_error, candidate_error,
+                   baseline_latency_ms, candidate_latency_ms,
+                   baseline_prompt_tokens, candidate_prompt_tokens,
+                   baseline_completion_tokens, candidate_completion_tokens,
+                   evaluator_json, fixture_hash, created_at, note
+            FROM prompt_evaluation_runs
+            WHERE item_id = ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (item_id, limit),
+        )
+        return [_evaluation_run_from_row(row) for row in cursor.fetchall()]
+
     def pending_review_count(self) -> int:
         """Count candidates waiting for human review."""
         row = self._connection.execute(
@@ -611,6 +782,49 @@ class PromptSourceStore:
     def rollback(self) -> None:
         """Roll back the current transaction."""
         self._connection.rollback()
+
+
+def _iso_plus_seconds(iso: str, seconds: int) -> str:
+    """Return ``iso`` plus ``seconds`` as an ISO-8601 UTC timestamp."""
+    from datetime import datetime, timedelta, timezone
+
+    value = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return (value + timedelta(seconds=seconds)).isoformat()
+
+
+def _evaluation_run_from_row(row: sqlite3.Row | tuple[Any, ...]) -> EvaluationRun:
+    """Map a prompt_evaluation_runs row to ``EvaluationRun``."""
+    values = tuple(row)
+    return EvaluationRun(
+        run_id=str(values[0]),
+        item_id=str(values[1]),
+        mode=values[2],  # type: ignore[arg-type]
+        evidence_class=values[3],  # type: ignore[arg-type]
+        vs_template_id=str(values[4]) if values[4] is not None else None,
+        vs_template_version=int(values[5]) if values[5] is not None else None,
+        vs_content_hash=str(values[6]) if values[6] is not None else None,
+        candidate_content_hash=str(values[7]),
+        model=str(values[8]) if values[8] is not None else None,
+        authorized=bool(values[9]),
+        budget_usd=float(values[10]) if values[10] is not None else None,
+        cost_usd=float(values[11]),
+        baseline_output=str(values[12]) if values[12] is not None else None,
+        candidate_output=str(values[13]) if values[13] is not None else None,
+        baseline_error=str(values[14]) if values[14] is not None else None,
+        candidate_error=str(values[15]) if values[15] is not None else None,
+        baseline_latency_ms=int(values[16]) if values[16] is not None else None,
+        candidate_latency_ms=int(values[17]) if values[17] is not None else None,
+        baseline_prompt_tokens=int(values[18]) if values[18] is not None else None,
+        candidate_prompt_tokens=int(values[19]) if values[19] is not None else None,
+        baseline_completion_tokens=int(values[20]) if values[20] is not None else None,
+        candidate_completion_tokens=int(values[21]) if values[21] is not None else None,
+        evaluator_json=str(values[22]),
+        fixture_hash=str(values[23]) if values[23] is not None else None,
+        created_at=str(values[24]),
+        note=str(values[25]),
+    )
 
 
 def source_store_from_connection(connection: sqlite3.Connection) -> PromptSourceStore:

@@ -359,18 +359,20 @@ Promoted public candidates show an **Upstream provenance** panel (source, revisi
 
 **Route:** `GET /console/sources`
 
-Allowlisted catalogs only (license, enabled, last refresh, revision, error).
-Enable/disable and refresh from this page. Scheduled refresh stays off until
-you enable a source. This is not a marketplace.
+Allowlisted catalogs only (license, compatibility, enabled, last refresh,
+revision, error). Enable/disable and refresh from this page. Scheduled refresh
+stays off until you enable a source. Incompatible sources (for example
+`github-awesome-copilot` as of 2026-09-13) cannot be enabled: Ylang will not
+convert agents/skills into ordinary prompts. This is not a marketplace.
 
 ## Candidates
 
 **Route:** `GET /console/candidates`
 
 Review queue: name, task, source, state, risk, duplicate, quality. Actions:
-Review, Reject, Promote (high-risk requires acknowledging risk), Evaluate vs
-current (local accept/cost/latency plus body diff; inactive experiment, no
-auto-traffic).
+Review, Reject, Promote (high-risk requires acknowledging risk), **Inspect vs
+current (no LLM)** — observational only. Bounded Engine execution is CLI
+`--mode execute` and is never triggered from this button.
 
 ---
 

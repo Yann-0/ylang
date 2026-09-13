@@ -332,7 +332,7 @@ Edit-distance Feedback requires the **dual gate** (console `edit_feedback` + hoo
 - Usage logging on every LLM call; `GET /usage` dashboard and CLI export
 - Pattern detection (`detect_patterns`, `ylang patterns suggest` / `apply`) and learned-template improver context
 - Propose-only improver and optimization surfaces (`optimization_suggestions`, optional `YLANG_EXPERIMENTS=1`)
-- Prompt intelligence — allowlisted public sources refresh into candidate quarantine; explicit promote; provenance on template versions ([prompt-intelligence.md](prompt-intelligence.md))
+- Prompt intelligence — allowlisted public sources refresh into candidate quarantine; explicit promote; provenance on template versions; fail-closed license/layout; inspect vs budgeted Engine execute ([prompt-intelligence.md](prompt-intelligence.md), [evaluation-methodology.md](evaluation-methodology.md))
 - Local usage digest CLI with optional desktop notify (`notify-send`)
 
 ### Planned

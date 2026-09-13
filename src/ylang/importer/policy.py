@@ -17,7 +17,15 @@ DEFAULT_TIMEOUT_SEC = 30
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 MAX_FILE_BYTES = 256 * 1024
 MAX_TREE_BYTES = 5 * 1024 * 1024
+MAX_INGEST_ITEMS = 200_000
+REFRESH_LEASE_TTL_SEC = 600
 USER_AGENT = "Ylang-PromptIntelligence/0.7 (+https://github.com/Yann-0/ylang)"
+
+COPILOT_INCOMPATIBLE_NOTE = (
+    "LIVE_SOURCE 2026-09-13 github/awesome-copilot@7568a482ce2d: 0 *.prompt.md "
+    "files; tree is agents/skills/instructions/extensions. v1 will not convert "
+    "those into ordinary prompts."
+)
 
 SCHEDULED_HOSTS: frozenset[str] = frozenset(
     {
@@ -89,6 +97,8 @@ BUILTIN_SOURCE_SPECS: tuple[dict[str, object], ...] = (
         "enabled": 0,
         "refresh_interval_hours": 24,
         "policy_version": POLICY_VERSION,
+        "compatibility_status": "incompatible",
+        "compatibility_note": COPILOT_INCOMPATIBLE_NOTE,
     },
     {
         "source_id": "fabric-patterns",
@@ -184,24 +194,40 @@ def is_scheduled_source(source: PromptSource) -> bool:
 
 
 def scheduled_license_required(source: PromptSource) -> bool:
-    """Scheduled ingestion requires a known SPDX policy, not 'unknown'."""
-    return is_scheduled_source(source) and bool(source.license_spdx) and source.license_spdx != "unknown"
+    """Scheduled sources always require a license check (fail closed)."""
+    return is_scheduled_source(source)
+
+
+def license_policy_error(source: PromptSource) -> str | None:
+    """Return a block reason when scheduled license policy is missing or unknown."""
+    if not is_scheduled_source(source):
+        return None
+    spdx = (source.license_spdx or "").strip()
+    if not spdx or spdx.lower() == "unknown":
+        return "unknown or missing license policy blocks scheduled ingestion"
+    if spdx not in LICENSE_MARKERS:
+        return f"unsupported license policy {spdx} blocks scheduled ingestion"
+    return None
 
 
 __all__ = [
     "ADAPTER_VERSION",
     "BUILTIN_SOURCE_SPECS",
     "DEFAULT_TIMEOUT_SEC",
+    "COPILOT_INCOMPATIBLE_NOTE",
     "MAX_FILE_BYTES",
+    "MAX_INGEST_ITEMS",
     "MAX_REDIRECTS",
     "MAX_RESPONSE_BYTES",
     "MAX_TREE_BYTES",
     "POLICY_VERSION",
+    "REFRESH_LEASE_TTL_SEC",
     "SOURCE_URL_PREFIXES",
     "SourcePolicyError",
     "USER_AGENT",
     "content_type_allowed",
     "is_scheduled_source",
+    "license_policy_error",
     "license_text_matches",
     "scheduled_license_required",
     "validate_fetch_url",

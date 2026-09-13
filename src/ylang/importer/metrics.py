@@ -69,12 +69,20 @@ def promoted_outcome_deltas(
         if baseline.template_id in seen:
             continue
         seen.add(baseline.template_id)
-        current = measure_template(library, usage, baseline.template_id)
+        current = measure_template(
+            library,
+            usage,
+            baseline.template_id,
+            version=baseline.version,
+            since=baseline.captured_at,
+        )
         status, accept_delta = classify_outcome_delta(
             baseline_accept_rate=baseline.accept_rate,
             current_accept_rate=current.accept_rate,
             current_injections=current.injections,
             min_samples=min_samples,
+            attribution=current.attribution,
+            unversioned_events=current.unversioned_events,
         )
         cost_delta = None
         if baseline.avg_cost is not None and current.avg_cost is not None:
@@ -94,6 +102,12 @@ def promoted_outcome_deltas(
                 latency_delta=latency_delta,
                 current_injections=current.injections,
                 status=status,
+                evidence_class="observational",
+                attribution=current.attribution,
+                unversioned_events=current.unversioned_events,
+                confounders=current.confounders,
+                observation_since=current.observation_since,
+                observation_until=current.observation_until,
             )
         )
     return deltas

@@ -203,9 +203,13 @@ retention days, and a count of sensitive traces. Purge with
 
 ### Public prompt catalogs
 
-Scheduled refresh contacts only allowlisted GitHub hosts. Imported text is
-quarantined until you promote it. Manual URL import does not register that URL
-as a scheduled source. See [prompt-intelligence.md](prompt-intelligence.md).
+Scheduled refresh contacts only allowlisted GitHub hosts. Unknown or missing
+license policy **blocks** scheduled ingestion. Imported text is quarantined
+until you promote it. Manual URL import does not register that URL as a
+scheduled source. Default candidate evaluate is inspect (zero paid calls).
+Paid execute requires `--authorize-paid` and `--budget-usd`. See
+[prompt-intelligence.md](prompt-intelligence.md) and
+[evaluation-methodology.md](evaluation-methodology.md).
 
 ---
 

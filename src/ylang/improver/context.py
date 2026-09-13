@@ -33,6 +33,7 @@ class ImproveContext:
     facts_block: str | None = None
     reference_prompts_block: str | None = None
     reference_template_ids: tuple[str, ...] = ()
+    reference_template_refs: tuple[tuple[str, int], ...] = ()
     blocks_block: str | None = None
     mode_handoff: dict[str, str | bool] | None = None
     fact_ids: tuple[int, ...] = ()
@@ -110,7 +111,7 @@ def build_improve_context(
     effectiveness = build_effectiveness_scores(store) if store is not None else {}
     weight = _effectiveness_weight()
 
-    reference_block, reference_ids = _build_reference_prompts_block(
+    reference_block, reference_refs = _build_reference_prompts_block(
         text,
         tool,
         library,
@@ -120,12 +121,19 @@ def build_improve_context(
         weight=weight,
         store=store,
     )
-    blocks_block, block_ids = select_blocks(
+    blocks_block, block_refs = select_blocks(
         library,
         cursor_mode=resolved.mode,
         max_chars=mode_config.reference_prompt_char_limit,
     )
-    all_ids = tuple(dict.fromkeys((*reference_ids, *block_ids)))
+    seen: set[str] = set()
+    all_refs: list[tuple[str, int]] = []
+    for template_id, version in (*reference_refs, *block_refs):
+        if template_id in seen:
+            continue
+        seen.add(template_id)
+        all_refs.append((template_id, version))
+    all_ids = tuple(template_id for template_id, _ in all_refs)
     facts_block, fact_ids = _build_facts_block(
         memory,
         fact_limit=mode_config.facts_limit,
@@ -141,6 +149,7 @@ def build_improve_context(
         facts_block=facts_block,
         reference_prompts_block=reference_block,
         reference_template_ids=all_ids,
+        reference_template_refs=tuple(all_refs),
         blocks_block=blocks_block or None,
         mode_handoff=handoff,
         fact_ids=fact_ids,
@@ -207,7 +216,7 @@ def _build_reference_prompts_block(
     effectiveness: dict[str, float],
     weight: float,
     store: UsageStore | None = None,
-) -> tuple[str | None, tuple[str, ...]]:
+) -> tuple[str | None, tuple[tuple[str, int], ...]]:
     from ylang.improver.mode_optimizer import ModeOptimizerConfig
 
     assert isinstance(mode_config, ModeOptimizerConfig)
@@ -242,12 +251,12 @@ def _build_reference_prompts_block(
         return None, ()
     sections: list[str] = []
     used = 0
-    template_ids: list[str] = []
+    refs: list[tuple[str, int]] = []
     for summary in ordered:
         template = library.recall(summary.template_id)
         if template is None:
             continue
-        template_ids.append(summary.template_id)
+        refs.append((summary.template_id, int(summary.latest_version)))
         section = (
             f"### {summary.name} ({summary.template_id})\n"
             f"tags: {', '.join(summary.tags) or 'none'}\n"
@@ -262,4 +271,4 @@ def _build_reference_prompts_block(
         used += len(section) + 2
     if not sections:
         return None, ()
-    return "\n\n".join(sections), tuple(template_ids)
+    return "\n\n".join(sections), tuple(refs)

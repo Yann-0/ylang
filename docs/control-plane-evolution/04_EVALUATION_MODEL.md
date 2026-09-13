@@ -1,5 +1,11 @@
 # Y3 — Evaluation Model
 
+> **Superseded in part (2026-09-13).** Candidate inspect vs bounded Engine
+> execute, versioned attribution, and the rule that a runner does not prove
+> quality live in [evaluation-methodology.md](../evaluation-methodology.md).
+> Treat any implication that evaluate implies quality improvement, or that
+> all-time V1 usage attaches to a newly promoted V2, as **out of date**.
+
 **Builds on:** improver outcome columns, `feedback_events`, optimizer, experiments, template effectiveness  
 **Does not:** invent a greenfield “feedback” product
 
@@ -94,7 +100,12 @@ Aggregations for Quality home must show **class** so operators see whether a tre
 
 ## Experiment model
 
-Compare with shared window + traffic split (existing `prompt_experiments` + outcomes):
+Compare with shared window + traffic split (existing `prompt_experiments` + outcomes).
+Prompt-candidate execute is a **separate** bounded Engine path (`prompt_evaluation_runs`)
+and does not inject untrusted text into improver retrieval (`traffic_pct=0`).
+
+Inspect vs execute, versioned attribution, and the rule that a runner does not
+prove quality: [evaluation-methodology.md](../evaluation-methodology.md).
 
 | Dimension | Compare |
 |-----------|---------|

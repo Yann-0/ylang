@@ -9,7 +9,7 @@
 
 - **Improves prompts** — Expands rough requests into structured specs; aware of Cursor modes (`agent`, `plan`, `debug`, `ask`, `multitask`)
 - **OpenAI-compatible gateway** — Routes real chat traffic through Ylang's **semantic activity routing** (`route-code`, `route-search`, etc.) then a concrete LiteLLM model from the current tested policy
-- **Template library** — Versioned local prompts; public catalogs refresh into candidate quarantine (promote explicitly)
+- **Template library** — Versioned local prompts; public catalogs refresh into candidate quarantine (promote explicitly). Live source compatibility is recorded; incompatible catalogs cannot be enabled.
 - **Remembers facts** — Scoped user facts injected into improvement context
 - **Tracks usage** — Every LLM call logged to SQLite with cost, latency, and explainable `routing_reason_json` (`resolution_reason`, requested alias, semantic route)
 - **Optional OTLP** — Metadata-only export (`pip install 'ylang[otel]'`); off by default; prompt bodies stay local unless you opt in
@@ -65,6 +65,7 @@ rebuilds the site. See [docs/publishing.md](docs/publishing.md).
 | [MCP tools](docs/mcp-tools.md) | Full API reference (17 tools) |
 | [CLI](docs/cli.md) | `ylang` subcommands: usage, patterns, prompts, backup, doctor, … |
 | [Prompt intelligence](docs/prompt-intelligence.md) | Discover → candidate → promote → measure |
+| [Evaluation methodology](docs/evaluation-methodology.md) | Inspect vs execute; versioned attribution |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
 | [Gateway](docs/gateway.md) | OpenAI HTTP face: `/v1/chat/completions`, `/v1/models`, `/usage`, `/health`; virtual `route-*` models |
 | [Deployment](docs/deployment.md) | HTTP transport, systemd |
