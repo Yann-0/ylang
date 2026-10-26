@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Gateway load probe isolation** — mocked probes use a per-run temporary SQLite database and close it on failure; concurrent runs no longer share or delete a global file.
+
 ### Added
 
 - **Versioned improver injections** — new improve events store `id@version` in `improver_context_templates` (MCP and Portal); measure_template attributes per-id versions; legacy bare ids stay unknown

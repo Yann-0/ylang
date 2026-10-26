@@ -92,6 +92,10 @@ OLLAMA_HOST=http://localhost:11434 pytest -q -m llm_e2e
 | `tests/integration/test_mcp_tools.py` | MCP tool registration and handlers |
 | `tests/integration/test_improve_prompt_e2e.py` | End-to-end improver (may call LLM if keys set) |
 
+The mocked gateway load probe uses a separate temporary SQLite database per run
+and closes it before cleanup, including when setup fails. Concurrent probes do
+not share database files.
+
 ### Running with coverage (optional)
 
 ```bash

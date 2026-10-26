@@ -12,7 +12,9 @@ import statistics
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import closing
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # Allow running from repo root without install.
 _ROOT = Path(__file__).resolve().parents[1]
@@ -21,7 +23,7 @@ if str(_ROOT / "src") not in sys.path:
 
 
 def _mock_client(concurrency: int, requests: int) -> dict[str, float]:
-    """Run concurrent /v1/models requests against an in-process TestClient."""
+    """Probe mocked chat completions with isolated temporary storage."""
     from unittest.mock import patch
 
     from mcp.server.fastmcp import FastMCP
@@ -35,74 +37,74 @@ def _mock_client(concurrency: int, requests: int) -> dict[str, float]:
     from ylang.settings import ProviderKeys
     from ylang.usage.store import open_store
 
-    db_path = Path("/tmp/ylang-gateway-load-test.db")
-    store = open_store(db_path)
-    router = ModelRouter(
-        activity_model_lists={"other": ["openai/gpt-4o"]},
-        provider_keys=ProviderKeys(openai="test"),
-        fallback_model="ollama/qwen2.5",
-    )
-    engine = Engine(store, surface="gateway-load-test", router=router)
-    server = FastMCP("ylang-load-test", streamable_http_path="/mcp")
-    register_gateway_routes(server, engine)
-    app = BearerTokenMiddleware(server.streamable_http_app(), "load-test-token")
-    client = TestClient(app)
+    with (
+        TemporaryDirectory(prefix="ylang-gateway-load-") as temp_dir,
+        closing(open_store(Path(temp_dir) / "ylang.db")) as store,
+    ):
+        router = ModelRouter(
+            activity_model_lists={"other": ["openai/gpt-4o"]},
+            provider_keys=ProviderKeys(openai="test"),
+            fallback_model="ollama/qwen2.5",
+        )
+        engine = Engine(store, surface="gateway-load-test", router=router)
+        server = FastMCP("ylang-load-test", streamable_http_path="/mcp")
+        register_gateway_routes(server, engine)
+        app = BearerTokenMiddleware(server.streamable_http_app(), "load-test-token")
+        client = TestClient(app)
 
-    mock_result = CompletionResult(
-        content="pong",
-        model_used="openai/gpt-4o",
-        prompt_tokens=1,
-        completion_tokens=1,
-        cost=0.0,
-        latency_ms=1,
-        success=True,
-    )
+        mock_result = CompletionResult(
+            content="pong",
+            model_used="openai/gpt-4o",
+            prompt_tokens=1,
+            completion_tokens=1,
+            cost=0.0,
+            latency_ms=1,
+            success=True,
+        )
 
-    import threading
+        import threading
 
-    latencies: list[float] = []
-    errors = 0
-    client_lock = threading.Lock()
+        latencies: list[float] = []
+        errors = 0
+        client_lock = threading.Lock()
 
-    def one_request() -> float:
+        def one_request() -> float:
+            started = time.perf_counter()
+            with client_lock:
+                response = client.post(
+                    "/v1/chat/completions",
+                    headers={"Authorization": "Bearer load-test-token"},
+                    json={
+                        "model": "route-other",
+                        "messages": [{"role": "user", "content": "ping"}],
+                    },
+                )
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            if response.status_code != 200:
+                raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
+            return elapsed_ms
+
         started = time.perf_counter()
-        with client_lock:
-            response = client.post(
-                "/v1/chat/completions",
-                headers={"Authorization": "Bearer load-test-token"},
-                json={
-                    "model": "route-other",
-                    "messages": [{"role": "user", "content": "ping"}],
-                },
-            )
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        if response.status_code != 200:
-            raise RuntimeError(f"HTTP {response.status_code}: {response.text[:200]}")
-        return elapsed_ms
+        with patch.object(engine, "complete", return_value=mock_result):
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                futures = [pool.submit(one_request) for _ in range(requests)]
+                for future in as_completed(futures):
+                    try:
+                        latencies.append(future.result())
+                    except Exception:
+                        errors += 1
+        total_s = time.perf_counter() - started
 
-    started = time.perf_counter()
-    with patch.object(engine, "complete", return_value=mock_result):
-        with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = [pool.submit(one_request) for _ in range(requests)]
-            for future in as_completed(futures):
-                try:
-                    latencies.append(future.result())
-                except Exception:
-                    errors += 1
-    total_s = time.perf_counter() - started
-    store.close()
-    db_path.unlink(missing_ok=True)
-
-    return {
-        "requests": float(requests),
-        "errors": float(errors),
-        "total_s": total_s,
-        "p50_ms": statistics.median(latencies) if latencies else 0.0,
-        "p95_ms": (
-            sorted(latencies)[max(0, int(len(latencies) * 0.95) - 1)] if latencies else 0.0
-        ),
-        "rps": requests / total_s if total_s else 0.0,
-    }
+        return {
+            "requests": float(requests),
+            "errors": float(errors),
+            "total_s": total_s,
+            "p50_ms": statistics.median(latencies) if latencies else 0.0,
+            "p95_ms": (
+                sorted(latencies)[max(0, int(len(latencies) * 0.95) - 1)] if latencies else 0.0
+            ),
+            "rps": requests / total_s if total_s else 0.0,
+        }
 
 
 def _live_probe(base_url: str, token: str, concurrency: int, requests: int) -> dict[str, float]:
