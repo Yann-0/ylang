@@ -158,6 +158,18 @@ def qualify(manifest: dict, run: Path, repository: Path, wheelhouse: Path) -> No
         *pip, "install", "--no-index", "--find-links", str(wheelhouse),
         *metadata["build-system"]["requires"],
     ], source, env)
+    backend = metadata["build-system"]["build-backend"]
+    hook = (
+        "import importlib,subprocess,sys; "
+        "backend=importlib.import_module(sys.argv[1]); "
+        "requires=getattr(backend,'get_requires_for_build_editable',lambda:[])(); "
+        "print('Editable build requirements:',requires,flush=True); "
+        "subprocess.run([sys.executable,'-m','pip','install','--no-index',"
+        "'--find-links',sys.argv[2],*requires],check=True) if requires else None"
+    )
+    run_step(manifest, run, "editable-build-dependencies", [
+        python, "-c", hook, backend, str(wheelhouse),
+    ], source, env)
     run_step(manifest, run, "install-project", [
         *pip, "install", "--no-index", "--find-links", str(wheelhouse),
         "--no-build-isolation", "-e", ".[dev,docs]",

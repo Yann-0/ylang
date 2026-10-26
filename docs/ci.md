@@ -47,7 +47,8 @@ publishing, and deployment require their own approved scope.
 ## Dependency intake
 
 Prepare a reviewed set of wheels for the declared runtime, dev, docs, and build
-requirements on the server. Pin versions during intake. `wheels.json` maps every
+requirements on the server, including requirements returned by the build
+backend's editable-build hook (Hatchling currently requests editables~=0.3). Pin versions during intake. `wheels.json` maps every
 wheel basename to its SHA-256; extra, missing, changed, or symlinked wheels fail
 preflight. Keep the directory and manifest root-owned and read-only to CI.
 
