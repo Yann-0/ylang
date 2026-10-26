@@ -96,6 +96,20 @@ The mocked gateway load probe uses a separate temporary SQLite database per run
 and closes it before cleanup, including when setup fails. Concurrent probes do
 not share database files.
 
+### Package build
+
+Run from the repository root:
+
+```bash
+python -m pip wheel --no-deps --wheel-dir dist .
+```
+
+Hatchling includes console static files with `src/ylang`. Do not force-include
+that directory again: duplicate archive paths cause the wheel build to fail.
+Verify the wheel's metadata and assets, then install it in a separate environment
+and run a smoke check outside the source checkout. Passing source tests alone
+does not qualify the installed artifact.
+
 ### Running with coverage (optional)
 
 ```bash

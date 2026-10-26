@@ -62,9 +62,6 @@ ylang = "ylang.__main__:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/ylang"]
 
-[tool.hatch.build.targets.wheel.force-include]
-"src/ylang/console/static" = "ylang/console/static"
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
