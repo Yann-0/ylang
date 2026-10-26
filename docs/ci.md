@@ -31,12 +31,14 @@ controller files, dependency manifest, Python, Node, and kernel identities.
 
 The pipeline checks:
 
-- Offline installation from the wheelhouse and dependency consistency.
+- Editable source installation from the wheelhouse and dependency consistency.
+  Source tests retain their repository-fixture contract; the installed wheel is
+  checked independently.
 - `ruff check .`, `pyright`, and `pytest -m "not llm_e2e and not network"`.
 - `mkdocs build --strict` with retained site output.
 - Wheel build, duplicate-entry rejection, and inclusion of every tracked package file.
 - A fresh runtime-only venv installed from the wheel and offline dependencies.
-- Installed-package identity, MCP template/scoped-memory round trips, gateway
+- Installed-package identity and alias-policy equivalence, MCP template/scoped-memory round trips, gateway
   health/authentication, and packaged console assets.
 
 Live source contracts, Ollama smoke, paid evaluations, quality experiments,

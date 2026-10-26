@@ -14,6 +14,7 @@ from starlette.testclient import TestClient
 
 import ylang
 from ylang.core.engine import Engine
+from ylang.core.model_aliases import load_cursor_slug_aliases
 from ylang.core.stores import open_stores
 from ylang.gateway.routes import register_gateway_routes
 from ylang.improver import Improver
@@ -28,6 +29,7 @@ def main() -> None:
     origin = Path(ylang.__file__).resolve()
     assert origin.is_relative_to(Path(sys.prefix).resolve())
     assert ylang.__version__ == importlib.metadata.version("ylang") == sys.argv[1]
+    assert load_cursor_slug_aliases() == json.loads(Path(sys.argv[2]).read_text())
     stores = open_stores(Settings.load().resolved_storage_path())
     try:
         engine = Engine(stores.store, surface="ci-smoke")

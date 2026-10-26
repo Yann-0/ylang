@@ -160,7 +160,7 @@ def qualify(manifest: dict, run: Path, repository: Path, wheelhouse: Path) -> No
     ], source, env)
     run_step(manifest, run, "install-project", [
         *pip, "install", "--no-index", "--find-links", str(wheelhouse),
-        "--no-build-isolation", ".[dev,docs]",
+        "--no-build-isolation", "-e", ".[dev,docs]",
     ], source, env)
     run_step(manifest, run, "dependency-check", [*pip, "check"], source, env)
     run_step(manifest, run, "dependency-identity", [*pip, "list", "--format=json"], source, env)
@@ -210,7 +210,7 @@ def qualify(manifest: dict, run: Path, repository: Path, wheelhouse: Path) -> No
     ], smoke, env)
     run_step(manifest, run, "installed-smoke", [
         smoke_python, str(Path(__file__).with_name("ci_smoke.py").resolve()),
-        metadata["project"]["version"],
+        metadata["project"]["version"], str(source / "deploy/ylang.models.json"),
     ], smoke, env)
 
 
