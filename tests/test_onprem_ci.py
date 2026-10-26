@@ -75,7 +75,7 @@ def test_moving_or_multiple_refs_are_rejected(tmp_path: Path, value: str) -> Non
         controller().approved_commit(path)
 
 
-@pytest.mark.parametrize("change", ["tamper", "extra", "missing", "symlink"])
+@pytest.mark.parametrize("change", ["tamper", "extra", "missing", "symlink", "sdist", "zip", "directory"])
 def test_wheelhouse_changes_fail_closed(tmp_path: Path, change: str) -> None:
     """Dependency changes must be detected before a project command runs."""
     module = controller()
@@ -90,6 +90,12 @@ def test_wheelhouse_changes_fail_closed(tmp_path: Path, change: str) -> None:
         (tmp_path / "other.whl").write_bytes(b"extra")
     elif change == "missing":
         wheel.unlink()
+    elif change == "sdist":
+        (tmp_path / "fixture-2.tar.gz").write_bytes(b"unmanifested source")
+    elif change == "zip":
+        (tmp_path / "fixture-2.zip").write_bytes(b"unmanifested source")
+    elif change == "directory":
+        (tmp_path / "unmanifested-source").mkdir()
     else:
         target = tmp_path / "target"
         wheel.rename(target)

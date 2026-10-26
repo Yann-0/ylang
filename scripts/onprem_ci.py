@@ -45,11 +45,12 @@ def approved_commit(path: Path) -> str:
 
 def verify_wheelhouse(path: Path) -> str:
     """Reject missing, extra or changed wheels before executing project code."""
-    if (path / "wheels.json").is_symlink() or any(p.is_symlink() for p in path.glob("*.whl")):
-        raise ValueError("wheelhouse symlinks are not permitted")
+    entries = list(path.iterdir())
+    if any(p.is_symlink() or not p.is_file() for p in entries):
+        raise ValueError("wheelhouse entries must be regular files")
     expected = json.loads((path / "wheels.json").read_text())
-    actual = {p.name for p in path.glob("*.whl")}
-    if not expected or actual != set(expected):
+    actual = {p.name for p in entries}
+    if not expected or actual != set(expected) | {"wheels.json"}:
         raise ValueError("wheelhouse inventory mismatch")
     for name, checksum in expected.items():
         if Path(name).name != name or not name.endswith(".whl"):
