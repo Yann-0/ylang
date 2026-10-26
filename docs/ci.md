@@ -15,7 +15,7 @@ self-hosted runner as a substitute. The quickcards runner is unrelated.
 
 `scripts/onprem_ci.py` accepts a local bare mirror, an operator-owned file
 containing one full commit SHA, a verified offline wheelhouse, and a private runs
-directory. It never fetches a moving branch, calls a provider, refreshes sources,
+directory. Mirror ownership trust is scoped to the clone and its upload-pack\nsubprocess; no global Git trust entries are written. It never fetches a moving branch, calls a provider, refreshes sources,
 promotes prompts, publishes artifacts externally, or deploys Ylang.
 
 A nonblocking host lock serializes jobs. Each job gets its own checkout, venvs,

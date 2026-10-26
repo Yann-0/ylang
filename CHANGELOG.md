@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Cross-owner CI mirrors** — scope the exact mirror trust exception to upload-pack as well as the clone, so the dedicated account can read the root-owned mirror without global Git configuration changes.
 - **Wheel build** — remove redundant forced inclusion of console assets; Hatchling packages them with the source package without duplicate archive entries.
 - **Gateway load probe isolation** — mocked probes use a per-run temporary SQLite database and close it on failure; concurrent runs no longer share or delete a global file.
 

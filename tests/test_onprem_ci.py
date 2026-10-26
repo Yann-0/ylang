@@ -201,3 +201,36 @@ def test_fresh_python_blocks_network_and_external_sqlite(tmp_path: Path) -> None
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == ["network", "database"]
     assert not outside.exists()
+
+
+def test_cross_owner_mirror_trust_reaches_upload_pack(tmp_path: Path) -> None:
+    """Cross-owner cloning must work without persistent Git trust or hardlinks."""
+    module = controller()
+    fixture = tmp_path / "fixture"
+    fixture.mkdir()
+    subprocess.run(["git", "init", str(fixture)], check=True, capture_output=True)
+    (fixture / "README").write_text("synthetic mirror fixture")
+    subprocess.run(["git", "-C", str(fixture), "add", "README"], check=True)
+    subprocess.run([
+        "git", "-C", str(fixture), "-c", "user.name=CI Fixture",
+        "-c", "user.email=ci-fixture@example.invalid", "commit", "-m", "fixture",
+    ], check=True, capture_output=True)
+    mirror = tmp_path / "mirror.git"
+    subprocess.run(["git", "clone", "--bare", str(fixture), str(mirror)], check=True, capture_output=True)
+    checkout = tmp_path / "checkout"
+    environment = {
+        **os.environ, "HOME": str(tmp_path), "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TEST_ASSUME_DIFFERENT_OWNER": "true",
+    }
+    result = subprocess.run(
+        module.local_clone_command(mirror, checkout),
+        env=environment, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    source_objects = [p for p in (mirror / "objects").glob("*/*") if p.is_file()]
+    assert source_objects
+    for original in source_objects:
+        copied = checkout / ".git/objects" / original.relative_to(mirror / "objects")
+        assert copied.read_bytes() == original.read_bytes()
+        assert copied.stat().st_ino != original.stat().st_ino
+    assert not (tmp_path / ".gitconfig").exists()

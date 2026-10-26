@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import shlex
 import signal
 import socket
 import subprocess
@@ -136,14 +137,24 @@ def private_environment(run: Path, wheelhouse: Path) -> dict[str, str]:
     }
 
 
+
+def local_clone_command(repository: Path, source: Path) -> list[str]:
+    """Trust only this local mirror inside Git's upload-pack subprocess."""
+    upload_pack = shlex.join([
+        "/usr/bin/git", "-c", f"safe.directory={repository}", "upload-pack",
+    ])
+    return [
+        "git", "-c", f"safe.directory={repository}", "clone",
+        "--no-hardlinks", "--no-checkout", "--upload-pack=" + upload_pack,
+        str(repository), str(source),
+    ]
+
+
 def qualify(manifest: dict, run: Path, repository: Path, wheelhouse: Path) -> None:
     """Build, test and install one immutable source tree without network access."""
     env = private_environment(run, wheelhouse)
     source = run / "source"
-    run_step(manifest, run, "checkout-clone", [
-        "git", "-c", f"safe.directory={repository}", "clone",
-        "--no-hardlinks", "--no-checkout", str(repository), str(source),
-    ], run, env)
+    run_step(manifest, run, "checkout-clone", local_clone_command(repository, source), run, env)
     run_step(manifest, run, "checkout-commit", [
         "git", "checkout", "--detach", manifest["commit"],
     ], source, env)
