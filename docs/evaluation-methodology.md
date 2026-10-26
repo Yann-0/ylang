@@ -1,6 +1,6 @@
 # Evaluation methodology
 
-Ylang separates **inspection**, **observational trends**, and **controlled
+Ylang separates **inspection**, **observational trends**, and **simulated
 execution**. A working runner does not prove a prompt is better.
 
 ## Modes
@@ -8,11 +8,11 @@ execution**. A working runner does not prove a prompt is better.
 | Mode | Command | Paid calls | Evidence class | What it stores |
 |------|---------|------------|----------------|----------------|
 | Inspect | `ylang prompts candidates evaluate ID` (default) | none | observational | static risk/quality, body diff, all-time usage trend labeled mixed/unknown, inactive experiment `traffic_pct=0` |
-| Execute simulated | `--mode execute --simulated --fixture-file PATH --vs TEMPLATE` | none | simulated | baseline and candidate outputs from `SimulatedCompleter` |
-| Execute paid | `--mode execute --authorize-paid --budget-usd N --model MODEL --fixture-file PATH --vs TEMPLATE` | yes, capped | controlled | actual Engine outputs, tokens, cost, latency, errors |
+| Execute simulated | `--mode execute --simulated --fixture-file PATH --vs TEMPLATE` | none | simulated | baseline and candidate outputs from the built-in `SimulatedCompleter` |
+| Execute paid (unavailable) | `--mode execute --authorize-paid --budget-usd N` | none: refused before dispatch | no executed run | authorization and budget validation errors |
 
-Portal **Inspect vs current (no LLM)** is inspect only. Paid execute is CLI-only
-so a previously safe inspection control cannot become a paid operation.
+Portal **Inspect vs current (no LLM)** is inspect only. Its safe inspection
+control cannot become a paid operation.
 
 ## Authorization and budget
 
@@ -22,12 +22,46 @@ Defaults:
 - `--budget-usd` = `0`
 - `--authorize-paid` = off
 
-Paid execute is refused unless both `--authorize-paid` and `--budget-usd > 0`
-are set. Spend is tracked on Engine `cost`; exceeding the budget aborts.
-Execute never passes `tools` and never promotes.
+Paid authorization and a **finite positive** budget are necessary but are not
+an enforceable spending bound. The current Engine has no per-attempt cost-bound
+and shared reservation contract. Paid evaluation is therefore **unavailable**,
+even with valid authorization and budget flags, and fails before invoking the
+completer. NaN, infinity, zero, and negative paid budgets are rejected.
 
-Private history is not replayed. Only operator-supplied `--fixture-file` text
-is sent in execute mode.
+A simulated flag cannot bypass this gate with an Engine-shaped or custom
+completer. Simulated execution accepts only the built-in local
+`SimulatedCompleter`. It never grants tools or promotes a candidate.
+
+Private history is not replayed. Simulation uses only the operator-supplied
+`--fixture-file` text. The built-in simulator makes no provider requests.
+
+Atomic reservations against both evaluation and shared daily budgets, enforced
+output limits, and complete per-attempt accounting remain future gates before
+paid evaluation can be enabled. The existing daily routing budget meter and
+fallback diagnostics do not establish those guarantees.
+
+## Execution evidence
+
+Each attempted simulated run retains per-arm `success`, actual `model_used`,
+`trace_id` when supplied, tokens, cost, latency, normalized error, and raw
+reported error in `evaluator_json.arms`. The top-level `model` remains the
+requested model; it does not replace actual response identities. Unavailable
+effective generation settings and trace identifiers remain unknown.
+
+Explicit completion success determines the operational status. A failed
+completion with empty error text remains a failure; an empty output does not
+erase its status. Successful Engine fallback clears the terminal error while
+preserving earlier failures in fallback diagnostics.
+
+An authorization abort after an arm was invoked saves partial evidence before
+raising an error containing the saved run ID. Unattempted arms stay distinct
+from attempted failures. Preflight refusals make no completion call.
+
+`both_completed` describes an operational outcome, not a valid quality
+comparison. Simulated runs always record `comparison_valid=false` and the
+`simulated_execution` confounder. Different actual response models additionally
+record `model_mismatch`. Real comparisons will also need verified effective
+generation settings and accounting for fallback/cache differences.
 
 ## Attribution
 
@@ -54,13 +88,14 @@ Inspect reports may still show an all-time observational trend, labeled
 
 ## Verdicts
 
-Execute evaluator JSON always includes:
+Execute evaluator JSON includes:
 
 ```json
 {
   "verdict": "both_completed | baseline_error | candidate_error | both_error | inconclusive",
   "quality_claim": false,
   "quality_improvement_demonstrated": false,
+  "comparison_valid": false,
   "tools_granted": false,
   "promoted": false
 }
@@ -74,11 +109,12 @@ Inconclusive is a valid outcome.
 - Historical improver events often omit version (`bare id`); those rows stay
   unknown. New events write `id@version` going forward — this does **not**
   prove quality improvement by itself.
-- Controlled execute uses the operator fixture, not the operator's private
-  production distribution.
+- Fixtures are operator supplied and do not represent private production
+  traffic.
 - No LLM-as-judge. No automatic promotion from any verdict.
-- Live provider quality is **not** demonstrated by CI. CI uses fixtures and a
-  simulated completer.
+- Live provider execution and quality improvement are **not** demonstrated by
+  CI or by the simulator.
+- This patch does not add shared budget reservations or an attempt ledger.
 
 ## Related
 

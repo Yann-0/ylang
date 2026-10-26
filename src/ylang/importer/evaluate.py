@@ -1,8 +1,9 @@
-"""Candidate evaluation: static inspect vs bounded Engine execution."""
+"""Candidate evaluation: static inspection and local simulated execution."""
 
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -543,23 +544,35 @@ def execute_candidate_evaluation(
     model: str | None = None,
     simulated: bool = False,
 ) -> EvaluationRun:
-    """Run baseline and candidate on matched fixtures through the Engine.
+    """Record local simulated arms; refuse paid execution without enforceable bounds.
 
-    Default paid budget is zero. Paid execution requires ``authorize_paid`` and
-    ``budget_usd > 0``. Simulated execution proves mechanics only. Tools are
-    never granted. This does not promote the candidate.
+    Authorization and a finite positive budget are necessary but cannot bound a
+    provider request. Until Engine exposes cost bounds and shared reservations,
+    paid execution fails before dispatch. Simulation accepts only the built-in
+    local completer and never establishes a quality comparison.
     """
     if not fixtures:
         raise EvaluationAuthorizationError(
             "execute requires operator-supplied --fixture-file inputs"
         )
-    if not simulated and not authorize_paid:
+    if not simulated:
+        if not authorize_paid:
+            raise EvaluationAuthorizationError(
+                "execute requires --authorize-paid; default evaluate is inspect (zero paid calls)"
+            )
+        if not math.isfinite(budget_usd) or budget_usd <= 0:
+            raise EvaluationAuthorizationError(
+                "execute requires a finite --budget-usd > 0; default budget is 0"
+            )
         raise EvaluationAuthorizationError(
-            "execute requires --authorize-paid; default evaluate is inspect (zero paid calls)"
+            "Paid evaluation is unavailable until Engine provides enforceable "
+            "per-attempt cost bounds and shared budget reservations. "
+            "Use inspect or --simulated; no completion was dispatched."
         )
-    if not simulated and budget_usd <= 0:
+    if type(completer) is not SimulatedCompleter:
         raise EvaluationAuthorizationError(
-            "execute requires --budget-usd > 0; default budget is 0"
+            "Simulated execution requires the built-in local SimulatedCompleter; "
+            "a simulated flag cannot authorize another completer."
         )
     current_id = vs_template_id or item.duplicate_template_id or item.linked_template_id
     current_template = library.recall(current_id) if current_id else None
@@ -567,72 +580,56 @@ def execute_candidate_evaluation(
         raise EvaluationAuthorizationError(
             "execute requires a current template (--vs TEMPLATE); inspect remains available"
         )
-    fixture_blob = "\n---\n".join(fixtures)
-    fixture_hash = sha256_text(fixture_blob)
-    cost = 0.0
-    baseline_outputs: list[str] = []
-    candidate_outputs: list[str] = []
-    baseline_error: str | None = None
-    candidate_error: str | None = None
-    baseline_latency = 0
-    candidate_latency = 0
-    baseline_prompt = 0
-    candidate_prompt = 0
-    baseline_completion = 0
-    candidate_completion = 0
-    activity = "improve"
 
-    def _run(body: str, *, version: int | None, label: str) -> CompletionResult:
-        nonlocal cost
-        if cost > budget_usd and not simulated:
-            raise EvaluationAuthorizationError(
-                f"budget exhausted before {label} (spent ${cost:.4f} of ${budget_usd:.4f})"
-            )
+    fixture_blob = "\n---\n".join(fixtures)
+    results: dict[str, CompletionResult | None] = {"baseline": None, "candidate": None}
+    errors: dict[str, str | None] = {"baseline": None, "candidate": None}
+    attempted: set[str] = set()
+    aborted: EvaluationAuthorizationError | None = None
+    for label, body, version in (
+        ("baseline", current_template.body, current_template.version),
+        ("candidate", item.body, None),
+    ):
         messages: list[Message] = [
             {"role": "system", "content": body},
             {"role": "user", "content": fixture_blob},
         ]
-        result = completer.complete(
-            messages,
-            activity,
-            model=model,
-            tools=None,
-            template_version=version,
-        )
-        cost += result.cost
-        if not simulated and cost > budget_usd:
-            raise EvaluationAuthorizationError(
-                f"budget exceeded during {label} (spent ${cost:.4f} of ${budget_usd:.4f})"
+        attempted.add(label)
+        try:
+            result = completer.complete(
+                messages, "improve", model=model, tools=None, template_version=version,
             )
-        return result
+            results[label] = result
+            if not result.success:
+                errors[label] = result.error or "completion_failed"
+        except EvaluationAuthorizationError as exc:
+            errors[label] = str(exc) or type(exc).__name__
+            aborted = exc
+            break
+        except Exception as exc:  # noqa: BLE001 — persist failed arm evidence
+            errors[label] = str(exc) or type(exc).__name__
 
-    try:
-        base = _run(current_template.body, version=current_template.version, label="baseline")
-        baseline_outputs.append(base.content)
-        baseline_error = base.error
-        baseline_latency = base.latency_ms
-        baseline_prompt = base.prompt_tokens
-        baseline_completion = base.completion_tokens
-    except EvaluationAuthorizationError:
-        raise
-    except Exception as exc:  # noqa: BLE001 — capture provider failures as evidence
-        baseline_error = str(exc)
+    def arm_evidence(label: str) -> dict[str, Any]:
+        """Retain actual response identity and distinguish failures from unattempted arms."""
+        result = results[label]
+        return {
+            "attempted": label in attempted,
+            "success": result.success if result is not None else (
+                False if label in attempted else None
+            ),
+            "model_used": result.model_used if result is not None else None,
+            "trace_id": result.trace_id if result is not None else None,
+            "cost_usd": result.cost if result is not None else None,
+            "latency_ms": result.latency_ms if result is not None else None,
+            "prompt_tokens": result.prompt_tokens if result is not None else None,
+            "completion_tokens": result.completion_tokens if result is not None else None,
+            "error": errors[label],
+            "reported_error": result.error if result is not None else None,
+            "effective_generation_settings": None,
+        }
 
-    try:
-        cand = _run(item.body, version=None, label="candidate")
-        candidate_outputs.append(cand.content)
-        candidate_error = cand.error
-        candidate_latency = cand.latency_ms
-        candidate_prompt = cand.prompt_tokens
-        candidate_completion = cand.completion_tokens
-    except EvaluationAuthorizationError:
-        raise
-    except Exception as exc:  # noqa: BLE001 — capture provider failures as evidence
-        candidate_error = str(exc)
-
-    evidence: Literal["controlled", "simulated"] = (
-        "simulated" if simulated else "controlled"
-    )
+    base, candidate = results["baseline"], results["candidate"]
+    baseline_error, candidate_error = errors["baseline"], errors["candidate"]
     verdict = "inconclusive"
     if baseline_error and candidate_error:
         verdict = "both_error"
@@ -640,57 +637,69 @@ def execute_candidate_evaluation(
         verdict = "baseline_error"
     elif candidate_error:
         verdict = "candidate_error"
-    elif baseline_outputs and candidate_outputs:
+    elif base is not None and candidate is not None and base.success and candidate.success:
         verdict = "both_completed"
+    confounders = ["simulated_execution"]
+    if base is not None and candidate is not None:
+        if not base.model_used or not candidate.model_used:
+            confounders.append("unknown_actual_model")
+        elif base.model_used != candidate.model_used:
+            confounders.append("model_mismatch")
+    if aborted is not None:
+        confounders.append("aborted_execution")
     evaluator = {
         "verdict": verdict,
         "quality_claim": False,
         "quality_improvement_demonstrated": False,
+        "comparison_valid": False,
+        "comparison_scope": "simulated_mechanics_only",
+        "confounders": confounders,
+        "arms": {label: arm_evidence(label) for label in results},
+        "aborted": aborted is not None,
+        "abort_reason": str(aborted) if aborted is not None else None,
         "note": (
-            "Completion-without-error is not success. A working runner does not "
-            "prove a prompt is better. Simulated results prove mechanics only."
+            "Completion-without-error is not success. Simulated results prove "
+            "mechanics only, not provider execution or prompt quality."
         ),
         "fixture_count": len(fixtures),
         "model": model,
         "tools_granted": False,
         "promoted": False,
     }
-    note = (
-        "Bounded Engine execution on operator fixtures. Candidate was not promoted "
-        "and was not granted tools. "
-        + (
-            "Simulated provider: mechanics only, not prompt quality."
-            if simulated
-            else "Controlled comparative evidence; not an automatic promotion."
-        )
-    )
     run = EvaluationRun(
         run_id=str(uuid.uuid4()),
         item_id=item.item_id,
         mode="execute",
-        evidence_class=evidence,
+        evidence_class="simulated",
         vs_template_id=current_id,
         vs_template_version=current_template.version,
         vs_content_hash=content_hash(current_template.body),
         candidate_content_hash=item.content_hash,
-        model=model or ("simulated/local" if simulated else None),
-        authorized=authorize_paid or simulated,
-        budget_usd=0.0 if simulated else budget_usd,
-        cost_usd=cost,
-        baseline_output="\n".join(baseline_outputs) or None,
-        candidate_output="\n".join(candidate_outputs) or None,
+        model=model or "simulated/local",
+        authorized=True,
+        budget_usd=0.0,
+        cost_usd=sum(result.cost for result in results.values() if result is not None),
+        baseline_output=base.content if base is not None else None,
+        candidate_output=candidate.content if candidate is not None else None,
         baseline_error=baseline_error,
         candidate_error=candidate_error,
-        baseline_latency_ms=baseline_latency or None,
-        candidate_latency_ms=candidate_latency or None,
-        baseline_prompt_tokens=baseline_prompt or None,
-        candidate_prompt_tokens=candidate_prompt or None,
-        baseline_completion_tokens=baseline_completion or None,
-        candidate_completion_tokens=candidate_completion or None,
+        baseline_latency_ms=base.latency_ms if base is not None else None,
+        candidate_latency_ms=candidate.latency_ms if candidate is not None else None,
+        baseline_prompt_tokens=base.prompt_tokens if base is not None else None,
+        candidate_prompt_tokens=candidate.prompt_tokens if candidate is not None else None,
+        baseline_completion_tokens=base.completion_tokens if base is not None else None,
+        candidate_completion_tokens=candidate.completion_tokens if candidate is not None else None,
         evaluator_json=json.dumps(evaluator, sort_keys=True),
-        fixture_hash=fixture_hash,
+        fixture_hash=sha256_text(fixture_blob),
         created_at=utcnow_iso(),
-        note=note,
+        note=(
+            "Built-in simulated execution on operator fixtures. Mechanics only; "
+            "no prompt quality claim, promotion or tools. Paid execution is unavailable."
+        ),
     )
     source_store.save_evaluation_run(run)
+    if aborted is not None:
+        raise EvaluationAuthorizationError(
+            f"{aborted}; evidence saved as evaluation run {run.run_id}"
+        ) from aborted
     return run

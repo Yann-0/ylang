@@ -263,6 +263,8 @@ class Engine:
                     tool_choice=tool_choice,
                 )
                 success = True
+                error = None
+                last_exc = None
                 attempt_index = index
                 break
             except Exception as exc:

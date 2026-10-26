@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import litellm
@@ -65,6 +66,14 @@ def test_complete_fallback_on_rate_limit(engine: Engine) -> None:
 
     assert result.success is True
     assert result.content == "fallback-ok"
+    assert result.error is None
+    rows = engine.store.recall_usage(UsageWindow.last_hours(1))
+    assert len(rows) == 1 and rows[0].success is True
+    assert rows[0].error_class is None
+    assert rows[0].fallback_events_json
+    events = json.loads(rows[0].fallback_events_json)
+    assert events[0]["from"] == "openai/gpt-4o"
+    assert events[0]["to"] == "ollama/qwen2.5"
     assert calls[0] == "openai/gpt-4o"
     assert "ollama/qwen2.5" in calls
 

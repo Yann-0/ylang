@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Evaluation execution safety** — refuse paid evaluation before dispatch until enforceable cost bounds and shared reservations exist; reject nonfinite budgets and prevent a simulated flag from dispatching another completer.
+- **Evaluation evidence** — retain per-arm actual model/trace identities and explicit success, preserve partial aborted runs and zero metrics, and mark simulated/model-mismatched comparisons as unqualified.
+- **Fallback terminal status** — successful completion clears a prior attempt error while retaining fallback diagnostics.
 - **Offline dependency inventory** — reject unmanifested source archives and directories as well as unexpected wheels before pip receives the wheelhouse.
 - **Cross-owner CI mirrors** — scope the exact mirror trust exception to upload-pack as well as the clone, so the dedicated account can read the root-owned mirror without global Git configuration changes.
 - **Wheel build** — remove redundant forced inclusion of console assets; Hatchling packages them with the source package without duplicate archive entries.
@@ -25,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CI controller migration candidate** — remove GitHub-hosted workflow definitions, correct clone-root setup examples, and supersede automatic cloud documentation publishing instructions. No live service or GitHub settings changed.
 - **Prompt intelligence fail-closed** — unknown/missing license policy blocks scheduled ingest; truncated trees and partial downloads preserve last-known-good; refreshes are serialized and honor per-source intervals
 - **Live source honesty** — `github-awesome-copilot` is incompatible as of 2026-09-13 (no `*.prompt.md`); agents/skills are not converted into ordinary prompts and the source cannot be enabled
-- **Evaluate default stays inspect** — zero paid calls; `--mode execute` requires `--authorize-paid` and `--budget-usd > 0` (or `--simulated`); Portal button is inspect-only
+- **Evaluate default stays inspect** — zero paid calls; only built-in `--simulated` execution is currently available. Paid execution remains unavailable until enforceable bounds exist; Portal is inspect-only
 - **Outcome attribution** — post-promotion metrics use exact template version and observation window; unversioned events stay unknown; observational trends are labeled separately from controlled execute evidence
 
 ## [0.7.0] - 2026-09-12
