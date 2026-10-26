@@ -12,7 +12,7 @@ If you use **both Windows and WSL** on the same clone, create the venv in the en
 
 ```bash
 git clone https://github.com/Yann-0/ylang.git
-cd ylang/app
+cd ylang
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -24,7 +24,7 @@ On Ubuntu/Debian, `python3` is the default interpreter. Optionally install `pyth
 
 ```powershell
 git clone https://github.com/Yann-0/ylang.git
-cd ylang/app
+cd ylang
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
@@ -65,12 +65,12 @@ Use `--non-interactive` to skip prompts and rely on existing environment variabl
 
 ## CLI (`ylang` command)
 
-`pip install -e .` installs a **`ylang`** console script into the active venv (`app/.venv/bin/ylang`). It is **not** on your shell `PATH` until you activate the venv or use a wrapper.
+`pip install -e .` installs a **`ylang`** console script into the active venv (`.venv/bin/ylang`). It is **not** on your shell `PATH` until you activate the venv or use a wrapper.
 
-### From `app/` (development)
+### From the repository root (development)
 
 ```bash
-cd app
+cd ylang   # the clone root containing pyproject.toml
 source .venv/bin/activate
 ylang usage digest --last-days 7
 ylang patterns apply --help
@@ -79,7 +79,7 @@ ylang patterns apply --help
 Same without activation:
 
 ```bash
-app/.venv/bin/ylang usage digest --last-days 7
+.venv/bin/ylang usage digest --last-days 7
 ```
 
 ### Workspace layout (`/srv/ylang`)

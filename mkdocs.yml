@@ -72,7 +72,8 @@ nav:
   - Cursor integration: cursor-integration.md
   - Gateway: gateway.md
   - Deployment: deployment.md
-  - Publishing (GitHub Pages): publishing.md
+  - Publishing: publishing.md
+  - On-prem CI: ci.md
   - Development: development.md
   - Database schema: database-schema.md
   - Prompt intelligence:

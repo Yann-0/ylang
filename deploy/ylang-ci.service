@@ -1,0 +1,38 @@
+[Unit]
+Description=Ylang offline qualification controller
+Documentation=file:/usr/local/share/doc/ylang/ci.md
+
+[Service]
+Type=oneshot
+User=ylang-ci
+Group=ylang-ci
+ExecStart=/usr/bin/python3 /usr/local/libexec/ylang-ci/onprem_ci.py --repository /var/lib/ylang-ci/repository.git --approved-commit-file /etc/ylang-ci/approved-commit --wheelhouse /var/cache/ylang-ci/wheels --runs-dir /var/lib/ylang-ci/runs
+TimeoutStartSec=30min
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+PrivateDevices=true
+PrivateNetwork=true
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+RestrictNamespaces=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadOnlyPaths=/etc/ylang-ci /var/cache/ylang-ci/wheels /var/lib/ylang-ci/repository.git
+ReadWritePaths=/var/lib/ylang-ci/runs
+InaccessiblePaths=-/srv/ylang/data -/srv/ylang/ylang.env -/srv/ylang/.venv -/srv/ylang/app
+CPUQuota=400%
+MemoryMax=6G
+TasksMax=256
+Nice=10
+IOSchedulingClass=idle
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ylang-ci

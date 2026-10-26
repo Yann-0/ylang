@@ -21,7 +21,7 @@ All data stays on your machine unless you send it to an LLM provider you configu
 
 ```bash
 git clone https://github.com/Yann-0/ylang.git
-cd ylang/app          # repository root is the app/ directory
+cd ylang              # repository root contains pyproject.toml
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .
 
@@ -49,8 +49,9 @@ Published docs (GitHub Pages): **https://yann-0.github.io/ylang/**
 - Configuration: https://yann-0.github.io/ylang/configuration/
 - Portal: https://yann-0.github.io/ylang/portal/
 
-Enable Pages (Actions source) once; every push to `main` that touches `docs/`
-rebuilds the site. See [docs/publishing.md](docs/publishing.md).
+Documentation builds and qualification run on stelsrv-d001. Cloud workflow
+retirement and local scheduler activation require separate approval. See
+[on-prem CI](docs/ci.md) and [publishing](docs/publishing.md).
 
 ## Documentation
 

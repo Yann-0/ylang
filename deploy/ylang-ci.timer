@@ -1,0 +1,11 @@
+[Unit]
+Description=Schedule Ylang qualification on this host
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+Unit=ylang-ci.service
+
+[Install]
+WantedBy=timers.target

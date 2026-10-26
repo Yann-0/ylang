@@ -1,71 +1,42 @@
-# Publishing documentation (GitHub Pages)
+# Publishing documentation
 
-Operator docs are a **MkDocs Material** site. After they land on `main`, GitHub
-Actions builds and publishes them to:
+Documentation is built and qualified on **stelsrv-d001** by the
+[on-prem pipeline](ci.md). The candidate migration removes the GitHub Actions
+Pages workflow. Administrator disablement of existing cloud workflows is a
+separate approval and must precede any push that could trigger them.
 
-**https://yann-0.github.io/ylang/**
+The historical public site is <https://yann-0.github.io/ylang/>. Its existence
+does not prove that current source has been built or published. The former
+automatic GitHub Actions build/deploy instructions are superseded.
 
-Repository: [Yann-0/ylang](https://github.com/Yann-0/ylang) (git root is the
-`app/` tree).
+## Build and preview
 
-## What gets published
-
-| Path | On the site |
-|------|-------------|
-| `docs/*.md` | Pages listed in `mkdocs.yml` `nav` |
-| `docs/images/console/*.png` | Portal screenshots (this folder must be committed) |
-| `mkdocs.yml` | Theme, nav, `site_url` |
-
-Nav-omitted historical files (`audit-and-roadmap.md`, `backlog*.md`,
-`dead-code.md`) stay in git but are **not** in the sidebar. `mkdocs build
---strict` still succeeds (`omitted_files: info`).
-
-## Local preview
+Run these commands only in an approved isolated server workspace, from the
+repository root containing `pyproject.toml` and `mkdocs.yml`:
 
 ```bash
-cd app   # or the Yann-0/ylang clone root
 pip install -e ".[docs]"
-mkdocs serve          # http://127.0.0.1:8000
 mkdocs build --strict
+mkdocs serve
 ```
 
-## CI workflow
+The controller instead installs from its reviewed offline wheelhouse and writes
+the built site into that run's artifacts directory. Its manifest retains the
+source commit, dependency identity, command, exit code, and timestamp.
 
-[`.github/workflows/pages.yml`](https://github.com/Yann-0/ylang/blob/main/.github/workflows/pages.yml):
+## Publication approval
 
-1. Trigger: push to `main` that touches `docs/**`, `mkdocs.yml`, `README.md`,
-   `pyproject.toml`, or the workflow file; also **Run workflow**
-   (`workflow_dispatch`).
-2. `pip install -e ".[docs]"` then `mkdocs build --strict`.
-3. Upload `site/` and deploy with `actions/deploy-pages`.
+A passing docs build produces a local site artifact. Publishing it to any host,
+pushing a Pages branch, or changing hosting configuration requires separate
+approval. Do not reintroduce an Actions controller or cloud build scheduler.
 
-GitHub repo settings required once (repo admin):
+Keep screenshots in `docs/images/console/`. Screenshot capture against a live
+service requires its own approved scope; the qualification pipeline does not
+capture private prompts, tokens, or production screens.
 
-- **Settings → Pages → Source:** GitHub Actions
-- Workflow permission: `pages: write` and `id-token: write` (already in the YAML)
+## Historical navigation and validation
 
-Until Pages is enabled, the `deploy` job stays yellow/failed even if `build`
-is green.
-
-## Screenshots
-
-Portal PNGs are **not** generated in CI (no live Ylang + token). Capture on a
-running HTTP instance before you commit:
-
-```bash
-python scripts/capture-console-screenshots.py
-git add docs/images/console/*.png
-```
-
-Do not commit screenshots that show secrets, full prompt bodies, or Bearer
-tokens. Login captures use an empty token field.
-
-## After merge
-
-1. Push (or merge) to `main`.
-2. Wait for the **Docs** workflow (Actions tab).
-3. Open https://yann-0.github.io/ylang/ — Portal:
-   https://yann-0.github.io/ylang/portal/
-   Configuration: https://yann-0.github.io/ylang/configuration/
-
-CDN/cache can lag a minute. Hard-refresh if an old nav appears.
+Nav-omitted audit/closure files remain historical evidence. MkDocs currently
+labels omitted files as informational and ignores several link-validation
+categories. A strict successful build does not establish that every historical
+link works.

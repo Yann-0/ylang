@@ -6,7 +6,7 @@ Guide for contributors and maintainers working on the Ylang codebase.
 
 ```bash
 git clone https://github.com/Yann-0/ylang.git
-cd ylang/app
+cd ylang
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
@@ -64,9 +64,15 @@ pytest -q -m "not llm_e2e"
 OLLAMA_HOST=http://localhost:11434 pytest -q -m llm_e2e
 ```
 
-### Nightly LLM e2e CI
+### On-prem qualification
 
-[`.github/workflows/llm-e2e.yml`](../.github/workflows/llm-e2e.yml) runs on a daily schedule (03:00 UTC) and via `workflow_dispatch`. It installs Ollama, pulls `qwen2.5`, and runs `pytest -m llm_e2e`. The job uses `continue-on-error: true` so a missing local Ollama setup does not block merges.
+[On-prem CI](ci.md) defines the local controller, scheduler templates, isolation,
+required checks, retained evidence, and staged activation approvals. The
+candidate removes the former GitHub-hosted workflows. Live GitHub workflow
+disablement requires separate approval.
+
+Live Ollama smoke is outside the default pipeline and requires an approved
+separate run. A missing model or skipped smoke does not qualify LLM execution.
 
 ### Fixtures (`tests/conftest.py`)
 
