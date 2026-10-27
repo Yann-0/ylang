@@ -79,7 +79,6 @@ class PreparedAttempt:
 
     def messages(self) -> list[Message]:
         """Return a fresh message copy, preserving the immutable serialized request."""
-        self.validate()
         return json.loads(self.wire_json)["messages"]
 
 

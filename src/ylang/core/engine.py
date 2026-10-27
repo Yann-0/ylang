@@ -454,8 +454,7 @@ class Engine:
                 else:
                     if tools is not None or tool_choice is not None or response_format is not None:
                         raise BudgetRefused("paid tools and response formats are not bounded")
-                    max_output = getattr(self._base_settings, "hard_budget_max_output_tokens", 512)
-                    prepared = self.prepare_bounded(candidate, messages, max_output_tokens=max_output)
+                    prepared = self.prepare_bounded(candidate, messages)
                     with self._ledger() as ledger:
                         reservation = ledger.reserve_many([prepared.quote], request_id=budget_request_id)[0]
                     budget_request_id = reservation.request_id

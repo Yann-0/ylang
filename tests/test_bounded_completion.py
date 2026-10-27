@@ -295,3 +295,55 @@ def test_reported_breach_takes_precedence_over_other_invalid_response_fields(tmp
     assert row["state"] == "BREACH" and row["actual_cost_nanos"] == 21_000_000
     assert not engine.complete(MESSAGES, "code").success
     assert len(adapter.calls) == 1
+
+
+def test_regular_completion_uses_hot_reloaded_output_ceiling(tmp_path: Path) -> None:
+    """A valid runtime ceiling changes ordinary dispatch instead of causing a stale-limit refusal."""
+    from ylang.core.runtime_settings import RuntimeSettingsStore
+    from ylang.settings import Settings
+
+    adapter = OfflineAdapter()
+    store = open_store(tmp_path / "output-limit.db")
+    initialize_budget(store)
+    settings = Settings(provider_keys=ProviderKeys(openai="fixture-key"),
+                        activity_model_lists={"code": [MODEL]},
+                        hard_budget_max_output_tokens=128)
+    engine = Engine(store, surface="test", base_settings=settings, bounded_adapters={MODEL: adapter})
+    RuntimeSettingsStore(store._connection).set("hard_budget_max_output_tokens", "64")
+    try:
+        result = engine.complete(MESSAGES, "code", model=MODEL)
+        assert result.success
+        assert adapter.calls[0].quote.max_output_tokens == 64
+    finally:
+        store.close()
+
+
+def test_quote_expiring_after_dispatch_does_not_discard_settled_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Expiry gates admission; reading the completed immutable request must not reauthorize it."""
+    from datetime import datetime, timedelta, timezone
+    import ylang.core.bounded_completion as bounded
+
+    class LaterClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(timezone.utc) + timedelta(hours=2)
+
+    adapter = OfflineAdapter()
+    engine = engine_at(tmp_path, adapter)
+    prepared = engine.prepare_bounded(MODEL, MESSAGES)
+    reservations = engine.reserve_bounded_pair((prepared, prepared), scope_limit_nanos=40_000_000,
+                                               metadata=({}, {}))
+    execute = adapter.execute
+    def finish_after_expiry(request):
+        monkeypatch.setattr(bounded, "datetime", LaterClock)
+        return execute(request)
+    monkeypatch.setattr(adapter, "execute", finish_after_expiry)
+    try:
+        result = engine.complete_prepared(prepared, reservations[0], activity="code")
+        assert result.success and result.content == "hello"
+        assert engine.bounded_attempt_evidence(reservations[0])["state"] == "SETTLED"
+        engine.cancel_bounded(reservations[1])
+    finally:
+        engine.store.close()
