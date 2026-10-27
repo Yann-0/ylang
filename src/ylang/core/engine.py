@@ -18,7 +18,7 @@ from litellm.caching.caching import Cache
 
 from ylang.core.bounded_completion import (
     BoundedEvidenceError, BoundedFailure, BoundedResponse, PreparedAttempt, SyntheticBoundedAdapter,
-    configuration, is_known_local_model, text_messages,
+    ProviderContractViolation, configuration, is_known_local_model, text_messages,
 )
 from ylang.core.model_router import ModelRouter
 from ylang.core.routing_reason import routing_reason_json
@@ -126,9 +126,13 @@ class Engine:
         """
         self._store = store
         self._bounded_adapters = dict(bounded_adapters or {})
+        from ylang.core.provider_adapters import NativeProviderAdapter
+
         for adapter in self._bounded_adapters.values():
+            if type(adapter) is NativeProviderAdapter:
+                continue
             if adapter.synthetic is not True or not adapter.adapter_id.startswith("synthetic:"):
-                raise BudgetRefused("only trusted in-process synthetic adapters supported")
+                raise BudgetRefused("only trusted synthetic or registered native adapters supported")
         if budget_store is not None and budget_store.database_path.resolve() != store.database_path:
             raise BudgetRefused("budget store must share the canonical usage database")
         self._budget_store = budget_store
@@ -185,6 +189,7 @@ class Engine:
     ) -> Engine:
         """Build an engine from a loaded Settings instance."""
         from ylang.telemetry.export import exporter_from_settings
+        from ylang.core.provider_adapters import build_provider_adapters
 
         return cls(
             store,
@@ -193,6 +198,7 @@ class Engine:
             base_settings=settings,
             capture_level=settings.capture_level,
             telemetry=exporter_from_settings(settings),
+            bounded_adapters=build_provider_adapters(settings),
         )
 
     def _refresh_routing(self) -> None:
@@ -235,6 +241,7 @@ class Engine:
 
     def prepare_bounded(
         self, model: str, messages: list[Message], *, max_output_tokens: int | None = None,
+        response_format: dict[str, str] | None = None,
     ) -> PreparedAttempt:
         """Refuse unregistered providers before any transport and freeze the request."""
         self._refresh_routing()
@@ -245,12 +252,23 @@ class Engine:
         adapter = self._bounded_adapters.get(model)
         if adapter is None:
             raise BudgetRefused("paid model has no certified bounded adapter")
-        configuration(max_output_tokens)
+        from ylang.core.provider_adapters import NativeProviderAdapter
+
+        configuration(max_output_tokens, response_format)
         original_messages = text_messages(messages)
-        prepared = adapter.prepare(model, json.loads(original_messages),
-                                   max_output_tokens=max_output_tokens)
+        if type(adapter) is NativeProviderAdapter:
+            prepared = adapter.prepare(model, json.loads(original_messages),
+                                       max_output_tokens=max_output_tokens, response_format=response_format)
+            expected_model = adapter.resolve_model(model)
+            adapter.validate_prepared(prepared)
+        else:
+            if response_format is not None:
+                raise BudgetRefused("synthetic adapter does not support native JSON format")
+            prepared = adapter.prepare(model, json.loads(original_messages),
+                                       max_output_tokens=max_output_tokens)
+            expected_model = model
         prepared.validate()
-        if (prepared.quote.model != model or prepared.quote.adapter_id != adapter.adapter_id
+        if (prepared.quote.model != expected_model or prepared.quote.adapter_id != adapter.adapter_id
                 or prepared.quote.max_output_tokens != max_output_tokens
                 or text_messages(prepared.messages()) != original_messages):
             raise BudgetRefused("adapter changed the prepared request identity")
@@ -289,10 +307,15 @@ class Engine:
 
     def _validate_adapter(self, prepared: PreparedAttempt) -> SyntheticBoundedAdapter:
         """Revalidate immutable request and trusted adapter identity before funding."""
+        from ylang.core.provider_adapters import NativeProviderAdapter
+
         prepared.validate()
         adapter = self._bounded_adapters.get(prepared.quote.model)
-        if (adapter is None or adapter.synthetic is not True
-                or adapter.adapter_id != prepared.quote.adapter_id):
+        if adapter is None or adapter.adapter_id != prepared.quote.adapter_id:
+            raise BudgetRefused("prepared adapter is not trusted by this Engine")
+        if type(adapter) is NativeProviderAdapter:
+            adapter.validate_prepared(prepared)
+        elif adapter.synthetic is not True or not prepared.simulated:
             raise BudgetRefused("prepared adapter is not trusted by this Engine")
         return adapter
 
@@ -300,12 +323,22 @@ class Engine:
         self, prepared: PreparedAttempt, reservation: Reservation, *, trace_id: str | None = None,
     ) -> BoundedResponse:
         """Persist dispatch intent and retain observed response identity on every outcome."""
-        adapter = self._validate_adapter(prepared)
+        from ylang.core.provider_adapters import NativeProviderAdapter
+
         with self._ledger() as ledger:
-            attempt = ledger.get_attempt(reservation.attempt_id)
-            if CostQuote.from_json(str(attempt["quote_json"])) != prepared.quote:
-                raise BudgetRefused("reservation does not match prepared quote")
-            token = ledger.begin_dispatch(reservation)
+            try:
+                adapter = self._validate_adapter(prepared)
+                attempt = ledger.get_attempt(reservation.attempt_id)
+                if CostQuote.from_json(str(attempt["quote_json"])) != prepared.quote:
+                    raise BudgetRefused("reservation does not match prepared quote")
+                token = ledger.begin_dispatch(reservation)
+            except BudgetRefused:
+                # Cancellation verifies that this reservation remains undispatched and fenced.
+                try:
+                    ledger.cancel(reservation)
+                except BudgetRefused:
+                    pass
+                raise
             attempt_started = time.perf_counter()
             response: BoundedResponse | None = None
             try:
@@ -314,7 +347,7 @@ class Engine:
                         and prepared.quote.max_cost_nanos < response.charge_nanos <= 2**63 - 1):
                     raise BoundedFailure(
                         "adapter charge exceeded certified bound", charge_nanos=response.charge_nanos,
-                        evidence={"source": "synthetic-adapter", "billability": "reported breach",
+                        evidence={"source": adapter.adapter_id, "billability": "reported bound breach",
                                   "reported_charge_nanos": response.charge_nanos},
                     )
                 response.validate(prepared)
@@ -322,14 +355,18 @@ class Engine:
                 known = isinstance(exc, BoundedFailure)
                 charge = exc.charge_nanos if isinstance(exc, BoundedFailure) else None
                 evidence: dict[str, object] = dict(exc.evidence) if isinstance(exc, BoundedFailure) else {
-                    "source": "synthetic-adapter", "error_class": type(exc).__name__, "billability": "unknown",
+                    "source": adapter.adapter_id, "error_class": type(exc).__name__, "billability": "unknown",
                 }
                 evidence["latency_ms"] = int((time.perf_counter() - attempt_started) * 1000)
                 evidence["trace_id"] = trace_id
-                observed = response if isinstance(response, BoundedResponse) else None
+                observed = response if isinstance(response, BoundedResponse) else (
+                    exc.observed_response if isinstance(exc, ProviderContractViolation) else None
+                )
                 if observed is not None:
                     evidence["observed_response"] = observed.observation()
                 try:
+                    if type(adapter) is NativeProviderAdapter and isinstance(exc, BudgetRefused):
+                        ledger.freeze("native_provider_contract_violation")
                     ledger.settle(token, charge, evidence=evidence)
                 except Exception as settlement_error:
                     if not isinstance(exc, Exception):
@@ -394,7 +431,7 @@ class Engine:
                 last_exc=_provider_error(error) if error else None,
                 tool_calls=[], attempt_chain=[prepared.quote.model], explicit_model=prepared.quote.model,
                 fallback_events=[], capture_level=self._effective_capture_level(), trace_id=trace_id,
-                parent_trace_id=None, mcp_tool=None, selected_route="bounded-synthetic",
+                parent_trace_id=None, mcp_tool=None, selected_route="bounded-synthetic" if prepared.simulated else "bounded-provider",
                 cost_actual=cost, template_version=template_version, budget_request_id=request_id,
             )
         except Exception as accounting_error:
@@ -466,14 +503,15 @@ class Engine:
                     )
                     cost += paid_charge_nanos / 1_000_000_000
                 else:
-                    if tools is not None or tool_choice is not None or response_format is not None:
-                        raise BudgetRefused("paid tools and response formats are not bounded")
-                    prepared = self.prepare_bounded(candidate, messages)
+                    if tools is not None or tool_choice is not None:
+                        raise BudgetRefused("paid tools are not bounded")
+                    prepared = self.prepare_bounded(candidate, messages, response_format=response_format)
                     with self._ledger() as ledger:
                         reservation = ledger.reserve_many(
                             [prepared.quote], request_id=budget_request_id,
                             metadata=[{"trace_id": allocated_trace_id, "surface": self._surface,
-                                       "activity": str(activity)}],
+                                       "activity": str(activity), "requested_model": candidate,
+                                        "resolved_model": prepared.quote.model}],
                         )[0]
                     budget_request_id = reservation.request_id
                     response = self._dispatch_bounded(prepared, reservation, trace_id=allocated_trace_id)
@@ -604,6 +642,28 @@ class Engine:
             activity,
             explicit_model=model,
         )
+        from ylang.core.provider_adapters import NativeProviderAdapter
+
+        first = attempt_chain[0] if attempt_chain else self._router.fallback_model
+        if type(self._bounded_adapters.get(first)) is NativeProviderAdapter:
+            result = self.complete(
+                messages, activity, model=model, improver_fired=improver_fired,
+                improver_accepted=improver_accepted, tools=tools, tool_choice=tool_choice,
+                parent_trace_id=parent_trace_id, mcp_tool=mcp_tool, selected_route=selected_route,
+                trace_id=trace_id, session_id=session_id, workspace=workspace,
+                context_sources_json=context_sources_json, memory_fact_ids_json=memory_fact_ids_json,
+                mcp_server=mcp_server, retention_until=retention_until,
+                cost_actual=cost_actual, template_version=template_version,
+            )
+            if not result.success:
+                raise StreamCompletionError(result.error or "bounded provider unavailable", result.model_used)
+            # Settlement completes before any buffered delta is exposed to cancellation.
+            yield StreamChunk(content=result.content)
+            yield StreamChunk(finish_reason="stop", usage={
+                "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens,
+                "total_tokens": result.prompt_tokens + result.completion_tokens,
+            })
+            return
         capture_level = self._effective_capture_level()
         allocated_trace_id = trace_id or str(uuid.uuid4())
 

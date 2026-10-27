@@ -241,6 +241,18 @@ class HardBudgetStore:
                 checked_nanos(total)
         return total
 
+    def freeze(self, reason: str) -> None:
+        """Persist a contract-integrity stop without releasing any outstanding liability."""
+        if not isinstance(reason, str) or not reason.strip():
+            raise BudgetRefused("freeze requires a reason")
+        with self._transaction() as connection:
+            if connection.execute("SELECT 1 FROM budget_policies WHERE policy_id='default'").fetchone() is None:
+                raise BudgetRefused("canonical hard-budget policy is not initialized")
+            connection.execute(
+                "UPDATE budget_policies SET frozen_reason=COALESCE(frozen_reason,?) WHERE policy_id='default'",
+                (reason,),
+            )
+
     def exposure_nanos(self) -> int:
         """Read current aggregate liability under the same serialized writer boundary."""
         with self._transaction() as connection:

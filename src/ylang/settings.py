@@ -224,6 +224,7 @@ class Settings(BaseModel):
         description="Optional rolling 24h spend cap; models skipped when budget exceeded.",
     )
     hard_budget_policy_id: Literal["default"] = "default"
+    bounded_providers_enabled: bool = Field(default=False, strict=True)
     hard_budget_max_output_tokens: int = Field(default=512, strict=True, ge=1)
     capture_level: CaptureLevel = Field(
         default=DEFAULT_CAPTURE_LEVEL,
@@ -285,6 +286,11 @@ class Settings(BaseModel):
             kwargs["provider_cooldown_seconds"] = int(raw_cooldown)
         if raw_budget := os.environ.get("YLANG_DAILY_BUDGET_USD"):
             kwargs["daily_budget_usd"] = float(raw_budget)
+        if raw_enabled := os.environ.get("YLANG_BOUNDED_PROVIDERS_ENABLED"):
+            normalized = raw_enabled.strip().lower()
+            if normalized not in {"1", "0", "true", "false", "yes", "no", "on", "off"}:
+                raise ValueError("YLANG_BOUNDED_PROVIDERS_ENABLED must be an explicit boolean")
+            kwargs["bounded_providers_enabled"] = normalized in {"1", "true", "yes", "on"}
         if raw_policy := os.environ.get("YLANG_HARD_BUDGET_POLICY_ID"):
             kwargs["hard_budget_policy_id"] = raw_policy
         if raw_output_limit := os.environ.get("YLANG_HARD_BUDGET_MAX_OUTPUT_TOKENS"):
