@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ylang.core.engine import Engine
+from tests.conftest import MockedPaidEngine as Engine
 from ylang.core.model_router import ModelRouter
 from ylang.core.types import ModelResolution
 from ylang.settings import ProviderKeys, Settings

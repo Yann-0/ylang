@@ -63,11 +63,11 @@ def test_improver_uses_models_improve_not_cursor_slug(tmp_path: object) -> None:
     settings_data["activity_model_lists"] = {
         **settings.activity_model_lists,
         "improve": [
-            "mistral/mistral-small-latest",
-            "openai/gpt-4o-mini",
+            "ollama/qwen2.5-improve",
+            "ollama/qwen2.5-secondary",
         ],
     }
-    settings_data["provider_keys"] = ProviderKeys(mistral="test-key")
+    settings_data["provider_keys"] = ProviderKeys()
     effective = Settings(**settings_data)
     router = ModelRouter.from_settings(effective, usage_store=stores.store)
     engine = Engine(stores.store, surface="mcp", router=router, base_settings=effective)
@@ -81,7 +81,7 @@ def test_improver_uses_models_improve_not_cursor_slug(tmp_path: object) -> None:
             )
         )
     ]
-    mock_response.model = "mistral/mistral-small-latest"
+    mock_response.model = "ollama/qwen2.5-improve"
     mock_response.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
     mock_response._hidden_params = {"response_cost": 0.001}
 
@@ -93,7 +93,7 @@ def test_improver_uses_models_improve_not_cursor_slug(tmp_path: object) -> None:
         )
 
     assert result.improved == "Fix the bug in main.py"
-    assert mock.call_args.kwargs["model"] == "mistral/mistral-small-latest"
+    assert mock.call_args.kwargs["model"] == "ollama/qwen2.5-improve"
 
 
 @pytest.fixture

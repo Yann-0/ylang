@@ -128,11 +128,11 @@ def test_engine_forwards_tools_to_litellm(tmp_path: object) -> None:
     store = open_store(tmp_path / "litellm-tools.db")  # type: ignore[operator]
     router = ModelRouter(
         activity_model_lists={
-            "code": ["openai/gpt-4o"],
-            "search": ["openai/gpt-4o"],
-            "reason": ["openai/gpt-4o"],
-            "improve": ["openai/gpt-4o"],
-            "other": ["openai/gpt-4o"],
+            "code": ["ollama/qwen2.5"],
+            "search": ["ollama/qwen2.5"],
+            "reason": ["ollama/qwen2.5"],
+            "improve": ["ollama/qwen2.5"],
+            "other": ["ollama/qwen2.5"],
         },
         provider_keys=ProviderKeys(openai="k"),
         fallback_model="ollama/qwen2.5",
@@ -155,7 +155,7 @@ def test_engine_forwards_tools_to_litellm(tmp_path: object) -> None:
     mock_choice = MagicMock(message=mock_message)
     mock_response = MagicMock(
         choices=[mock_choice],
-        model="openai/gpt-4o",
+        model="ollama/qwen2.5",
         usage=MagicMock(prompt_tokens=5, completion_tokens=3),
         _hidden_params={"response_cost": 0.0},
     )

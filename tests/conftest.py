@@ -58,3 +58,33 @@ def ylang_deps(db_path: Path) -> Iterator[YlangDeps]:
 async def mcp_server(ylang_deps: YlangDeps) -> AsyncIterator[Any]:
     """FastMCP server with all Ylang tools registered."""
     yield create_server(ylang_deps)
+
+
+class MockedPaidEngine(Engine):
+    """Explicit opt-in Engine for modules with patched text-only cloud fixtures."""
+
+    def __init__(
+        self, store: Any, *, known_failure_charge_nanos: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """Admit the exact mock route; failure charges require explicit fixture evidence."""
+        from unittest.mock import Mock
+
+        from ylang.core import engine as engine_module
+        from tests.bounded_adapter_helpers import MockedCompletionAdapter, initialize_budget
+
+        def mocked_transport(**call_kwargs: Any) -> Any:
+            """Refuse accidental live transport even when a fixture patch is missing."""
+            transport = engine_module.litellm.completion
+            if not isinstance(transport, Mock):
+                raise AssertionError("offline bounded fixture requires patched completion")
+            return transport(**call_kwargs)
+
+        initialize_budget(store)
+        adapters = {
+            "openai/gpt-4o": MockedCompletionAdapter(
+                Mock(side_effect=mocked_transport),
+                known_failure_charge_nanos=known_failure_charge_nanos,
+            ),
+        }
+        super().__init__(store, bounded_adapters=adapters, **kwargs)

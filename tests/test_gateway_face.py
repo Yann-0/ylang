@@ -9,11 +9,11 @@ import pytest
 from mcp.server.fastmcp import FastMCP
 from starlette.testclient import TestClient
 
-from ylang.core.engine import Engine
+from tests.conftest import MockedPaidEngine as Engine
 from ylang.core.model_router import ModelRouter
 from ylang.gateway.routes import register_gateway_routes
 from ylang.mcp.auth import BearerTokenMiddleware
-from ylang.settings import ProviderKeys
+from ylang.settings import ProviderKeys, Settings
 from ylang.usage.store import UsageWindow, open_store
 
 _AUTH_HEADERS = {"Authorization": "Bearer secret-token"}
@@ -253,12 +253,15 @@ def test_passthrough_model_is_honored(
 def test_stream_returns_openai_sse_and_logs_one_usage_row(
     gateway_setup: tuple[TestClient, object, Engine, ModelRouter],
 ) -> None:
-    client, store, _, _ = gateway_setup
+    client, store, _, router = gateway_setup
+    router.apply_settings(Settings(activity_model_lists={
+        **router.activity_model_lists, "code": ["ollama/qwen2.5"],
+    }))
 
     def fake_stream(*_args: object, **_kwargs: object) -> Iterator[MagicMock]:
-        yield _stream_content_chunk("hel")
-        yield _stream_content_chunk("lo")
-        yield _stream_usage_chunk(prompt_tokens=10, completion_tokens=5, cost=0.03)
+        yield _stream_content_chunk("hel", model="ollama/qwen2.5")
+        yield _stream_content_chunk("lo", model="ollama/qwen2.5")
+        yield _stream_usage_chunk(model="ollama/qwen2.5", prompt_tokens=10, completion_tokens=5, cost=0.03)
 
     with patch("ylang.core.engine.litellm.completion", side_effect=fake_stream):
         response = client.post(

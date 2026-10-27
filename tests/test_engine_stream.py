@@ -18,11 +18,11 @@ def engine(tmp_path: object) -> Engine:
     store = open_store(tmp_path / "stream.db")  # type: ignore[operator]
     router = ModelRouter(
         activity_model_lists={
-            "code": ["openai/gpt-4o"],
-            "search": ["openai/gpt-4o"],
-            "reason": ["openai/gpt-4o"],
-            "improve": ["openai/gpt-4o"],
-            "other": ["openai/gpt-4o"],
+            "code": ["ollama/qwen2.5"],
+            "search": ["ollama/qwen2.5"],
+            "reason": ["ollama/qwen2.5"],
+            "improve": ["ollama/qwen2.5"],
+            "other": ["ollama/qwen2.5"],
         },
         provider_keys=ProviderKeys(openai="test-key"),
         fallback_model="ollama/qwen2.5",
@@ -33,7 +33,7 @@ def engine(tmp_path: object) -> Engine:
 def _stream_chunk(content: str) -> MagicMock:
     chunk = MagicMock()
     chunk.choices = [MagicMock(delta=MagicMock(content=content), finish_reason=None)]
-    chunk.model = "openai/gpt-4o"
+    chunk.model = "ollama/qwen2.5"
     chunk.usage = None
     chunk._hidden_params = {}
     return chunk

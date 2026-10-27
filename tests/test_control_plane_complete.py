@@ -15,7 +15,7 @@ from starlette.testclient import TestClient
 from ylang.cli.ops import run_doctor_cli, run_purge_traces_cli
 from ylang.console import register_console_routes
 from ylang.console.proposals import collect_pending_proposals
-from ylang.core.engine import Engine
+from tests.conftest import MockedPaidEngine as Engine
 from ylang.core.model_router import ModelRouter
 from ylang.core.routing_reason import build_routing_reason, routing_one_liner
 from ylang.gateway.routes import register_gateway_routes
@@ -50,15 +50,18 @@ def _mock_response(
     return response
 
 
-def _engine(tmp_path: Path, *, capture_level: str = "minimal") -> Engine:
+def _engine(
+    tmp_path: Path, *, capture_level: str = "minimal", local: bool = False,
+    known_failure_charge_nanos: int | None = None,
+) -> Engine:
     store = open_store(tmp_path / "cp.db")
     router = ModelRouter(
         activity_model_lists={
-            "code": ["openai/gpt-4o"],
-            "search": ["openai/gpt-4o"],
-            "reason": ["openai/gpt-4o"],
-            "improve": ["openai/gpt-4o"],
-            "other": ["openai/gpt-4o"],
+            "code": ["ollama/qwen2.5" if local else "openai/gpt-4o"],
+            "search": ["ollama/qwen2.5" if local else "openai/gpt-4o"],
+            "reason": ["ollama/qwen2.5" if local else "openai/gpt-4o"],
+            "improve": ["ollama/qwen2.5" if local else "openai/gpt-4o"],
+            "other": ["ollama/qwen2.5" if local else "openai/gpt-4o"],
         },
         provider_keys=ProviderKeys(openai="test-key"),
         fallback_model="ollama/qwen2.5",
@@ -69,18 +72,19 @@ def _engine(tmp_path: Path, *, capture_level: str = "minimal") -> Engine:
         surface="gateway",
         router=router,
         capture_level=capture_level,  # type: ignore[arg-type]
+        known_failure_charge_nanos=known_failure_charge_nanos,
     )
 
 
 def test_stream_persists_single_trace(tmp_path: Path) -> None:
-    engine = _engine(tmp_path)
+    engine = _engine(tmp_path, local=True)
 
     def stream_side_effect(**kwargs: object):
         chunk = MagicMock()
         chunk.choices = [
             MagicMock(delta=MagicMock(content="hi", tool_calls=None), finish_reason=None)
         ]
-        chunk.model = "openai/gpt-4o"
+        chunk.model = "ollama/qwen2.5"
         chunk.usage = MagicMock(prompt_tokens=2, completion_tokens=4)
         chunk._hidden_params = {"response_cost": 0.0}
         return [chunk]
@@ -102,7 +106,7 @@ def test_stream_persists_single_trace(tmp_path: Path) -> None:
 
 
 def test_tool_calls_json_traced(tmp_path: Path) -> None:
-    engine = _engine(tmp_path)
+    engine = _engine(tmp_path, local=True)
     tool_calls = [
         {
             "id": "call_1",
@@ -112,7 +116,7 @@ def test_tool_calls_json_traced(tmp_path: Path) -> None:
     ]
     with patch(
         "ylang.core.engine.litellm.completion",
-        return_value=_mock_response("ok", tool_calls=tool_calls),
+        return_value=_mock_response("ok", model="ollama/qwen2.5", tool_calls=tool_calls),
     ):
         engine.complete([{"role": "user", "content": "call tool"}], "code")
     row = engine.store.recall_usage(UsageWindow.last_hours(1))[0]
@@ -523,7 +527,7 @@ def test_gateway_selected_route_traced(
 
 
 def test_fallback_rate_limit_traced(tmp_path: Path) -> None:
-    engine = _engine(tmp_path)
+    engine = _engine(tmp_path, known_failure_charge_nanos=0)
 
     def side_effect(**kwargs: object) -> MagicMock:
         if kwargs["model"] == "openai/gpt-4o":

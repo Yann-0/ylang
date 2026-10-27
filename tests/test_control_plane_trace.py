@@ -11,7 +11,7 @@ import litellm
 import pytest
 
 from ylang.core.db import open_connection
-from ylang.core.engine import Engine
+from tests.conftest import MockedPaidEngine as Engine
 from ylang.core.migrations import USAGE_TRACE_COLUMNS, run_migrations
 from ylang.core.model_router import ModelRouter
 from ylang.core.routing_reason import build_routing_reason, routing_reason_json
@@ -179,7 +179,7 @@ def test_engine_fallback_events_traced(tmp_path: Path) -> None:
         provider_keys=ProviderKeys(openai="test-key"),
         fallback_model="ollama/qwen2.5",
     )
-    engine = Engine(store, surface="test", router=router)
+    engine = Engine(store, surface="test", router=router, known_failure_charge_nanos=0)
 
     def side_effect(**kwargs: object) -> MagicMock:
         model = str(kwargs["model"])
