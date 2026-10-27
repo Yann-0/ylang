@@ -177,7 +177,7 @@ def test_anthropic_cache_counters_are_added_without_discounting() -> None:
     adapter, _ = adapter_for(key, data)
     result = adapter.execute(adapter.prepare(key, MESSAGES, max_output_tokens=512))
     assert result.prompt_tokens == 60
-    assert result.charge_nanos == 60 * 6000 + 5 * 15000
+    assert result.charge_nanos == 60 * 6600 + 5 * 16500
 
 
 @pytest.mark.parametrize("change", ["messages", "native", "output", "config", "account", "tariff", "bound", "simulated"])
