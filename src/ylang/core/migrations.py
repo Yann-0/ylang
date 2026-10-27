@@ -482,6 +482,57 @@ def _migrate_prompt_intelligence_fail_closed(connection: sqlite3.Connection) -> 
     )
 
 
+
+@migration(17, "hard_budget_attempt_ledger")
+def _migrate_hard_budget(connection: sqlite3.Connection) -> None:
+    """Add durable monetary reservations without rewriting historical evidence."""
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS budget_policies (
+            policy_id TEXT PRIMARY KEY CHECK (policy_id = 'default'),
+            limit_nanos INTEGER NOT NULL CHECK (typeof(limit_nanos) = 'integer' AND limit_nanos >= 0),
+            opening_liability_nanos INTEGER NOT NULL CHECK (typeof(opening_liability_nanos) = 'integer' AND opening_liability_nanos >= 0),
+            opening_evidence TEXT NOT NULL CHECK (length(opening_evidence) > 0),
+            last_now_us INTEGER NOT NULL,
+            generation INTEGER NOT NULL DEFAULT 1,
+            frozen_reason TEXT
+        );
+        CREATE TABLE IF NOT EXISTS budget_scopes (
+            scope_id TEXT PRIMARY KEY,
+            policy_id TEXT NOT NULL REFERENCES budget_policies(policy_id),
+            limit_nanos INTEGER NOT NULL CHECK (typeof(limit_nanos) = 'integer' AND limit_nanos >= 0)
+        );
+        CREATE TABLE IF NOT EXISTS budget_requests (
+            request_id TEXT PRIMARY KEY,
+            policy_id TEXT NOT NULL REFERENCES budget_policies(policy_id),
+            scope_id TEXT REFERENCES budget_scopes(scope_id),
+            metadata_json TEXT NOT NULL,
+            usage_row_id INTEGER UNIQUE REFERENCES usage(id) ON DELETE RESTRICT
+        );
+        CREATE TABLE IF NOT EXISTS budget_attempts (
+            attempt_id TEXT PRIMARY KEY,
+            request_id TEXT NOT NULL REFERENCES budget_requests(request_id),
+            ordinal INTEGER NOT NULL CHECK (ordinal > 0),
+            state TEXT NOT NULL CHECK (state IN ('RESERVED','DISPATCHING','SETTLED','UNCERTAIN','CANCELLED','BREACH')),
+            fence INTEGER NOT NULL DEFAULT 0,
+            policy_generation INTEGER NOT NULL,
+            quote_json TEXT NOT NULL,
+            max_cost_nanos INTEGER NOT NULL CHECK (typeof(max_cost_nanos) = 'integer' AND max_cost_nanos >= 0),
+            actual_cost_nanos INTEGER CHECK (actual_cost_nanos IS NULL OR (typeof(actual_cost_nanos) = 'integer' AND actual_cost_nanos >= 0)),
+            reserved_at_us INTEGER NOT NULL,
+            dispatched_at_us INTEGER,
+            settled_at_us INTEGER,
+            evidence_json TEXT,
+            UNIQUE(request_id, ordinal)
+        );
+        CREATE INDEX IF NOT EXISTS idx_budget_attempts_state_time
+            ON budget_attempts(state, dispatched_at_us);
+        CREATE INDEX IF NOT EXISTS idx_budget_requests_scope
+            ON budget_requests(scope_id);
+        """
+    )
+
+
 def run_migrations(connection: sqlite3.Connection) -> int:
     """Apply pending migrations; return count applied."""
     connection.execute(
