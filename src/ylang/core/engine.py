@@ -427,6 +427,7 @@ class Engine:
             completion_tokens=completion_tokens, cost=cost,
             latency_ms=int((time.perf_counter() - started) * 1000),
             success=error is None, error=str(error) if error else None, trace_id=trace_id,
+            finish_reason=response.finish_reason if response is not None else None,
         )
         try:
             evidence = self.bounded_attempt_evidence(reservation)
@@ -501,6 +502,7 @@ class Engine:
         budget_request_id: str | None = None
         paid_charge_nanos = 0
         native_attempted = False
+        finish_reason: str | None = None
 
         for index, candidate in enumerate(attempt_chain):
             api_key = api_key_for_model(candidate, self._router.provider_keys)
@@ -531,6 +533,7 @@ class Engine:
                     paid_charge_nanos += response.charge_nanos
                     content, model_used = response.content, response.model
                     prompt_tokens, completion_tokens = response.prompt_tokens, response.completion_tokens
+                    finish_reason = response.finish_reason
                     cost = paid_charge_nanos / 1_000_000_000
                     tool_calls = []
                 success = True
@@ -553,6 +556,7 @@ class Engine:
                         prompt_tokens = observed_prompt if isinstance(observed_prompt, int) else 0
                         completion_tokens = observed_completion if isinstance(observed_completion, int) else 0
                         content = exc.observed_response.content if isinstance(exc.observed_response.content, str) else ""
+                        finish_reason = exc.observed_response.finish_reason
                     cost = paid_charge_nanos / 1_000_000_000
                     retry_allowed = exc.retry_allowed
                 else:
@@ -624,6 +628,7 @@ class Engine:
             error=error,
             tool_calls=tool_calls,
             trace_id=allocated_trace_id,
+            finish_reason=finish_reason,
         )
 
     def complete_stream(
@@ -672,7 +677,7 @@ class Engine:
                 raise StreamCompletionError(result.error or "bounded provider unavailable", result.model_used)
             # Settlement completes before any buffered delta is exposed to cancellation.
             yield StreamChunk(content=result.content)
-            yield StreamChunk(finish_reason="stop", usage={
+            yield StreamChunk(finish_reason=result.finish_reason or "stop", usage={
                 "prompt_tokens": result.prompt_tokens, "completion_tokens": result.completion_tokens,
                 "total_tokens": result.prompt_tokens + result.completion_tokens,
             })

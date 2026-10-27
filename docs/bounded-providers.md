@@ -111,7 +111,9 @@ Native gateway streaming buffers one bounded nonstream provider request, settles
 it and writes one usage record before emitting SSE content/usage chunks.
 Cancellation after the first emitted chunk cannot erase the financial record.
 This has first-byte latency of a full completion and is not incremental provider
-streaming. Local Ollama retains its existing path.
+streaming. Native termination reasons remain distinct as `stop`, `length` or
+`content_filter` in ordinary responses, SSE and durable evidence. Local Ollama
+retains its existing path.
 
 Paid tools, structured schemas beyond a JSON object, multimodal input and
 unsupported models remain refused. No model quality improvement follows from

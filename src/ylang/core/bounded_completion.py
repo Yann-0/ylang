@@ -112,6 +112,7 @@ class BoundedResponse:
     charge_nanos: int
     evidence: dict[str, object]
     validation_error: str | None = None
+    finish_reason: str = "stop"
 
     def validate(self, prepared: PreparedAttempt) -> None:
         """Reject invalid accounting before handling a known-charge output failure."""
@@ -125,6 +126,8 @@ class BoundedResponse:
         if not isinstance(self.content, str) or not self.evidence:
             raise BudgetRefused("missing terminal response evidence")
         canonical_json(self.evidence)
+        if self.finish_reason not in {"stop", "length", "content_filter"}:
+            raise BudgetRefused("unsupported normalized finish reason")
         if self.validation_error is not None:
             if not isinstance(self.validation_error, str) or not self.validation_error:
                 raise BudgetRefused("invalid terminal validation failure")
@@ -140,6 +143,7 @@ class BoundedResponse:
             "reported_charge_nanos": self.charge_nanos if type(self.charge_nanos) is int and self.charge_nanos >= 0 else None,
             "output_hash": digest(self.content) if isinstance(self.content, str) else None,
             "cost_is_upper_bound": self.evidence.get("cost_is_upper_bound") is True,
+            "finish_reason": self.finish_reason,
         }
 
 

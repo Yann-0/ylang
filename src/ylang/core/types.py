@@ -119,6 +119,7 @@ class CompletionResult:
     error: str | None = None
     tool_calls: list[dict[str, Any]] = field(default_factory=list)
     trace_id: str | None = None
+    finish_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -386,6 +386,11 @@ class NativeProviderAdapter:
                     raise ValueError("unsupported native multimodal response")
         except (ValueError, TypeError, KeyError) as exc:
             raise ProviderContractViolation(str(exc), observed_response=observed) from exc
+        native_stop = (data["stop_reason"] if self.profile.provider == "anthropic"
+                       else data["choices"][0]["finish_reason"])
+        normalized_stop = ("length" if native_stop in {"max_tokens", "length", "model_length"}
+                           else "content_filter" if native_stop in {"refusal", "content_filter"} else "stop")
+        evidence.update(provider_stop_reason=native_stop, finish_reason=normalized_stop)
         validation_error = None
         if not content:
             validation_error = "provider returned no text content"
@@ -395,7 +400,7 @@ class NativeProviderAdapter:
             except (ValueError, TypeError, RecursionError):
                 validation_error = "provider output is not a valid JSON object"
         return BoundedResponse(content, observed_model, prompt, completion, charge, evidence,
-                               validation_error=validation_error)
+                               validation_error=validation_error, finish_reason=normalized_stop)
 
 
 def build_provider_adapters(settings: Settings, *, transport: ProviderTransport | None = None,

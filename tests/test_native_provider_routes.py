@@ -100,6 +100,11 @@ class FixtureHTTP:
         elif self.fault == "bound":
             assert host == "api.anthropic.com"
             reply["usage"] = {"input_tokens": 1_048_577, "output_tokens": 513}
+        elif self.fault in {"length", "content_filter"}:
+            if host == "api.anthropic.com":
+                reply["stop_reason"] = "max_tokens" if self.fault == "length" else "refusal"
+            else:
+                reply["choices"][0]["finish_reason"] = self.fault
         return HTTPReply(200, json.dumps(reply).encode(), "req-fixture")
 
 
@@ -377,3 +382,35 @@ def test_reported_native_charge_above_hold_is_a_durable_breach(engine_factory) -
         assert ledger.exposure_nanos() == expected_charge
     assert engine.complete(MESSAGES, "code").success is False
     assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["completion", "buffered-sse"])
+@pytest.mark.parametrize("reason", ["length", "content_filter"])
+@pytest.mark.parametrize("model", ["route-code", "openai/gpt-4o", "mistral/mistral-small-latest"])
+def test_gateway_retains_native_termination_reason(engine_factory, model: str, reason: str, stream: bool) -> None:
+    """Do not describe truncated/filtered native output as a normal completion."""
+    engine, transport = engine_factory(FixtureHTTP(fault=reason))
+    server = FastMCP("native-finish-reason", streamable_http_path="/mcp")
+    register_gateway_routes(server, engine)
+    with TestClient(server.streamable_http_app()) as client:
+        response = client.post("/v1/chat/completions", json={
+            "model": model, "messages": MESSAGES, "stream": stream,
+        })
+    assert response.status_code == 200
+    if stream:
+        payloads = [json.loads(line[6:]) for line in response.text.splitlines()
+                    if line.startswith("data: ") and line != "data: [DONE]"]
+        terminal = [choice["finish_reason"] for payload in payloads for choice in payload.get("choices", [])
+                    if choice["finish_reason"] is not None]
+        assert terminal == [reason]
+        assert response.text.count("data: [DONE]") == 1
+    else:
+        assert response.json()["choices"][0]["finish_reason"] == reason
+    attempts = ledger_rows(engine, "budget_attempts")
+    assert len(transport.calls) == len(attempts) == 1
+    assert attempts[0]["state"] == "SETTLED"
+    evidence = json.loads(attempts[0]["evidence_json"])
+    assert evidence["finish_reason"] == reason
+    assert evidence["observed_response"]["finish_reason"] == reason
+    expected_native = ("max_tokens" if reason == "length" else "refusal") if model == "route-code" else reason
+    assert evidence["provider_stop_reason"] == expected_native

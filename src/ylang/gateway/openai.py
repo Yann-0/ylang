@@ -158,7 +158,7 @@ def chat_completion_payload(
         "role": "assistant",
         "content": result.content,
     }
-    finish_reason = "stop"
+    finish_reason = result.finish_reason or "stop"
     if result.tool_calls:
         message["tool_calls"] = result.tool_calls
         finish_reason = "tool_calls"
