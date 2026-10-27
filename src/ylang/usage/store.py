@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Self
 
 from ylang.core.db import YlangDatabase, _is_readonly_error, open_connection
-from ylang.core.migrations import USAGE_TRACE_COLUMNS, USAGE_TRACE_PHASE_B_COLUMNS
+from ylang.core.migrations import USAGE_TRACE_COLUMNS, USAGE_TRACE_PHASE_B_COLUMNS, protect_budget_usage
 from ylang.core.sqlite_rows import (
     SqliteRow,
     cell_bool,
@@ -245,6 +245,7 @@ class UsageStore:
         self._connection.execute(
             "CREATE INDEX IF NOT EXISTS idx_usage_parent_trace_id ON usage (parent_trace_id)"
         )
+        protect_budget_usage(self._connection)
         self._connection.commit()
 
     def write_usage(

@@ -549,6 +549,7 @@ def execute_candidate_evaluation(
 ) -> EvaluationRun:
     """Reserve matched bounded arms atomically; real providers remain unavailable."""
     from ylang.core.engine import Engine
+    from ylang.core.bounded_completion import BoundedEvidenceError
     from ylang.usage.hard_budget import BudgetRefused, usd_to_nanos
 
     if not fixtures:
@@ -622,6 +623,7 @@ def execute_candidate_evaluation(
     attempted: set[str] = set()
     aborted: EvaluationAuthorizationError | None = None
     interruption: BaseException | None = None
+    accounting_errors: dict[str, str] = {}
     for label, _, version in arms:
         attempted.add(label)
         try:
@@ -640,6 +642,9 @@ def execute_candidate_evaluation(
                     aborted = EvaluationAuthorizationError("bounded execution stopped after " + label + " failure")
                     break
         except BaseException as exc:
+            if isinstance(exc, BoundedEvidenceError):
+                results[label] = exc.completion
+                accounting_errors[label] = exc.accounting_error
             errors[label] = str(exc) or type(exc).__name__
             if isinstance(exc, EvaluationAuthorizationError) or bounded_engine is not None or not isinstance(exc, Exception):
                 aborted = EvaluationAuthorizationError(str(exc) or type(exc).__name__)
@@ -677,6 +682,11 @@ def execute_candidate_evaluation(
             "completion_tokens": result.completion_tokens if result is not None else None,
             "error": errors[label],
             "reported_error": result.error if result is not None else None,
+            "accounting_error": accounting_errors.get(label),
+            "requested_model": prepared[label].quote.model if label in prepared else model,
+            "response_received": bool(result is not None and result.model_used),
+            "observed_response": (json.loads(str(record["evidence_json"])).get("observed_response")
+                                  if record and record.get("evidence_json") else None),
             "effective_generation_settings": json.loads(prepared[label].config_json) if label in prepared else None,
             "reservation": record,
         }
@@ -702,6 +712,13 @@ def execute_candidate_evaluation(
         confounders.append("billing_uncertain")
     if any(record.get("state") == "BREACH" for record in financial.values()):
         confounders.append("certified_bound_exceeded")
+    if bounded_engine is not None and any(
+        result is not None and result.model_used and result.model_used != prepared[label].quote.model
+        for label, result in results.items()
+    ) and "model_mismatch" not in confounders:
+        confounders.append("model_mismatch")
+    if accounting_errors:
+        confounders.append("accounting_write_failed")
     if aborted is not None:
         confounders.append("aborted_execution")
     total_known_nanos = sum(int(record["actual_cost_nanos"]) for record in financial.values()

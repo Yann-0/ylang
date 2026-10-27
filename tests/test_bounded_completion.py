@@ -347,3 +347,24 @@ def test_quote_expiring_after_dispatch_does_not_discard_settled_response(
         engine.cancel_bounded(reservations[1])
     finally:
         engine.store.close()
+
+
+@pytest.mark.parametrize("model", [
+    "ollama/gpt-oss:120b-cloud",
+    "ollama_chat/deepseek-v3.1:671b-cloud",
+    "ollama/fixture:CLOUD",
+    "ollama_chat/cloud-alias",
+])
+def test_cloud_style_ollama_tags_cannot_bypass_either_dispatch_path(tmp_path: Path, model: str) -> None:
+    """Cloud-style names are denied without contacting a local daemon or provider."""
+    store = open_store(tmp_path / "cloud-tags.db")
+    router = ModelRouter(activity_model_lists={"code": [model]}, fallback_model=model)
+    engine = Engine(store, surface="test", router=router)
+    try:
+        with patch("ylang.core.engine.litellm.completion") as transport:
+            assert engine.complete(MESSAGES, "code", model=model).success is False
+            with pytest.raises(StreamCompletionError):
+                list(engine.complete_stream(MESSAGES, "code", model=model))
+            transport.assert_not_called()
+    finally:
+        store.close()

@@ -17,7 +17,7 @@ import litellm
 from litellm.caching.caching import Cache
 
 from ylang.core.bounded_completion import (
-    BoundedFailure, BoundedResponse, PreparedAttempt, SyntheticBoundedAdapter,
+    BoundedEvidenceError, BoundedFailure, BoundedResponse, PreparedAttempt, SyntheticBoundedAdapter,
     configuration, is_known_local_model, text_messages,
 )
 from ylang.core.model_router import ModelRouter
@@ -77,13 +77,15 @@ class _BudgetAttemptError(Exception):
     """Carry internally generated accounting identity through the routing loop."""
 
     def __init__(self, cause: Exception, reservation: Reservation,
-                 charge_nanos: int, retry_allowed: bool) -> None:
+                 charge_nanos: int, retry_allowed: bool,
+                 observed_response: BoundedResponse | None = None) -> None:
         """Preserve the failed attempt even when fallback later succeeds."""
         super().__init__(str(cause))
         self.cause = cause
         self.reservation = reservation
         self.charge_nanos = charge_nanos
         self.retry_allowed = retry_allowed
+        self.observed_response = observed_response
 
 
 class Engine:
@@ -295,22 +297,23 @@ class Engine:
         return adapter
 
     def _dispatch_bounded(
-        self, prepared: PreparedAttempt, reservation: Reservation,
+        self, prepared: PreparedAttempt, reservation: Reservation, *, trace_id: str | None = None,
     ) -> BoundedResponse:
-        """Persist dispatch intent and settle every outcome, including cancellation."""
+        """Persist dispatch intent and retain observed response identity on every outcome."""
         adapter = self._validate_adapter(prepared)
         with self._ledger() as ledger:
             attempt = ledger.get_attempt(reservation.attempt_id)
             if CostQuote.from_json(str(attempt["quote_json"])) != prepared.quote:
                 raise BudgetRefused("reservation does not match prepared quote")
             token = ledger.begin_dispatch(reservation)
+            attempt_started = time.perf_counter()
+            response: BoundedResponse | None = None
             try:
                 response = adapter.execute(prepared)
                 if (type(response.charge_nanos) is int
                         and prepared.quote.max_cost_nanos < response.charge_nanos <= 2**63 - 1):
                     raise BoundedFailure(
-                        "adapter charge exceeded certified bound",
-                        charge_nanos=response.charge_nanos,
+                        "adapter charge exceeded certified bound", charge_nanos=response.charge_nanos,
                         evidence={"source": "synthetic-adapter", "billability": "reported breach",
                                   "reported_charge_nanos": response.charge_nanos},
                     )
@@ -318,74 +321,85 @@ class Engine:
             except BaseException as exc:
                 known = isinstance(exc, BoundedFailure)
                 charge = exc.charge_nanos if isinstance(exc, BoundedFailure) else None
-                evidence: dict[str, object] = exc.evidence if isinstance(exc, BoundedFailure) else {
-                    "source": "synthetic-adapter", "error_class": type(exc).__name__,
-                    "billability": "unknown",
+                evidence: dict[str, object] = dict(exc.evidence) if isinstance(exc, BoundedFailure) else {
+                    "source": "synthetic-adapter", "error_class": type(exc).__name__, "billability": "unknown",
                 }
+                evidence["latency_ms"] = int((time.perf_counter() - attempt_started) * 1000)
+                evidence["trace_id"] = trace_id
+                observed = response if isinstance(response, BoundedResponse) else None
+                if observed is not None:
+                    evidence["observed_response"] = observed.observation()
                 try:
                     ledger.settle(token, charge, evidence=evidence)
                 except Exception as settlement_error:
                     if not isinstance(exc, Exception):
                         raise exc from settlement_error
-                    raise _BudgetAttemptError(settlement_error, token, 0, False) from exc
+                    raise _BudgetAttemptError(settlement_error, token, 0, False, observed) from exc
                 if not isinstance(exc, Exception):
                     raise
                 retry = (known and isinstance(exc, BoundedFailure) and exc.retry_allowed
                          and exc.charge_nanos <= prepared.quote.max_cost_nanos)
-                raise _BudgetAttemptError(exc, token, charge or 0, retry) from exc
+                raise _BudgetAttemptError(exc, token, charge or 0, retry, observed) from exc
             try:
-                ledger.settle(token, response.charge_nanos, evidence=response.evidence)
+                success_evidence = dict(response.evidence)
+                success_evidence.update(observed_response=response.observation(),
+                                        latency_ms=int((time.perf_counter() - attempt_started) * 1000),
+                                        trace_id=trace_id)
+                ledger.settle(token, response.charge_nanos, evidence=success_evidence)
             except Exception as exc:
-                raise _BudgetAttemptError(exc, token, 0, False) from exc
-            if response.charge_nanos > prepared.quote.max_cost_nanos:
-                raise _BudgetAttemptError(
-                    BudgetRefused("adapter charge exceeded certified bound"), token,
-                    response.charge_nanos, False,
-                )
+                raise _BudgetAttemptError(exc, token, 0, False, response) from exc
             return response
 
     def complete_prepared(
         self, prepared: PreparedAttempt, reservation: Reservation, *,
         activity: str, template_version: int | None = None,
     ) -> CompletionResult:
-        """Run exactly one pre-reserved synthetic arm, without fallback or caching."""
+        """Retain captured response evidence even if a later accounting write fails."""
         started = time.perf_counter()
         trace_id = str(uuid.uuid4())
         response: BoundedResponse | None = None
         error: Exception | None = None
         charge_nanos = 0
         try:
-            response = self._dispatch_bounded(prepared, reservation)
+            response = self._dispatch_bounded(prepared, reservation, trace_id=trace_id)
             charge_nanos = response.charge_nanos
         except Exception as exc:
             error = exc
             if isinstance(exc, _BudgetAttemptError):
                 charge_nanos = exc.charge_nanos
-        latency = int((time.perf_counter() - started) * 1000)
-        content = response.content if response else ""
-        prompt_tokens = response.prompt_tokens if response else 0
-        completion_tokens = response.completion_tokens if response else 0
+                response = exc.observed_response
+        observation = response.observation() if response is not None else {}
+        content = response.content if response is not None and isinstance(response.content, str) else ""
+        actual_model = observation.get("model")
+        prompt = observation.get("prompt_tokens")
+        completion = observation.get("completion_tokens")
+        prompt_tokens = prompt if isinstance(prompt, int) else 0
+        completion_tokens = completion if isinstance(completion, int) else 0
+        model_used = actual_model if isinstance(actual_model, str) else ""
         cost = charge_nanos / 1_000_000_000
-        # Link only a dispatched terminal attempt; failed predispatch validation leaves its hold.
-        evidence = self.bounded_attempt_evidence(reservation)
-        budget_request_id = reservation.request_id if evidence.get("state") in {"SETTLED", "UNCERTAIN", "BREACH"} else None
-        self._write_traced_usage(
-            messages=prepared.messages(), activity=activity, model_used=prepared.quote.model,
-            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, cost=cost,
-            improver_fired=False, improver_accepted=False, improver_input_sample=None,
-            latency_ms=latency, success=error is None, error=str(error) if error else None,
-            last_exc=_provider_error(error) if error else None,
-            tool_calls=[], attempt_chain=[prepared.quote.model],
-            explicit_model=prepared.quote.model, fallback_events=[],
-            capture_level=self._effective_capture_level(), trace_id=trace_id,
-            parent_trace_id=None, mcp_tool=None, selected_route="bounded-synthetic",
-            cost_actual=cost, template_version=template_version,
-            budget_request_id=budget_request_id,
+        result = CompletionResult(
+            content=content, model_used=model_used, prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens, cost=cost,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            success=error is None, error=str(error) if error else None, trace_id=trace_id,
         )
-        return CompletionResult(content=content, model_used=prepared.quote.model,
-                                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
-                                cost=cost, latency_ms=latency, success=error is None,
-                                error=str(error) if error else None, trace_id=trace_id)
+        try:
+            evidence = self.bounded_attempt_evidence(reservation)
+            request_id = reservation.request_id if evidence.get("state") in {"SETTLED", "UNCERTAIN", "BREACH"} else None
+            self._write_traced_usage(
+                messages=prepared.messages(), activity=activity, model_used=model_used,
+                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, cost=cost,
+                improver_fired=False, improver_accepted=False, improver_input_sample=None,
+                latency_ms=result.latency_ms, success=result.success, error=result.error,
+                last_exc=_provider_error(error) if error else None,
+                tool_calls=[], attempt_chain=[prepared.quote.model], explicit_model=prepared.quote.model,
+                fallback_events=[], capture_level=self._effective_capture_level(), trace_id=trace_id,
+                parent_trace_id=None, mcp_tool=None, selected_route="bounded-synthetic",
+                cost_actual=cost, template_version=template_version, budget_request_id=request_id,
+            )
+        except Exception as accounting_error:
+            raise BoundedEvidenceError(result, accounting_error) from accounting_error
+        return result
 
     def complete(
         self,
@@ -456,9 +470,13 @@ class Engine:
                         raise BudgetRefused("paid tools and response formats are not bounded")
                     prepared = self.prepare_bounded(candidate, messages)
                     with self._ledger() as ledger:
-                        reservation = ledger.reserve_many([prepared.quote], request_id=budget_request_id)[0]
+                        reservation = ledger.reserve_many(
+                            [prepared.quote], request_id=budget_request_id,
+                            metadata=[{"trace_id": allocated_trace_id, "surface": self._surface,
+                                       "activity": str(activity)}],
+                        )[0]
                     budget_request_id = reservation.request_id
-                    response = self._dispatch_bounded(prepared, reservation)
+                    response = self._dispatch_bounded(prepared, reservation, trace_id=allocated_trace_id)
                     paid_charge_nanos += response.charge_nanos
                     content, model_used = response.content, response.model
                     prompt_tokens, completion_tokens = response.prompt_tokens, response.completion_tokens
@@ -476,6 +494,14 @@ class Engine:
                 if isinstance(exc, _BudgetAttemptError):
                     budget_request_id = exc.reservation.request_id
                     paid_charge_nanos += exc.charge_nanos
+                    if exc.observed_response is not None:
+                        observation = exc.observed_response.observation()
+                        model_used = str(observation.get("model") or "")
+                        observed_prompt = observation.get("prompt_tokens")
+                        observed_completion = observation.get("completion_tokens")
+                        prompt_tokens = observed_prompt if isinstance(observed_prompt, int) else 0
+                        completion_tokens = observed_completion if isinstance(observed_completion, int) else 0
+                        content = exc.observed_response.content if isinstance(exc.observed_response.content, str) else ""
                     cost = paid_charge_nanos / 1_000_000_000
                     retry_allowed = exc.retry_allowed
                 else:

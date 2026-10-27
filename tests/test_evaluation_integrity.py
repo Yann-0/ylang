@@ -473,3 +473,54 @@ def test_typed_output_limit_is_shared_with_runtime_preparation(bounded_scenario)
     with pytest.raises(ValueError):
         engine.prepare_bounded("synthetic/model", messages)
     assert adapter.calls == []
+
+
+def test_settled_response_survives_later_usage_write_failure(bounded_scenario, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Accounting failure aborts the pair while retaining the captured successful response."""
+    from ylang.usage.hard_budget import HardBudgetStore
+    (_, store, item), engine, adapter, usage = bounded_scenario
+    def failed_write(**kwargs):
+        raise RuntimeError("synthetic usage link failure")
+    monkeypatch.setattr(engine, "_write_traced_usage", failed_write)
+    with pytest.raises(EvaluationAuthorizationError, match="evidence saved"):
+        run_bounded(bounded_scenario)
+    run = store.list_evaluation_runs(item.item_id)[0]
+    payload = json.loads(run.evaluator_json)
+    baseline = payload["arms"]["baseline"]
+    assert run.baseline_output == "hello"
+    assert baseline["success"] is True and baseline["response_received"] is True
+    assert baseline["model_used"] == "synthetic/model"
+    assert baseline["trace_id"] and baseline["prompt_tokens"] == 10
+    assert baseline["completion_tokens"] == 25
+    assert baseline["accounting_error"] == "synthetic usage link failure"
+    assert baseline["reservation"]["state"] == "SETTLED"
+    persisted = json.loads(baseline["reservation"]["evidence_json"])
+    assert persisted["observed_response"]["model"] == "synthetic/model"
+    assert persisted["observed_response"]["prompt_tokens"] == 10
+    assert persisted["trace_id"] == baseline["trace_id"]
+    assert persisted["latency_ms"] >= 0
+    assert payload["arms"]["candidate"]["reservation"]["state"] == "CANCELLED"
+    assert "accounting_write_failed" in payload["confounders"]
+    assert payload["comparison_valid"] is False and len(adapter.calls) == 1
+    with HardBudgetStore.open(usage.database_path) as ledger:
+        assert ledger.exposure_nanos() == 10_000_000
+
+
+def test_rejected_actual_model_is_retained_separately_from_reserved_model(bounded_scenario) -> None:
+    """Validation keeps unknown billing held while preserving the actual observed identity."""
+    from tests.bounded_adapter_helpers import response
+    (_, store, item), _, adapter, _ = bounded_scenario
+    adapter.outcomes = [response("Captured mismatched output", model="unreserved/actual")]
+    with pytest.raises(EvaluationAuthorizationError, match="evidence saved"):
+        run_bounded(bounded_scenario)
+    run = store.list_evaluation_runs(item.item_id)[0]
+    payload = json.loads(run.evaluator_json)
+    baseline = payload["arms"]["baseline"]
+    assert run.baseline_output == "Captured mismatched output"
+    assert baseline["model_used"] == "unreserved/actual"
+    assert baseline["requested_model"] == "synthetic/model"
+    assert baseline["observed_response"]["model"] == "unreserved/actual"
+    assert baseline["prompt_tokens"] == 10 and baseline["completion_tokens"] == 25
+    assert baseline["reservation"]["state"] == "UNCERTAIN"
+    assert baseline["cost_usd"] is None and "model_mismatch" in payload["confounders"]
+    assert payload["comparison_valid"] is False

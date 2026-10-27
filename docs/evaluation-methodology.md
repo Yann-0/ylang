@@ -151,7 +151,7 @@ Inconclusive is a valid outcome.
   CI or by the simulator.
 - The ledger and output contract are qualified with synthetic adapters only. No real provider pricing, billing or wire limit is certified.
 - Abrupt termination can leave durable dispatch intent requiring explicit reconciliation; a timer or lease cannot prove an attempt was free.
-- The budget ledger must outlive trace retention. Backups, migrations, policy activation and any update of the running application require an explicit operator procedure.
+- The budget ledger must outlive trace retention. Under an initialized policy, database triggers protect linked usage rows and nonzero legacy-cost rows from deletion on ordinary connections, even with foreign keys disabled. Monetary cost/time fields become immutable; trace payload fields can still be redacted. Deletion protection is conservative at every age until an explicit monetary archival procedure is provided. Backups, migrations, policy activation and any update of the running application require an explicit operator procedure.
 - Ylang provider USD and account-wide Codex subscription quota are separate controls.
 
 ## Related

@@ -303,3 +303,46 @@ def test_migration_preserves_existing_rows_and_is_idempotent(tmp_path: Path) -> 
         assert connection.execute("SELECT * FROM usage").fetchall() == before
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO budget_policies VALUES ('other',1,0,'fixture',0,1,NULL)")
+
+
+def test_console_cannot_delete_legacy_liability_with_foreign_keys_off(tmp_path: Path) -> None:
+    """The actual console writer cannot restore headroom by deleting recent history."""
+    from ylang.console.data_mutators import delete_usage_row, purge_usage_older_than
+    path = tmp_path / "console-legacy.db"
+    usage = UsageStore.open(path)
+    row_id = _insert_usage(usage._connection, 0.2)
+    usage._connection.commit()
+    with HardBudgetStore.open(path, clock=lambda: NOW) as store:
+        store.initialize_policy(limit_nanos=ONE, opening_evidence="synthetic legacy acknowledgement")
+        assert usage._connection.execute("PRAGMA foreign_keys").fetchone()[0] == 0
+        with pytest.raises(sqlite3.IntegrityError, match="financial history"):
+            delete_usage_row(usage._connection, row_id)
+        assert usage._connection.in_transaction is False
+        with pytest.raises(sqlite3.IntegrityError):
+            purge_usage_older_than(usage._connection, 1)
+        assert store.exposure_nanos() == 200_000_000
+        with pytest.raises(BudgetRefused):
+            store.reserve_many([quote(800_000_001)])
+    usage.close()
+
+
+def test_console_cannot_delete_linked_usage_or_rewrite_monetary_inputs(ledger: HardBudgetStore) -> None:
+    """Connection-independent triggers protect exact linkage and immutable financial inputs."""
+    from ylang.console.data_mutators import delete_usage_row
+    (reserved,) = ledger.reserve_many([quote()])
+    ledger.settle(ledger.begin_dispatch(reserved), 0, evidence={"receipt": "synthetic zero"})
+    row_id = ledger.link_usage(reserved.request_id, lambda c: _insert_usage(c, 0))
+    usage = UsageStore.open(ledger.database_path)
+    try:
+        assert usage._connection.execute("PRAGMA foreign_keys").fetchone()[0] == 0
+        with pytest.raises(sqlite3.IntegrityError):
+            delete_usage_row(usage._connection, row_id)
+        with pytest.raises(sqlite3.IntegrityError, match="immutable"):
+            usage._connection.execute("UPDATE usage SET timestamp='1970-01-01T00:00:00+00:00' WHERE id=?", (row_id,))
+        assert usage._connection.in_transaction is False
+        usage._connection.execute("UPDATE usage SET prompt_body_redacted=NULL WHERE id=?", (row_id,))
+        usage._connection.commit()
+        assert ledger.link_usage(reserved.request_id, lambda c: pytest.fail("duplicate insert")) == row_id
+        assert ledger.exposure_nanos() == 0
+    finally:
+        usage.close()

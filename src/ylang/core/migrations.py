@@ -483,6 +483,32 @@ def _migrate_prompt_intelligence_fail_closed(connection: sqlite3.Connection) -> 
 
 
 
+
+def protect_budget_usage(connection: sqlite3.Connection) -> None:
+    """Protect financial inputs and request links on every connection, regardless of FK mode."""
+    if not _table_exists(connection, "usage") or not _table_exists(connection, "budget_policies"):
+        return
+    connection.execute(
+        """CREATE TRIGGER IF NOT EXISTS budget_protect_usage_delete
+        BEFORE DELETE ON usage
+        WHEN EXISTS (SELECT 1 FROM budget_policies)
+          AND (OLD.cost != 0 OR EXISTS (
+              SELECT 1 FROM budget_requests WHERE usage_row_id=OLD.id))
+        BEGIN
+            SELECT RAISE(ROLLBACK, 'budget financial history is retained; redact trace fields instead');
+        END"""
+    )
+    connection.execute(
+        """CREATE TRIGGER IF NOT EXISTS budget_protect_usage_money_update
+        BEFORE UPDATE OF cost,timestamp ON usage
+        WHEN EXISTS (SELECT 1 FROM budget_policies)
+          AND (NEW.cost IS NOT OLD.cost OR NEW.timestamp IS NOT OLD.timestamp)
+        BEGIN
+            SELECT RAISE(ROLLBACK, 'budget monetary inputs are immutable');
+        END"""
+    )
+
+
 @migration(17, "hard_budget_attempt_ledger")
 def _migrate_hard_budget(connection: sqlite3.Connection) -> None:
     """Add durable monetary reservations without rewriting historical evidence."""
@@ -531,6 +557,8 @@ def _migrate_hard_budget(connection: sqlite3.Connection) -> None:
             ON budget_requests(scope_id);
         """
     )
+
+    protect_budget_usage(connection)
 
 
 def run_migrations(connection: sqlite3.Connection) -> int:

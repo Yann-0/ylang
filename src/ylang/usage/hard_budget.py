@@ -423,6 +423,8 @@ class HardBudgetStore:
             if request is None:
                 raise BudgetRefused("unknown logical request")
             if request["usage_row_id"] is not None:
+                if connection.execute("SELECT 1 FROM usage WHERE id=?", (request["usage_row_id"],)).fetchone() is None:
+                    raise BudgetRefused("terminal usage linkage is missing; financial liability is retained")
                 return int(request["usage_row_id"])
             if connection.execute(
                 "SELECT 1 FROM budget_attempts WHERE request_id=? AND state IN ('RESERVED','DISPATCHING')",

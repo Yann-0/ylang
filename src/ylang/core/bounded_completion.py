@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Protocol
 
-from ylang.core.types import Message
+from ylang.core.types import CompletionResult, Message
 from ylang.usage.hard_budget import BudgetRefused, CostQuote
 
 
@@ -107,6 +107,27 @@ class BoundedResponse:
         canonical_json(self.evidence)
 
 
+    def observation(self) -> dict[str, object]:
+        """Keep observed identity separate from validated identity without persisting raw output."""
+        return {
+            "model": self.model if isinstance(self.model, str) else None,
+            "prompt_tokens": self.prompt_tokens if type(self.prompt_tokens) is int and self.prompt_tokens >= 0 else None,
+            "completion_tokens": self.completion_tokens if type(self.completion_tokens) is int and self.completion_tokens >= 0 else None,
+            "reported_charge_nanos": self.charge_nanos if type(self.charge_nanos) is int and self.charge_nanos >= 0 else None,
+            "output_hash": digest(self.content) if isinstance(self.content, str) else None,
+        }
+
+
+class BoundedEvidenceError(RuntimeError):
+    """Carry an already captured completion through a separate accounting-write failure."""
+
+    def __init__(self, completion: CompletionResult, accounting_error: Exception) -> None:
+        """Preserve transport result identity while the evaluator aborts and saves partial evidence."""
+        super().__init__("accounting write failed: " + str(accounting_error))
+        self.completion = completion
+        self.accounting_error = str(accounting_error)
+
+
 class BoundedFailure(Exception):
     """Trusted synthetic adapter reports a terminal failed attempt and its charge."""
 
@@ -140,4 +161,4 @@ class SyntheticBoundedAdapter(Protocol):
 def is_known_local_model(model: str) -> bool:
     """Only explicitly local Ollama namespaces retain the legacy transport path."""
     return (model.startswith(("ollama/", "ollama_chat/"))
-            and bool(model.split("/", 1)[1]) and ":cloud" not in model.lower())
+            and bool(model.split("/", 1)[1]) and "cloud" not in model.lower())
