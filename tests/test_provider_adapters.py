@@ -375,3 +375,21 @@ def test_truncated_http_body_is_uncertain_even_when_json_prefix_is_complete() ->
                     with pytest.raises(ProviderTransportError):
                         DirectHTTPSProviderTransport().post("api.openai.com", "/v1/chat/completions", {}, b"{}", 1)
     assert connection.request.call_count == 1 and response.read1.call_count == 2
+
+
+@pytest.mark.parametrize("key", PROFILES)
+def test_native_request_pins_standard_service_capacity(key: str) -> None:
+    """Do not let workspace priority defaults escape the quoted standard tariff."""
+    adapter, _ = adapter_for(key)
+    body = json.loads(adapter.prepare(key, MESSAGES, max_output_tokens=512).provider_wire_json or "{}")
+    assert body["service_tier"] == ("default" if PROFILES[key].provider == "openai" else "standard_only")
+    assert "inference_geo" not in body
+
+
+def test_sonnet_geography_surcharge_is_reserved_without_overriding_workspace() -> None:
+    """Include the documented 1.1x US surcharge in input/cache and output ceilings."""
+    key = "anthropic/claude-sonnet-4-6"
+    adapter, _ = adapter_for(key, native_reply(key, extra_usage={"inference_geo": "us"}))
+    prepared = adapter.prepare(key, MESSAGES, max_output_tokens=512)
+    assert prepared.quote.max_cost_nanos == 1_048_576 * 6_600 + 512 * 16_500
+    assert adapter.execute(prepared).charge_nanos == 10 * 6_600 + 5 * 16_500

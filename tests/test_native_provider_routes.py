@@ -46,7 +46,7 @@ PINNED = {
 }
 # Independent expected values from the reviewed provider-interface contract.
 TARIFF = {
-    "anthropic/claude-sonnet-4-6": (1_048_576, 6_000, 15_000),
+    "anthropic/claude-sonnet-4-6": (1_048_576, 6_600, 16_500),
     "anthropic/claude-haiku-4-5-20251001": (200_000, 2_000, 5_000),
     "openai/gpt-4o-2024-08-06": (128_000, 2_500, 10_000),
     "mistral/mistral-small-2603": (262_144, 150, 600),
@@ -366,7 +366,7 @@ def test_reported_native_charge_above_hold_is_a_durable_breach(engine_factory) -
     assert result.success is False
     assert len(transport.calls) == 1
     attempt = ledger_rows(engine, "budget_attempts")[0]
-    expected_charge = 1_048_577 * 6_000 + 513 * 15_000
+    expected_charge = 1_048_577 * 6_600 + 513 * 16_500
     assert attempt["state"] == "BREACH"
     assert attempt["actual_cost_nanos"] == expected_charge
     assert expected_charge > attempt["max_cost_nanos"]

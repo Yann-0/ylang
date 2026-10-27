@@ -326,11 +326,12 @@ class Engine:
         from ylang.core.provider_adapters import NativeProviderAdapter
 
         with self._ledger() as ledger:
+            attempt = ledger.get_attempt(reservation.attempt_id)
+            if CostQuote.from_json(str(attempt["quote_json"])) != prepared.quote:
+                # A mismatched request cannot cancel the correctly reserved request.
+                raise BudgetRefused("reservation does not match prepared quote")
             try:
                 adapter = self._validate_adapter(prepared)
-                attempt = ledger.get_attempt(reservation.attempt_id)
-                if CostQuote.from_json(str(attempt["quote_json"])) != prepared.quote:
-                    raise BudgetRefused("reservation does not match prepared quote")
                 token = ledger.begin_dispatch(reservation)
             except BudgetRefused:
                 # Cancellation verifies that this reservation remains undispatched and fenced.

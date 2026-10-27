@@ -31,7 +31,7 @@ QUOTE_TTL_SECONDS = 120
 MAX_REQUEST_BYTES = 512 * 1024
 MAX_MESSAGES = 128
 JSON_INSTRUCTION = "Return exactly one valid JSON object. Do not use Markdown fences or any surrounding text."
-PRICING_VERSION = "2026-10-27-standard-tariff-upper-v1"
+PRICING_VERSION = "2026-10-27-standard-tariff-upper-v2-geography"
 
 
 @dataclass(frozen=True)
@@ -55,7 +55,8 @@ class ProviderProfile:
 PROFILES = {
     "anthropic/claude-sonnet-4-6": ProviderProfile(
         "anthropic", "claude-sonnet-4-6", ("anthropic/claude-sonnet-4-6", "anthropic/claude-3-5-sonnet-latest"),
-        1048576, 128000, 3000, 6000, 15000),
+        # Include cache-write maximum and US inference's 1.1x surcharge without changing workspace geo.
+        1048576, 128000, 3000, 6600, 16500),
     "anthropic/claude-haiku-4-5-20251001": ProviderProfile(
         "anthropic", "claude-haiku-4-5-20251001", ("anthropic/claude-haiku-4-5", "anthropic/claude-haiku-4-5-20251001"),
         200000, 64000, 1000, 2000, 5000),
@@ -163,7 +164,8 @@ class NativeProviderAdapter:
             body: dict[str, Any] = {"model": self.profile.pinned_id,
                                     "messages": conversational,
                                     "max_tokens": max_output_tokens,
-                                    "stream": False, "thinking": {"type": "disabled"}}
+                                    "stream": False, "thinking": {"type": "disabled"},
+                                    "service_tier": "standard_only"}
             if system:
                 body["system"] = "\n\n".join(system)
         else:
@@ -172,7 +174,7 @@ class NativeProviderAdapter:
             if self.profile.provider == "openai":
                 body.update(max_completion_tokens=max_output_tokens, store=False, service_tier="default")
             else:
-                body.update(max_tokens=max_output_tokens, reasoning_effort="none")
+                body.update(max_tokens=max_output_tokens, reasoning_effort="none", service_tier="standard_only")
             if response_format is not None:
                 body["response_format"] = {"type": "json_object"}
         serialized = canonical_json(body)
@@ -290,6 +292,8 @@ class NativeProviderAdapter:
                 raise ValueError("unsupported server-side tool billing")
             if usage.get("service_tier", "standard") != "standard":
                 raise ValueError("unsupported provider service tier")
+            if self.profile.pinned_id == "claude-sonnet-4-6" and usage.get("inference_geo", "global") not in {"global", "us"}:
+                raise ValueError("unsupported provider inference geography")
         else:
             prompt = _integer(usage.get("prompt_tokens"), "prompt_tokens")
             completion = _integer(usage.get("completion_tokens"), "completion_tokens")
@@ -307,7 +311,8 @@ class NativeProviderAdapter:
                                 raise ValueError("cache usage exceeds prompt total")
                         elif count != 0:
                             raise ValueError("unsupported nontext/reasoning/prediction usage")
-            if data.get("service_tier", "default") != "default":
+            allowed_tiers = {"default"} if self.profile.provider == "openai" else {"default", "standard", "standard_only"}
+            if data.get("service_tier", "default") not in allowed_tiers:
                 raise ValueError("unsupported provider service tier")
             for key in ("prompt_audio_seconds", "completion_audio_seconds"):
                 if key in usage and usage[key] != 0:
