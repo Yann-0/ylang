@@ -547,7 +547,7 @@ def execute_candidate_evaluation(
     model: str | None = None,
     simulated: bool = False,
 ) -> EvaluationRun:
-    """Reserve matched bounded arms atomically; real providers remain unavailable."""
+    """Reserve matched arms atomically and distinguish mocked transport from real execution."""
     from ylang.core.engine import Engine
     from ylang.core.bounded_completion import BoundedEvidenceError
     from ylang.usage.hard_budget import BudgetRefused, usd_to_nanos
@@ -618,6 +618,9 @@ def execute_candidate_evaluation(
         except (BudgetRefused, ValueError) as exc:
             raise EvaluationAuthorizationError("No arms dispatched: bounded cost bounds/reservation refused: " + str(exc)) from exc
 
+    simulated_execution = bounded_engine is None or all(value.simulated for value in prepared.values())
+    tariff_upper_cost = any(value.quote.adapter_id.startswith("provider:") for value in prepared.values())
+
     results: dict[str, CompletionResult | None] = {"baseline": None, "candidate": None}
     errors: dict[str, str | None] = {"baseline": None, "candidate": None}
     attempted: set[str] = set()
@@ -683,7 +686,9 @@ def execute_candidate_evaluation(
             "error": errors[label],
             "reported_error": result.error if result is not None else None,
             "accounting_error": accounting_errors.get(label),
-            "requested_model": prepared[label].quote.model if label in prepared else model,
+            "requested_model": model,
+            "reserved_model": prepared[label].quote.model if label in prepared else model,
+            "cost_is_upper_bound": tariff_upper_cost,
             "response_received": bool(result is not None and result.model_used),
             "observed_response": (json.loads(str(record["evidence_json"])).get("observed_response")
                                   if record and record.get("evidence_json") else None),
@@ -702,7 +707,9 @@ def execute_candidate_evaluation(
         verdict = "candidate_error"
     elif base is not None and candidate is not None and base.success and candidate.success:
         verdict = "both_completed"
-    confounders = ["simulated_execution"]
+    confounders = ["simulated_execution"] if simulated_execution else []
+    if tariff_upper_cost:
+        confounders.append("tariff_upper_bound_not_invoice")
     if base is not None and candidate is not None:
         if not base.model_used or not candidate.model_used:
             confounders.append("unknown_actual_model")
@@ -726,20 +733,28 @@ def execute_candidate_evaluation(
     evaluator = {
         "verdict": verdict, "quality_claim": False, "quality_improvement_demonstrated": False,
         "comparison_valid": False,
-        "comparison_scope": "bounded_simulated_mechanics" if bounded_engine else "simulated_mechanics_only",
+        "comparison_scope": ("bounded_simulated_mechanics" if simulated_execution else "bounded_provider_execution")
+                            if bounded_engine else "simulated_mechanics_only",
         "confounders": confounders,
         "arms": {label: arm_evidence(label) for label in results},
         "aborted": aborted is not None, "abort_reason": str(aborted) if aborted else None,
-        "note": "All supported adapters are synthetic. Execution establishes no provider or quality claim.",
+        "note": ("Mocked transport proves mechanics only." if simulated_execution else
+                 "Real execution does not demonstrate quality improvement or verified invoice cost."),
+        "cost_is_upper_bound": tariff_upper_cost,
         "fixture_count": len(fixtures), "model": model, "tools_granted": False, "promoted": False,
         "paired_before_dispatch": bounded_engine is not None,
         "budget_scope_limit_nanos": budget_nanos if bounded_engine else None,
         "known_cost_nanos": total_known_nanos if bounded_engine else None,
-        "billing_total_known": len(financial) == 2 and all(record.get("state") in {"SETTLED", "CANCELLED", "BREACH"}
-                                   for record in financial.values()) if bounded_engine else True,
+        "billing_total_known": (not tariff_upper_cost and len(financial) == 2 and all(
+            record.get("state") in {"SETTLED", "CANCELLED", "BREACH"} for record in financial.values()
+        )) if bounded_engine else True,
+        "billing_upper_bound_known": len(financial) == 2 and all(
+            record.get("state") in {"SETTLED", "CANCELLED", "BREACH"} for record in financial.values()
+        ) if bounded_engine else True,
     }
     run = EvaluationRun(
-        run_id=str(uuid.uuid4()), item_id=item.item_id, mode="execute", evidence_class="simulated",
+        run_id=str(uuid.uuid4()), item_id=item.item_id, mode="execute",
+        evidence_class="simulated" if simulated_execution else "controlled",
         vs_template_id=current_id, vs_template_version=current_template.version,
         vs_content_hash=content_hash(current_template.body), candidate_content_hash=item.content_hash,
         model=model or "simulated/local", authorized=True,
@@ -756,7 +771,10 @@ def execute_candidate_evaluation(
         candidate_completion_tokens=candidate.completion_tokens if candidate else None,
         evaluator_json=json.dumps(evaluator, sort_keys=True), fixture_hash=sha256_text(fixture_blob),
         created_at=utcnow_iso(),
-        note="Synthetic mechanics only; no real provider, quality claim, promotion or tools. Cost contains known charges only.",
+        note=("Mocked mechanics only; no quality claim, promotion or tools." if simulated_execution else
+              "Real bounded execution only; no quality claim, promotion or tools.")
+             + (" Cost is a standard-tariff upper liability, not verified invoice cost." if tariff_upper_cost else
+                " Cost contains known charges only."),
     )
     source_store.save_evaluation_run(run)
     if interruption is not None:

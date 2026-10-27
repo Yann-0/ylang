@@ -432,7 +432,8 @@ class Engine:
                 tool_calls=[], attempt_chain=[prepared.quote.model], explicit_model=prepared.quote.model,
                 fallback_events=[], capture_level=self._effective_capture_level(), trace_id=trace_id,
                 parent_trace_id=None, mcp_tool=None, selected_route="bounded-synthetic" if prepared.simulated else "bounded-provider",
-                cost_actual=cost, template_version=template_version, budget_request_id=request_id,
+                cost_actual=(None if prepared.quote.adapter_id.startswith("provider:") else cost),
+                template_version=template_version, budget_request_id=request_id,
             )
         except Exception as accounting_error:
             raise BoundedEvidenceError(result, accounting_error) from accounting_error
@@ -491,6 +492,7 @@ class Engine:
         attempt_index = 0
         budget_request_id: str | None = None
         paid_charge_nanos = 0
+        native_attempted = False
 
         for index, candidate in enumerate(attempt_chain):
             api_key = api_key_for_model(candidate, self._router.provider_keys)
@@ -505,6 +507,9 @@ class Engine:
                 else:
                     if tools is not None or tool_choice is not None:
                         raise BudgetRefused("paid tools are not bounded")
+                    from ylang.core.provider_adapters import NativeProviderAdapter
+
+                    native_attempted = native_attempted or type(self._bounded_adapters.get(candidate)) is NativeProviderAdapter
                     prepared = self.prepare_bounded(candidate, messages, response_format=response_format)
                     with self._ledger() as ledger:
                         reservation = ledger.reserve_many(
@@ -596,7 +601,7 @@ class Engine:
                 memory_fact_ids_json=memory_fact_ids_json,
                 mcp_server=mcp_server,
                 retention_until=retention_until,
-                cost_actual=cost if budget_request_id else cost_actual,
+                cost_actual=(None if native_attempted else cost if budget_request_id else cost_actual),
                 template_version=template_version,
                 budget_request_id=budget_request_id,
             )

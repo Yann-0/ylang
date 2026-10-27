@@ -42,6 +42,7 @@ HOT_RELOADABLE_KEYS: frozenset[str] = frozenset(
 RESTART_REQUIRED_KEYS: frozenset[str] = frozenset(
     {
         "storage_path",
+        "bounded_providers_enabled",
         "transport",
         "host",
         "port",
@@ -285,6 +286,7 @@ def restart_required_snapshot(settings: Settings) -> dict[str, str]:
     keys = settings.provider_keys
     return {
         "storage_path": str(settings.resolved_storage_path()),
+        "bounded_providers_enabled": str(settings.bounded_providers_enabled).lower(),
         "transport": settings.transport,
         "host": settings.host,
         "port": str(settings.port),
