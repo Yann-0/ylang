@@ -7,7 +7,8 @@ import logging
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,10 @@ from typing import TYPE_CHECKING, Any
 import litellm
 from litellm.caching.caching import Cache
 
+from ylang.core.bounded_completion import (
+    BoundedFailure, BoundedResponse, PreparedAttempt, SyntheticBoundedAdapter,
+    configuration, is_known_local_model, text_messages,
+)
 from ylang.core.model_router import ModelRouter
 from ylang.core.routing_reason import routing_reason_json
 from ylang.core.types import (
@@ -42,6 +47,7 @@ from ylang.usage.capture import (
     tool_calls_for_capture,
 )
 from ylang.usage.evaluation import evaluation_json_for_write
+from ylang.usage.hard_budget import BudgetRefused, CostQuote, HardBudgetStore, Reservation
 from ylang.usage.purge import DEFAULT_TRACE_RETENTION_DAYS
 from ylang.usage.store import UsageStore, dumps_json_list
 
@@ -67,6 +73,18 @@ class _StreamUsage:
     model_used: str = ""
 
 
+class _BudgetAttemptError(Exception):
+    """Carry internally generated accounting identity through the routing loop."""
+
+    def __init__(self, cause: Exception, reservation: Reservation,
+                 charge_nanos: int, retry_allowed: bool) -> None:
+        """Preserve the failed attempt even when fallback later succeeds."""
+        super().__init__(str(cause))
+        self.reservation = reservation
+        self.charge_nanos = charge_nanos
+        self.retry_allowed = retry_allowed
+
+
 class Engine:
     """Shared core engine: route by activity, call LiteLLM, log usage."""
 
@@ -84,6 +102,8 @@ class Engine:
         provider_cooldown_seconds: int | None = None,
         capture_level: CaptureLevel | None = None,
         telemetry: UsageSpanSink | None = None,
+        bounded_adapters: Mapping[str, SyntheticBoundedAdapter] | None = None,
+        budget_store: HardBudgetStore | None = None,
     ) -> None:
         """Wire a usage store and routing surface label for completion logging.
 
@@ -102,6 +122,13 @@ class Engine:
             telemetry: Optional span sink (OTLP); local usage writes always run.
         """
         self._store = store
+        self._bounded_adapters = dict(bounded_adapters or {})
+        for adapter in self._bounded_adapters.values():
+            if adapter.synthetic is not True or not adapter.adapter_id.startswith("synthetic:"):
+                raise BudgetRefused("only trusted in-process synthetic adapters supported")
+        if budget_store is not None and budget_store.database_path.resolve() != store.database_path:
+            raise BudgetRefused("budget store must share the canonical usage database")
+        self._budget_store = budget_store
         self._surface = surface
         self._base_settings = base_settings
         if capture_level is not None:
@@ -192,6 +219,152 @@ class Engine:
         effective = merge_settings(self._base_settings, overrides)
         return parse_capture_level(effective.capture_level)
 
+    @contextmanager
+    def _ledger(self) -> Iterator[HardBudgetStore]:
+        """Own a dedicated budget connection or use the explicitly injected one."""
+        if self._budget_store is not None:
+            yield self._budget_store
+        else:
+            with HardBudgetStore.open(self._store.database_path) as ledger:
+                yield ledger
+
+    def prepare_bounded(
+        self, model: str, messages: list[Message], *, max_output_tokens: int = 512,
+    ) -> PreparedAttempt:
+        """Refuse unregistered providers before any transport and freeze the request."""
+        adapter = self._bounded_adapters.get(model)
+        if adapter is None:
+            raise BudgetRefused("paid model has no certified bounded adapter")
+        configuration(max_output_tokens)
+        original_messages = text_messages(messages)
+        prepared = adapter.prepare(model, json.loads(original_messages),
+                                   max_output_tokens=max_output_tokens)
+        prepared.validate()
+        if (prepared.quote.model != model or prepared.quote.adapter_id != adapter.adapter_id
+                or prepared.quote.max_output_tokens != max_output_tokens
+                or text_messages(prepared.messages()) != original_messages):
+            raise BudgetRefused("adapter changed the prepared request identity")
+        return prepared
+
+    def reserve_bounded_pair(
+        self, prepared: tuple[PreparedAttempt, PreparedAttempt], *,
+        scope_limit_nanos: int,
+        metadata: tuple[dict[str, object], dict[str, object]],
+    ) -> tuple[Reservation, Reservation]:
+        """Atomically reserve both matched arms before either can dispatch."""
+        for item in prepared:
+            self._validate_adapter(item)
+        left, right = prepared
+        if (left.config_json != right.config_json or left.quote.model != right.quote.model
+                or left.quote.adapter_id != right.quote.adapter_id
+                or left.quote.account_id != right.quote.account_id
+                or left.quote.pricing_version != right.quote.pricing_version):
+            raise BudgetRefused("paired attempts require identical model and configuration")
+        with self._ledger() as ledger:
+            reservations = ledger.reserve_many(
+                [item.quote for item in prepared], scope_limit_nanos=scope_limit_nanos,
+                metadata=metadata,
+            )
+        return reservations[0], reservations[1]
+
+    def bounded_attempt_evidence(self, reservation: Reservation) -> dict[str, object]:
+        """Read durable attempt evidence for paired evaluation integrity checks."""
+        with self._ledger() as ledger:
+            return ledger.get_attempt(reservation.attempt_id)
+
+    def _validate_adapter(self, prepared: PreparedAttempt) -> SyntheticBoundedAdapter:
+        """Revalidate immutable request and trusted adapter identity before funding."""
+        prepared.validate()
+        adapter = self._bounded_adapters.get(prepared.quote.model)
+        if (adapter is None or adapter.synthetic is not True
+                or adapter.adapter_id != prepared.quote.adapter_id):
+            raise BudgetRefused("prepared adapter is not trusted by this Engine")
+        return adapter
+
+    def _dispatch_bounded(
+        self, prepared: PreparedAttempt, reservation: Reservation,
+    ) -> BoundedResponse:
+        """Persist dispatch intent and settle every outcome, including cancellation."""
+        adapter = self._validate_adapter(prepared)
+        with self._ledger() as ledger:
+            attempt = ledger.get_attempt(reservation.attempt_id)
+            if CostQuote.from_json(str(attempt["quote_json"])) != prepared.quote:
+                raise BudgetRefused("reservation does not match prepared quote")
+            token = ledger.begin_dispatch(reservation)
+            try:
+                response = adapter.execute(prepared)
+                response.validate(prepared)
+            except BaseException as exc:
+                known = isinstance(exc, BoundedFailure)
+                charge = exc.charge_nanos if isinstance(exc, BoundedFailure) else None
+                evidence: dict[str, object] = exc.evidence if isinstance(exc, BoundedFailure) else {
+                    "source": "synthetic-adapter", "error_class": type(exc).__name__,
+                    "billability": "unknown",
+                }
+                try:
+                    ledger.settle(token, charge, evidence=evidence)
+                except Exception as settlement_error:
+                    if not isinstance(exc, Exception):
+                        raise exc from settlement_error
+                    raise _BudgetAttemptError(settlement_error, token, 0, False) from exc
+                if not isinstance(exc, Exception):
+                    raise
+                retry = (known and isinstance(exc, BoundedFailure) and exc.retry_allowed
+                         and exc.charge_nanos <= prepared.quote.max_cost_nanos)
+                raise _BudgetAttemptError(exc, token, charge or 0, retry) from exc
+            try:
+                ledger.settle(token, response.charge_nanos, evidence=response.evidence)
+            except Exception as exc:
+                raise _BudgetAttemptError(exc, token, 0, False) from exc
+            if response.charge_nanos > prepared.quote.max_cost_nanos:
+                raise _BudgetAttemptError(
+                    BudgetRefused("adapter charge exceeded certified bound"), token,
+                    response.charge_nanos, False,
+                )
+            return response
+
+    def complete_prepared(
+        self, prepared: PreparedAttempt, reservation: Reservation, *,
+        activity: str, template_version: int | None = None,
+    ) -> CompletionResult:
+        """Run exactly one pre-reserved synthetic arm, without fallback or caching."""
+        started = time.perf_counter()
+        trace_id = str(uuid.uuid4())
+        response: BoundedResponse | None = None
+        error: Exception | None = None
+        charge_nanos = 0
+        try:
+            response = self._dispatch_bounded(prepared, reservation)
+            charge_nanos = response.charge_nanos
+        except Exception as exc:
+            error = exc
+            if isinstance(exc, _BudgetAttemptError):
+                charge_nanos = exc.charge_nanos
+        latency = int((time.perf_counter() - started) * 1000)
+        content = response.content if response else ""
+        prompt_tokens = response.prompt_tokens if response else 0
+        completion_tokens = response.completion_tokens if response else 0
+        cost = charge_nanos / 1_000_000_000
+        # Link only a dispatched terminal attempt; failed predispatch validation leaves its hold.
+        evidence = self.bounded_attempt_evidence(reservation)
+        budget_request_id = reservation.request_id if evidence.get("state") in {"SETTLED", "UNCERTAIN", "BREACH"} else None
+        self._write_traced_usage(
+            messages=prepared.messages(), activity=activity, model_used=prepared.quote.model,
+            prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, cost=cost,
+            improver_fired=False, improver_accepted=False, improver_input_sample=None,
+            latency_ms=latency, success=error is None, error=str(error) if error else None,
+            last_exc=error, tool_calls=[], attempt_chain=[prepared.quote.model],
+            explicit_model=prepared.quote.model, fallback_events=[],
+            capture_level=self._effective_capture_level(), trace_id=trace_id,
+            parent_trace_id=None, mcp_tool=None, selected_route="bounded-synthetic",
+            cost_actual=cost, template_version=template_version,
+            budget_request_id=budget_request_id,
+        )
+        return CompletionResult(content=content, model_used=prepared.quote.model,
+                                prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+                                cost=cost, latency_ms=latency, success=error is None,
+                                error=str(error) if error else None, trace_id=trace_id)
+
     def complete(
         self,
         messages: list[Message],
@@ -220,8 +393,8 @@ class Engine:
     ) -> CompletionResult:
         """Resolve model from activity, complete via LiteLLM, write usage.
 
-        When ``usage_cancelled`` is set before the usage write, the write is
-        skipped so a caller timeout path can record the outcome instead.
+        Caller cancellation may suppress local presentation writes. Paid attempt
+        settlement and its linked usage row remain mandatory.
         """
         self._refresh_routing()
         attempt_chain = self._router.build_attempt_chain(
@@ -243,25 +416,33 @@ class Engine:
         success = False
         fallback_events: list[dict[str, Any]] = []
         attempt_index = 0
+        budget_request_id: str | None = None
+        paid_charge_nanos = 0
 
         for index, candidate in enumerate(attempt_chain):
             api_key = api_key_for_model(candidate, self._router.provider_keys)
             try:
-                (
-                    content,
-                    model_used,
-                    prompt_tokens,
-                    completion_tokens,
-                    cost,
-                    tool_calls,
-                ) = _call_litellm(
-                    candidate,
-                    messages,
-                    api_key=api_key,
-                    response_format=response_format,
-                    tools=tools,
-                    tool_choice=tool_choice,
-                )
+                if is_known_local_model(candidate):
+                    (content, model_used, prompt_tokens, completion_tokens,
+                     cost, tool_calls) = _call_litellm(
+                        candidate, messages, api_key=api_key, response_format=response_format,
+                        tools=tools, tool_choice=tool_choice,
+                    )
+                    cost += paid_charge_nanos / 1_000_000_000
+                else:
+                    if tools is not None or tool_choice is not None or response_format is not None:
+                        raise BudgetRefused("paid tools and response formats are not bounded")
+                    max_output = getattr(self._base_settings, "hard_budget_max_output_tokens", 512)
+                    prepared = self.prepare_bounded(candidate, messages, max_output_tokens=max_output)
+                    with self._ledger() as ledger:
+                        reservation = ledger.reserve_many([prepared.quote], request_id=budget_request_id)[0]
+                    budget_request_id = reservation.request_id
+                    response = self._dispatch_bounded(prepared, reservation)
+                    paid_charge_nanos += response.charge_nanos
+                    content, model_used = response.content, response.model
+                    prompt_tokens, completion_tokens = response.prompt_tokens, response.completion_tokens
+                    cost = paid_charge_nanos / 1_000_000_000
+                    tool_calls = []
                 success = True
                 error = None
                 last_exc = None
@@ -270,7 +451,15 @@ class Engine:
             except Exception as exc:
                 last_exc = exc
                 error = str(exc)
-                if index + 1 >= len(attempt_chain) or not _should_try_next_model(exc):
+                attempt_index = index
+                if isinstance(exc, _BudgetAttemptError):
+                    budget_request_id = exc.reservation.request_id
+                    paid_charge_nanos += exc.charge_nanos
+                    cost = paid_charge_nanos / 1_000_000_000
+                    retry_allowed = exc.retry_allowed
+                else:
+                    retry_allowed = is_known_local_model(candidate) and _should_try_next_model(exc)
+                if index + 1 >= len(attempt_chain) or not retry_allowed:
                     break
                 next_model = attempt_chain[index + 1]
                 error_class = classify_error(exc, success=False) or "error"
@@ -291,7 +480,7 @@ class Engine:
                 )
 
         latency_ms = int((time.perf_counter() - started) * 1000)
-        if usage_cancelled is None or not usage_cancelled.is_set():
+        if budget_request_id is not None or usage_cancelled is None or not usage_cancelled.is_set():
             self._write_traced_usage(
                 messages=messages,
                 activity=activity,
@@ -322,8 +511,9 @@ class Engine:
                 memory_fact_ids_json=memory_fact_ids_json,
                 mcp_server=mcp_server,
                 retention_until=retention_until,
-                cost_actual=cost_actual,
+                cost_actual=cost if budget_request_id else cost_actual,
                 template_version=template_version,
+                budget_request_id=budget_request_id,
             )
         return CompletionResult(
             content=content,
@@ -387,6 +577,8 @@ class Engine:
             for index, candidate in enumerate(attempt_chain):
                 api_key = api_key_for_model(candidate, self._router.provider_keys)
                 try:
+                    if not is_known_local_model(candidate):
+                        raise BudgetRefused("paid streaming has no certified budget boundary")
                     stream_usage = _StreamUsage(model_used=candidate)
                     for chunk in _iter_litellm_stream(
                         candidate,
@@ -518,6 +710,7 @@ class Engine:
         retention_until: str | None = None,
         cost_actual: float | None = None,
         template_version: int | None = None,
+        budget_request_id: str | None = None,
     ) -> None:
         """Persist one usage row with control-plane trace fields."""
         resolution = self._router.resolve(
@@ -613,6 +806,7 @@ class Engine:
             retention_until=resolved_retention,
             cost_actual=cost_actual,
             template_version=template_version,
+            budget_request_id=budget_request_id,
         )
         self._emit_telemetry(
             activity=activity,
@@ -746,6 +940,8 @@ def _call_litellm(
         "messages": messages,
         "caching": True,
     }
+    if is_known_local_model(model):
+        kwargs["api_base"] = "http://localhost:11434"
     if api_key is not None:
         kwargs["api_key"] = api_key
     if response_format is not None:
@@ -775,6 +971,8 @@ def _iter_litellm_stream(
         "stream": True,
         "stream_options": {"include_usage": True},
     }
+    if is_known_local_model(model):
+        kwargs["api_base"] = "http://localhost:11434"
     if api_key is not None:
         kwargs["api_key"] = api_key
     if tools is not None:

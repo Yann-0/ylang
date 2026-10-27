@@ -183,6 +183,14 @@ class UsageStore:
         self._connection = connection
         self._reconnect: Callable[[], None] | None = None
 
+    @property
+    def database_path(self) -> Path:
+        """Resolve the actual main database; private memory stores cannot fund calls."""
+        for _, name, filename in self._connection.execute("PRAGMA database_list"):
+            if name == "main" and filename:
+                return Path(filename).resolve()
+        raise ValueError("hard budget requires a file-backed canonical database")
+
     def bind_reconnect(self, callback: Callable[[], None]) -> None:
         """Register a callback to refresh all stores after a read-only write failure."""
         self._reconnect = callback
@@ -285,7 +293,8 @@ class UsageStore:
         retention_until: str | None = None,
         cost_actual: float | None = None,
         template_version: int | None = None,
-    ) -> None:
+        budget_request_id: str | None = None,
+    ) -> int:
         """Insert one per-request usage row. Commits immediately."""
         when = timestamp or datetime.now(timezone.utc)
         sample = truncate_improver_input_sample(improver_input_sample)
@@ -338,8 +347,18 @@ class UsageStore:
             cost_actual,
             template_version,
         )
+        if budget_request_id is not None:
+            from ylang.usage.hard_budget import HardBudgetStore
+
+            with HardBudgetStore.open(self.database_path) as ledger:
+                return ledger.link_usage(
+                    budget_request_id,
+                    lambda connection: self._execute_write(
+                        params, connection=connection, commit=False
+                    ),
+                )
         try:
-            self._execute_write(params)
+            return self._execute_write(params)
         except sqlite3.OperationalError as exc:
             if not _is_readonly_error(exc):
                 raise
@@ -350,10 +369,15 @@ class UsageStore:
                 self._connection = self._database.connection
             else:
                 raise
-            self._execute_write(params)
+            return self._execute_write(params)
 
-    def _execute_write(self, params: tuple[object, ...]) -> None:
-        self._connection.execute(
+    def _execute_write(
+        self, params: tuple[object, ...], *,
+        connection: sqlite3.Connection | None = None, commit: bool = True,
+    ) -> int:
+        """Insert on the transaction owner's connection and return this exact row ID."""
+        target = connection if connection is not None else self._connection
+        cursor = target.execute(
             """
             INSERT INTO usage (
                 timestamp, surface, activity, model_used, prompt_tokens, cost,
@@ -376,7 +400,11 @@ class UsageStore:
             """,
             params,
         )
-        self._connection.commit()
+        if commit:
+            target.commit()
+        if cursor.lastrowid is None:
+            raise RuntimeError("usage insertion did not return a row ID")
+        return cursor.lastrowid
 
     def update_last_improver_accepted(self, accepted: bool) -> None:
         """Set improver_accepted on the most recently inserted usage row."""
