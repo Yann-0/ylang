@@ -1,7 +1,7 @@
 # Evaluation methodology
 
-Ylang separates **inspection**, **observational trends**, and **simulated
-execution**. A working runner does not prove a prompt is better.
+Ylang separates **inspection**, **observational trends**, **simulated
+execution**, and separately authorized **controlled execution**. A working runner does not prove a prompt is better.
 
 ## Modes
 
@@ -9,7 +9,7 @@ execution**. A working runner does not prove a prompt is better.
 |------|---------|------------|----------------|----------------|
 | Inspect | `ylang prompts candidates evaluate ID` (default) | none | observational | static risk/quality, body diff, all-time usage trend labeled mixed/unknown, inactive experiment `traffic_pct=0` |
 | Execute simulated | `--mode execute --simulated --fixture-file PATH --vs TEMPLATE` | none | simulated | baseline and candidate outputs from the built-in `SimulatedCompleter` |
-| Execute paid (unavailable) | `--mode execute --authorize-paid --budget-usd N` | none: refused before dispatch | no executed run | authorization and budget validation errors |
+| Execute native (disabled by default) | `--mode execute --authorize-paid --budget-usd N --model PIN` | only with separate native activation, policy and sufficient paired reservations | controlled for actual transport; simulated for fixtures | exact native/request/response and conservative tariff evidence; no quality claim |
 
 Portal **Inspect vs current (no LLM)** is inspect only. Its safe inspection
 control cannot become a paid operation.
@@ -22,12 +22,13 @@ Defaults:
 - `--budget-usd` = `0`
 - `--authorize-paid` = off
 
-Paid provider execution remains **unavailable**: the real-adapter registry is
-empty. Supplying authorization or a price estimate cannot enable it. Every paid
-Engine path requires a trusted bound and canonical shared policy; unsupported
-models, paid streaming, tools and structured paid requests refuse before
-transport. Known local Ollama execution uses the loopback endpoint; Ollama cloud
-variants are refused. This local endpoint is assumed unmetered.
+Native providers are **disabled by default**. Explicit environment activation
+cannot replace canonical monetary authority. A closed catalog supports the five
+configured activity chains, JSON improvement and buffered SSE; unsupported
+models, paid tools and richer output schemas refuse before transport. See
+[Bounded providers](bounded-providers.md) for pinned identities, native wire
+contracts, tariff expiry, conservative money bounds and separate live gates.
+Local Ollama uses a trusted unmetered loopback daemon; cloud variants are refused.
 
 The CLI preserves `--budget-usd` as an exact decimal string. Programmatic bounded
 evaluation accepts a decimal string or `Decimal`, rejects binary-float authority,
@@ -42,9 +43,9 @@ accepts only the built-in local `SimulatedCompleter`. A separate developer
 integration path uses the actual Engine with explicitly injected synthetic
 adapters. Those adapters freeze text requests, output limits, model/account and
 pricing identities, disable caching and hidden retries, and are always labeled
-simulated. No runtime setting or request payload registers a real adapter.
+simulated. Fixture native transports are also labeled simulated. No request payload can register a provider or grant monetary authority.
 
-For a bounded synthetic comparison, both arms reserve their maximum charge in
+For a bounded comparison, both arms reserve their maximum charge in
 one SQLite `BEGIN IMMEDIATE` transaction, against the shared rolling 24-hour cap
 and evaluation lifetime cap, before either dispatches. One attempt per arm is
 allowed. A failure stops the pair and cancels only provably undispatched arms.
@@ -71,17 +72,17 @@ domain must share this canonical database and compatible code. Separate
 databases and external provider calls cannot share its aggregate limit.
 
 Private history is not replayed. Execution uses only operator-supplied fixture
-text. No supported adapter makes a real provider request. Provider certification,
-trusted token/price upper bounds and separately approved provider conformance
-checks remain the next gate before real paid evaluation.
+text. Native conformance and paid canaries were not run by offline qualification;
+they require separate approval. Authentication flags alone cannot authorize a
+model whose tariff has expired or a request without reserved capacity.
 
 ## Execution evidence
 
-Each attempted simulated run retains per-arm `success`, actual `model_used`,
+Each attempted run retains per-arm `success`, actual `model_used`,
 `trace_id` when supplied, tokens, cost, latency, normalized error, and raw
 reported error in `evaluator_json.arms`. The top-level `model` remains the
 requested model; it does not replace actual response identities. Unavailable
-effective generation settings and trace identifiers remain unknown for the built-in simulator. Bounded synthetic arms retain their exact configuration, reservation, integer charge and pricing/request identity. Unknown bounded cost stays null in arm evidence; the top-level cost contains known charges only and `billing_total_known` states whether the total is complete.
+effective generation settings and trace identifiers remain unknown for the built-in simulator. Bounded synthetic arms retain their exact configuration, reservation, integer charge and pricing/request identity. Unknown bounded cost stays null in arm evidence. Native amounts are conservative tariff upper liabilities: `cost_is_upper_bound=true`, `billing_total_known=false`; `billing_upper_bound_known` identifies complete terminal liability evidence. Native usage `cost_actual` stays null. Synthetic exact charge evidence retains its existing classification.
 
 Explicit completion success determines the operational status. A failed
 completion with empty error text remains a failure; an empty output does not
@@ -149,7 +150,7 @@ Inconclusive is a valid outcome.
 - No LLM-as-judge. No automatic promotion from any verdict.
 - Live provider execution and quality improvement are **not** demonstrated by
   CI or by the simulator.
-- The ledger and output contract are qualified with synthetic adapters only. No real provider pricing, billing or wire limit is certified.
+- The ledger and native wire/output contracts are qualified with offline transports. Real account availability, invoice pricing and provider conformance remain unverified.
 - Abrupt termination can leave durable dispatch intent requiring explicit reconciliation; a timer or lease cannot prove an attempt was free.
 - The budget ledger must outlive trace retention. Under an initialized policy, database triggers protect linked usage rows and nonzero legacy-cost rows from deletion on ordinary connections, even with foreign keys disabled. Monetary cost/time fields become immutable; trace payload fields can still be redacted. Deletion protection is conservative at every age until an explicit monetary archival procedure is provided. Backups, migrations, policy activation and any update of the running application require an explicit operator procedure.
 - Ylang provider USD and account-wide Codex subscription quota are separate controls.

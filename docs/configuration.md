@@ -1,5 +1,16 @@
 # Configuration
 
+## Native bounded providers
+
+`YLANG_BOUNDED_PROVIDERS_ENABLED` defaults to `false` and requires a process
+restart. A runtime/console override cannot activate it. Even when enabled, paid
+dispatch requires a separately initialized canonical monetary policy; the old
+daily spend meter is not funding authority. Supported configured routes, pinned
+models, expiring tariffs, conservative holds, JSON improvement and buffered SSE
+are documented in [Bounded providers](bounded-providers.md). No live
+configuration or policy is initialized by an offline qualification.
+
+
 This is the **complete operator reference** for how Ylang is configured: env
 files, process environment, SQLite runtime overrides (Portal **Parameters**),
 provider keys, routing, privacy, hooks, and optional telemetry.

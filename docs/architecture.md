@@ -1,5 +1,13 @@
 # Architecture
 
+Native paid text/JSON execution uses a closed, disabled-by-default adapter
+registry behind the same Engine. It shares the durable SQLite budget ledger
+with all callers. Requested aliases and actual pinned responses remain distinct;
+streaming buffers one funded completion before emitting chunks. Unsupported
+paid tools/models remain refused. Local Ollama retains its existing LiteLLM
+path. See [Bounded providers](bounded-providers.md).
+
+
 Ylang follows a **single core engine, multiple thin faces** design. Business logic lives in `src/ylang/core` and domain packages; face adapters only translate I/O.
 
 **Three live faces** share one core when running on HTTP transport (`YLANG_TRANSPORT=http`):
@@ -37,7 +45,8 @@ flowchart TB
     end
 
     subgraph external["External"]
-        LLM["LiteLLM → providers"]
+        LLM["LiteLLM → local Ollama"]
+        NATIVE["Pinned native providers<br/>disabled by default"]
     end
 
     MCP --> IMP
@@ -53,6 +62,7 @@ flowchart TB
     ENG --> RTR
     ENG --> USG
     ENG --> LLM
+    ENG --> NATIVE
     LIB --> DB
     USG --> DB
     MEM --> DB
@@ -328,7 +338,7 @@ Edit-distance Feedback requires the **dual gate** (console `edit_feedback` + hoo
 - Admin console on HTTP (third face) — Operator Hub + Optimize wizard, templates, facts, analytics, proposals, Parameters, ops
 - Bearer auth on `/mcp`, `/v1/*`, `/console/*`, and `/usage` when `YLANG_AUTH_TOKEN` is set; `/health` exempt
 - Activity-based model routing, fallback chain, provider cooldown, usage-based preference boost
-- **Daily budget cap enforced at runtime** — when `YLANG_DAILY_BUDGET_USD` is set and rolling 24h spend ≥ cap, `ModelRouter.apply_budget_filter` drops cloud models from candidate lists (local `ollama/*` remains via fallback); 80% startup stderr warning
+- **Separate budget controls** — `YLANG_DAILY_BUDGET_USD` is a retrospective routing filter; canonical SQLite reservations supply atomic native paid admission. Expiring full-context tariff bounds and unresolved holds are documented in [Bounded providers](bounded-providers.md).
 - Usage logging on every LLM call; `GET /usage` dashboard and CLI export
 - Pattern detection (`detect_patterns`, `ylang patterns suggest` / `apply`) and learned-template improver context
 - Propose-only improver and optimization surfaces (`optimization_suggestions`, optional `YLANG_EXPERIMENTS=1`)

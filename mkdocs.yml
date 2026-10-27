@@ -66,6 +66,7 @@ nav:
   - Configuration: configuration.md
   - Portal: portal.md
   - Models: models.md
+  - Bounded providers: bounded-providers.md
   - Architecture: architecture.md
   - MCP tools: mcp-tools.md
   - CLI: cli.md

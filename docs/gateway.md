@@ -1,5 +1,12 @@
 # OpenAI-compatible gateway
 
+Native provider support is opt-in and uses the shared monetary ledger.
+Its SSE path buffers one bounded provider completion and settles before the
+first chunk; it does not make an incremental upstream stream. Paid tools and
+unreviewed models remain refused. See [Bounded providers](bounded-providers.md)
+for activation, supported identities, tariff ceilings and remaining live gates.
+
+
 Ylang exposes an **OpenAI-compatible HTTP gateway** on the same host, port, and bearer auth as the MCP HTTP transport. Point Cursor (or any OpenAI-compatible client) at it to route real coding traffic through Ylang's activity-based model selection.
 
 The gateway is enabled automatically when `YLANG_TRANSPORT=http`. Startup stderr logs the route paths and virtual model names. **Stdio transport has no `/v1/*` routes** — use HTTP for the gateway.

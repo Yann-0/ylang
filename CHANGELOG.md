@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bounded native provider support** — closed, disabled-by-default Anthropic/OpenAI/Mistral adapters with pinned models, expiring conservative tariffs, exact native wire binding, one HTTPS attempt, strict usage evidence, JSON prompt improvement and buffered SSE. Five configured activity chains have offline qualification; no paid canary or deployment is implied.
+
 - **Durable offline budget controls** — canonical SQLite integer-money reservations, fenced attempt accounting, conservative unknown-billing holds, atomic usage linking and paired synthetic evaluation reservations. Real provider adapters remain disabled.
 
 - **On-prem CI preparation** — approved-SHA offline controller, serialized private jobs, failure/timeout evidence, clean installed-wheel smoke, and hardened systemd service/timer templates. Activation and cloud workflow disablement require separate approval.
@@ -27,13 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Bounded Engine dispatch** — paid calls require verified adapter bounds and a shared policy; unsupported paid streaming/tools/structured requests refuse before transport. Local Ollama is pinned to loopback and cloud variants are refused.
+- **Bounded Engine dispatch** — paid calls require verified adapter bounds and a shared policy; unsupported paid tools and richer schemas refuse before transport; reviewed native providers support JSON objects and bounded buffered SSE. Local Ollama is pinned to loopback and cloud variants are refused.
 - **Exact evaluation caps** — preserve decimal CLI budgets, expose a validated output-token ceiling, and retain partial paired-run financial evidence without quality claims.
 
 - **CI controller migration candidate** — remove GitHub-hosted workflow definitions, correct clone-root setup examples, and supersede automatic cloud documentation publishing instructions. No live service or GitHub settings changed.
 - **Prompt intelligence fail-closed** — unknown/missing license policy blocks scheduled ingest; truncated trees and partial downloads preserve last-known-good; refreshes are serialized and honor per-source intervals
 - **Live source honesty** — `github-awesome-copilot` is incompatible as of 2026-09-13 (no `*.prompt.md`); agents/skills are not converted into ordinary prompts and the source cannot be enabled
-- **Evaluate default stays inspect** — zero paid calls; only built-in `--simulated` execution is currently available. Paid execution remains unavailable until enforceable bounds exist; Portal is inspect-only
+- **Evaluate default stays inspect** — zero paid calls by default; built-in simulation and explicitly funded bounded execution remain distinct. Native transport is disabled pending separate activation/conformance decisions; Portal is inspect-only
 - **Outcome attribution** — post-promotion metrics use exact template version and observation window; unversioned events stay unknown; observational trends are labeled separately from controlled execute evidence
 
 ## [0.7.0] - 2026-09-12
