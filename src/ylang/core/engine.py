@@ -364,6 +364,13 @@ class Engine:
                 )
                 if observed is not None:
                     evidence["observed_response"] = observed.observation()
+                    if (type(adapter) is NativeProviderAdapter and observed.model == prepared.quote.model
+                            and all(type(value) is int and 0 <= value <= 2**63 - 1 for value in
+                                    (observed.prompt_tokens, observed.completion_tokens, observed.charge_nanos))
+                            and observed.charge_nanos > prepared.quote.max_cost_nanos):
+                        charge = observed.charge_nanos
+                        evidence.update(cost_is_upper_bound=True, billability="reported tariff bound breach",
+                                        reported_charge_nanos=charge)
                 try:
                     if type(adapter) is NativeProviderAdapter and isinstance(exc, BudgetRefused):
                         ledger.freeze("native_provider_contract_violation")
