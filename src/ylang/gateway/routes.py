@@ -274,6 +274,8 @@ async def _stream_response(
         finish_reason = "stop"
         try:
             for chunk in chunks:
+                if chunk.finish_reason:
+                    finish_reason = chunk.finish_reason
                 if chunk.usage is not None:
                     yield sse_chunk_payload(
                         completion_id=completion_id,

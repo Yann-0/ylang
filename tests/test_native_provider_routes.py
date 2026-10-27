@@ -6,6 +6,7 @@ local daemon, environment file, or deployed database participates.
 from __future__ import annotations
 
 from functools import partial
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
@@ -52,6 +53,16 @@ TARIFF = {
     "mistral/mistral-small-2603": (262_144, 150, 600),
 }
 MESSAGES = [{"role": "user", "content": "Reply with a short answer."}]
+FIXTURE_NOW = datetime(2026, 10, 27, 16, tzinfo=timezone.utc)
+
+
+class FixtureClock(datetime):
+    """Keep positive protocol fixtures deterministic after the real tariff expires."""
+
+    @classmethod
+    def now(cls, tz=None):
+        """Return the controlled reviewed UTC instant for money/quote clocks only."""
+        return FIXTURE_NOW
 
 
 class FixtureHTTP:
@@ -121,6 +132,8 @@ def forbid_legacy_dispatch(monkeypatch: pytest.MonkeyPatch):
 def engine_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Wire the real settings factory with only its HTTP transport replaced."""
     stores = []
+    monkeypatch.setattr("ylang.core.bounded_completion.datetime", FixtureClock)
+    monkeypatch.setattr("ylang.usage.hard_budget.datetime", FixtureClock)
 
     def create(transport: FixtureHTTP | None = None, *, enabled: bool = True,
                limit: int | None = 100_000_000_000, runtime: bool = False):
@@ -152,7 +165,7 @@ def engine_factory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
                 )
         monkeypatch.setattr(
             provider_adapters, "build_provider_adapters",
-            partial(build_provider_adapters, transport=transport),
+            partial(build_provider_adapters, transport=transport, clock=lambda: FIXTURE_NOW),
         )
         engine = Engine.from_settings(store, surface="gateway", settings=settings)
         assert all(type(adapter) is NativeProviderAdapter
@@ -414,3 +427,66 @@ def test_gateway_retains_native_termination_reason(engine_factory, model: str, r
     assert evidence["observed_response"]["finish_reason"] == reason
     expected_native = ("max_tokens" if reason == "length" else "refusal") if model == "route-code" else reason
     assert evidence["provider_stop_reason"] == expected_native
+
+
+def native_evaluation_fixture(engine: Engine):
+    """Seed quarantined synthetic candidate data on the Engine's own private database."""
+    from ylang.importer.ingest import ingest_parsed_items
+    from ylang.importer.refresh import open_source_store
+    from ylang.importer.source_types import ParsedUpstreamItem
+    from ylang.library.store import from_connection
+    library = from_connection(engine.store._connection)
+    sources = open_source_store(library)
+    source = sources.get_source("prompts-chat")
+    assert source is not None
+    ingest_parsed_items(sources, library, source,
+                        [ParsedUpstreamItem("native-fixture", "Native fixture", "Candidate fixture text.")],
+                        revision="offline-native", mark_removed=False)
+    library.save("native-baseline", name="Baseline", body="Baseline fixture text.",
+                 params=[], source="user", visibility="private")
+    item = sources.get_item("prompts-chat:native-fixture")
+    assert item is not None
+    return library, sources, item
+
+
+def test_native_pair_retains_simulation_and_upper_cost_semantics(engine_factory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fund both real-adapter fixture arms before dispatch and never claim invoice/quality proof."""
+    from ylang.importer.evaluate import execute_candidate_evaluation
+    engine, transport = engine_factory()
+    library, sources, item = native_evaluation_fixture(engine)
+    original = transport.post
+    observed_states = []
+    def post(*args, **kwargs):
+        """Observe ledger state before each fixture response without replacing adapter logic."""
+        observed_states.append([row["state"] for row in ledger_rows(engine, "budget_attempts")])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(transport, "post", post)
+    run = execute_candidate_evaluation(item, library, completer=engine, fixtures=["Synthetic input."],
+                                       source_store=sources, vs_template_id="native-baseline",
+                                       authorize_paid=True, budget_usd="1", model=MISTRAL)
+    evidence = json.loads(run.evaluator_json)
+    assert run.evidence_class == "simulated"
+    assert observed_states[0] == ["DISPATCHING", "RESERVED"]
+    assert len(transport.calls) == 2
+    assert evidence["comparison_valid"] is False and evidence["quality_claim"] is False
+    assert evidence["cost_is_upper_bound"] is True
+    assert evidence["billing_total_known"] is False and evidence["billing_upper_bound_known"] is True
+    assert "simulated_execution" in evidence["confounders"]
+    for arm in evidence["arms"].values():
+        assert arm["requested_model"] == MISTRAL
+        assert arm["reserved_model"] == arm["model_used"] == PINNED[MISTRAL]
+    usage = engine.store.recall_usage(UsageWindow.last_hours(1))
+    assert len(usage) == 2 and all(row.cost_actual is None for row in usage)
+
+
+def test_native_pair_insufficient_scope_never_dispatches(engine_factory) -> None:
+    """Refuse the pair's full-context liability before either native request starts."""
+    from ylang.importer.evaluate import EvaluationAuthorizationError, execute_candidate_evaluation
+    engine, transport = engine_factory()
+    library, sources, item = native_evaluation_fixture(engine)
+    with pytest.raises(EvaluationAuthorizationError, match="No arms dispatched"):
+        execute_candidate_evaluation(item, library, completer=engine, fixtures=["Synthetic input."],
+                                     source_store=sources, vs_template_id="native-baseline",
+                                     authorize_paid=True, budget_usd="0.01", model=MISTRAL)
+    assert transport.calls == []
+    assert ledger_rows(engine, "budget_attempts") == []
