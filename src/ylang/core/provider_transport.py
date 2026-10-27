@@ -132,6 +132,8 @@ class DirectHTTPSProviderTransport:
                 if size > MAX_RESPONSE_BYTES:
                     raise ProviderTransportError("provider response exceeds byte limit")
                 parts.append(chunk)
+            if length is not None and int(length) != size:
+                raise ProviderTransportError("provider response body ended before its declared length")
             request_id = response.getheader("request-id") or response.getheader("x-request-id")
             if request_id is not None:
                 request_id = request_id[:256]

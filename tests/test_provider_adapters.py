@@ -360,3 +360,18 @@ def test_direct_transport_total_deadline_interrupts_partial_reply() -> None:
                             DirectHTTPSProviderTransport().post("api.openai.com", "/v1/chat/completions", {}, b"{}", 1)
     assert connection.request.call_count == 1 and response.read1.call_count == 1
     connection.close.assert_called_once()
+
+
+def test_truncated_http_body_is_uncertain_even_when_json_prefix_is_complete() -> None:
+    response = MagicMock(status=200)
+    response.getheader.return_value = "100"
+    response.read1.side_effect = [b"{}", b""]
+    connection = MagicMock()
+    connection.getresponse.return_value = response
+    with patch("ylang.core.provider_transport._resolve_address", return_value=(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))):
+        with patch("ylang.core.provider_transport.socket.socket"):
+            with patch("ylang.core.provider_transport.ssl.create_default_context"):
+                with patch("ylang.core.provider_transport.http.client.HTTPSConnection", return_value=connection):
+                    with pytest.raises(ProviderTransportError):
+                        DirectHTTPSProviderTransport().post("api.openai.com", "/v1/chat/completions", {}, b"{}", 1)
+    assert connection.request.call_count == 1 and response.read1.call_count == 2
