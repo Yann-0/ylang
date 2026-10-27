@@ -1,15 +1,19 @@
 """Offline adversarial qualification of the paid Engine boundary."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
+import litellm
 import pytest
 
-from tests.bounded_adapter_helpers import OfflineAdapter, initialize_budget, response
+from tests.bounded_adapter_helpers import (
+    MockedCompletionAdapter, OfflineAdapter, initialize_budget, response,
+)
 from ylang.core.bounded_completion import BoundedFailure, canonical_json
 from ylang.core.engine import Engine
 from ylang.core.model_router import ModelRouter
@@ -265,3 +269,29 @@ def test_injected_ledger_cannot_use_another_database(tmp_path: Path) -> None:
     with HardBudgetStore.open(tmp_path / "other.db") as ledger:
         with pytest.raises(BudgetRefused):
             Engine(engine.store, surface="test", budget_store=ledger)
+
+
+def test_bounded_failure_retains_provider_classification(tmp_path: Path) -> None:
+    adapter = MockedCompletionAdapter(
+        Mock(side_effect=litellm.RateLimitError("rate limited", "openai", "gpt-4o")),
+        known_failure_charge_nanos=0,
+    )
+    engine = engine_at(tmp_path, adapter)
+    with patch("ylang.core.engine._call_litellm", return_value=("fallback", "ollama/qwen2.5", 1, 1, 0.0, [])):
+        result = engine.complete(MESSAGES, "code")
+    assert result.success
+    rows = engine.store.recall_usage(UsageWindow.last_hours(1))
+    events = json.loads(rows[0].fallback_events_json or "[]")
+    assert events[0]["error_class"] == "rate_limit"
+    assert attempts(engine)[0]["state"] == "SETTLED"
+
+
+def test_reported_breach_takes_precedence_over_other_invalid_response_fields(tmp_path: Path) -> None:
+    adapter = OfflineAdapter(replace(response(model="unexpected", charge=21_000_000),
+                                     completion_tokens=100_000))
+    engine = engine_at(tmp_path, adapter)
+    assert not engine.complete(MESSAGES, "code").success
+    row = attempts(engine)[0]
+    assert row["state"] == "BREACH" and row["actual_cost_nanos"] == 21_000_000
+    assert not engine.complete(MESSAGES, "code").success
+    assert len(adapter.calls) == 1

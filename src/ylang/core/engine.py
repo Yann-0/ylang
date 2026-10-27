@@ -80,6 +80,7 @@ class _BudgetAttemptError(Exception):
                  charge_nanos: int, retry_allowed: bool) -> None:
         """Preserve the failed attempt even when fallback later succeeds."""
         super().__init__(str(cause))
+        self.cause = cause
         self.reservation = reservation
         self.charge_nanos = charge_nanos
         self.retry_allowed = retry_allowed
@@ -131,6 +132,7 @@ class Engine:
         self._budget_store = budget_store
         self._surface = surface
         self._base_settings = base_settings
+        self._hard_budget_max_output_tokens = base_settings.hard_budget_max_output_tokens if base_settings else 512
         if capture_level is not None:
             self._capture_level: CaptureLevel = capture_level
         elif base_settings is not None:
@@ -206,6 +208,7 @@ class Engine:
         effective = merge_settings(self._base_settings, overrides)
         self._router.apply_settings(effective)
         self._capture_level = effective.capture_level
+        self._hard_budget_max_output_tokens = effective.hard_budget_max_output_tokens
 
     def _effective_capture_level(self) -> CaptureLevel:
         """Return the capture level for this request (runtime-aware when possible)."""
@@ -229,9 +232,14 @@ class Engine:
                 yield ledger
 
     def prepare_bounded(
-        self, model: str, messages: list[Message], *, max_output_tokens: int = 512,
+        self, model: str, messages: list[Message], *, max_output_tokens: int | None = None,
     ) -> PreparedAttempt:
         """Refuse unregistered providers before any transport and freeze the request."""
+        self._refresh_routing()
+        if max_output_tokens is None:
+            max_output_tokens = self._hard_budget_max_output_tokens
+        if type(max_output_tokens) is not int or not 1 <= max_output_tokens <= self._hard_budget_max_output_tokens:
+            raise BudgetRefused("output ceiling exceeds configured bounded limit")
         adapter = self._bounded_adapters.get(model)
         if adapter is None:
             raise BudgetRefused("paid model has no certified bounded adapter")
@@ -267,6 +275,11 @@ class Engine:
             )
         return reservations[0], reservations[1]
 
+    def cancel_bounded(self, reservation: Reservation) -> None:
+        """Release only an undispatched fenced arm when a paired run stops."""
+        with self._ledger() as ledger:
+            ledger.cancel(reservation)
+
     def bounded_attempt_evidence(self, reservation: Reservation) -> dict[str, object]:
         """Read durable attempt evidence for paired evaluation integrity checks."""
         with self._ledger() as ledger:
@@ -293,6 +306,14 @@ class Engine:
             token = ledger.begin_dispatch(reservation)
             try:
                 response = adapter.execute(prepared)
+                if (type(response.charge_nanos) is int
+                        and prepared.quote.max_cost_nanos < response.charge_nanos <= 2**63 - 1):
+                    raise BoundedFailure(
+                        "adapter charge exceeded certified bound",
+                        charge_nanos=response.charge_nanos,
+                        evidence={"source": "synthetic-adapter", "billability": "reported breach",
+                                  "reported_charge_nanos": response.charge_nanos},
+                    )
                 response.validate(prepared)
             except BaseException as exc:
                 known = isinstance(exc, BoundedFailure)
@@ -353,7 +374,8 @@ class Engine:
             prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, cost=cost,
             improver_fired=False, improver_accepted=False, improver_input_sample=None,
             latency_ms=latency, success=error is None, error=str(error) if error else None,
-            last_exc=error, tool_calls=[], attempt_chain=[prepared.quote.model],
+            last_exc=_provider_error(error) if error else None,
+            tool_calls=[], attempt_chain=[prepared.quote.model],
             explicit_model=prepared.quote.model, fallback_events=[],
             capture_level=self._effective_capture_level(), trace_id=trace_id,
             parent_trace_id=None, mcp_tool=None, selected_route="bounded-synthetic",
@@ -449,7 +471,7 @@ class Engine:
                 attempt_index = index
                 break
             except Exception as exc:
-                last_exc = exc
+                last_exc = _provider_error(exc)
                 error = str(exc)
                 attempt_index = index
                 if isinstance(exc, _BudgetAttemptError):
@@ -462,7 +484,7 @@ class Engine:
                 if index + 1 >= len(attempt_chain) or not retry_allowed:
                     break
                 next_model = attempt_chain[index + 1]
-                error_class = classify_error(exc, success=False) or "error"
+                error_class = classify_error(last_exc, success=False) or "error"
                 fallback_events.append(
                     {
                         "from": candidate,
@@ -470,13 +492,13 @@ class Engine:
                         "error_class": error_class,
                     }
                 )
-                if _is_retryable_llm_error(exc):
+                if _is_retryable_llm_error(last_exc):
                     self._router.cooldown.mark_failed(candidate)
                 logger.warning(
                     "LLM fallback: %s -> %s (%s)",
                     candidate,
                     next_model,
-                    redact_secrets(_error_reason(exc)),
+                    redact_secrets(_error_reason(last_exc)),
                 )
 
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -871,6 +893,15 @@ class Engine:
             self._telemetry.emit(attributes)
         except Exception:
             logger.warning("telemetry export failed", exc_info=True)
+
+
+def _provider_error(exc: BaseException) -> BaseException:
+    """Keep financial wrappers from obscuring the original provider error evidence."""
+    if isinstance(exc, _BudgetAttemptError):
+        exc = exc.cause
+    if isinstance(exc, BoundedFailure) and exc.__cause__ is not None:
+        return exc.__cause__
+    return exc
 
 
 def _litellm_error_type(name: str) -> type[BaseException] | None:

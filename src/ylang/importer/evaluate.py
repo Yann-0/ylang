@@ -7,6 +7,7 @@ import math
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ylang.core.types import CompletionResult, Message
@@ -18,6 +19,8 @@ from ylang.usage.experiments import ExperimentStore, ExperimentVariant
 from ylang.usage.store import UsageWindow
 
 if TYPE_CHECKING:
+    from ylang.core.bounded_completion import PreparedAttempt
+    from ylang.usage.hard_budget import Reservation
     from ylang.usage.store import UsageRecord, UsageStore
 
 MIN_OUTCOME_SAMPLES = 3
@@ -540,36 +543,41 @@ def execute_candidate_evaluation(
     source_store: PromptSourceStore,
     vs_template_id: str | None = None,
     authorize_paid: bool = False,
-    budget_usd: float = 0.0,
+    budget_usd: float | str | Decimal = 0.0,
     model: str | None = None,
     simulated: bool = False,
 ) -> EvaluationRun:
-    """Record local simulated arms; refuse paid execution without enforceable bounds.
+    """Reserve matched bounded arms atomically; real providers remain unavailable."""
+    from ylang.core.engine import Engine
+    from ylang.usage.hard_budget import BudgetRefused, usd_to_nanos
 
-    Authorization and a finite positive budget are necessary but cannot bound a
-    provider request. Until Engine exposes cost bounds and shared reservations,
-    paid execution fails before dispatch. Simulation accepts only the built-in
-    local completer and never establishes a quality comparison.
-    """
     if not fixtures:
-        raise EvaluationAuthorizationError(
-            "execute requires operator-supplied --fixture-file inputs"
-        )
+        raise EvaluationAuthorizationError("execute requires operator-supplied --fixture-file inputs")
+    bounded_engine: Engine | None = None
+    budget_nanos = 0
     if not simulated:
         if not authorize_paid:
             raise EvaluationAuthorizationError(
                 "execute requires --authorize-paid; default evaluate is inspect (zero paid calls)"
             )
-        if not math.isfinite(budget_usd) or budget_usd <= 0:
+        if isinstance(budget_usd, float) and (not math.isfinite(budget_usd) or budget_usd <= 0):
+            raise EvaluationAuthorizationError("execute requires a finite --budget-usd > 0")
+        if type(completer) is not Engine:
             raise EvaluationAuthorizationError(
-                "execute requires a finite --budget-usd > 0; default budget is 0"
+                "Paid evaluation is unavailable without enforceable cost bounds and an exact bounded Engine."
             )
-        raise EvaluationAuthorizationError(
-            "Paid evaluation is unavailable until Engine provides enforceable "
-            "per-attempt cost bounds and shared budget reservations. "
-            "Use inspect or --simulated; no completion was dispatched."
-        )
-    if type(completer) is not SimulatedCompleter:
+        try:
+            if not isinstance(budget_usd, (str, Decimal)):
+                raise BudgetRefused("budget authority must be an exact decimal string or Decimal")
+            budget_nanos = usd_to_nanos(budget_usd, cap=True)
+            if budget_nanos <= 0:
+                raise BudgetRefused("execute requires a finite positive decimal --budget-usd")
+            if not model:
+                raise BudgetRefused("bounded evaluation requires an explicit pinned model")
+        except BudgetRefused as exc:
+            raise EvaluationAuthorizationError(str(exc)) from exc
+        bounded_engine = completer
+    elif type(completer) is not SimulatedCompleter:
         raise EvaluationAuthorizationError(
             "Simulated execution requires the built-in local SimulatedCompleter; "
             "a simulated flag cannot authorize another completer."
@@ -582,50 +590,95 @@ def execute_candidate_evaluation(
         )
 
     fixture_blob = "\n---\n".join(fixtures)
+    arms = (
+        ("baseline", current_template.body, current_template.version),
+        ("candidate", item.body, None),
+    )
+    messages_by_arm: dict[str, list[Message]] = {
+        label: [{"role": "system", "content": body}, {"role": "user", "content": fixture_blob}]
+        for label, body, _ in arms
+    }
+    prepared: dict[str, PreparedAttempt] = {}
+    reservations: dict[str, Reservation] = {}
+    financial: dict[str, dict[str, object]] = {}
+    if bounded_engine is not None:
+        try:
+            pair = tuple(bounded_engine.prepare_bounded(model or "", messages_by_arm[label]) for label, _, _ in arms)
+            held = bounded_engine.reserve_bounded_pair(
+                (pair[0], pair[1]), scope_limit_nanos=budget_nanos,
+                metadata=tuple({
+                    "arm": label, "item_id": item.item_id, "fixture_hash": sha256_text(fixture_blob),
+                    "content_hash": content_hash(body), "template_id": current_id if label == "baseline" else None,
+                    "template_version": version,
+                } for label, body, version in arms),  # type: ignore[arg-type]
+            )
+            prepared = {label: pair[index] for index, (label, _, _) in enumerate(arms)}
+            reservations = {label: held[index] for index, (label, _, _) in enumerate(arms)}
+        except (BudgetRefused, ValueError) as exc:
+            raise EvaluationAuthorizationError("No arms dispatched: bounded cost bounds/reservation refused: " + str(exc)) from exc
+
     results: dict[str, CompletionResult | None] = {"baseline": None, "candidate": None}
     errors: dict[str, str | None] = {"baseline": None, "candidate": None}
     attempted: set[str] = set()
     aborted: EvaluationAuthorizationError | None = None
-    for label, body, version in (
-        ("baseline", current_template.body, current_template.version),
-        ("candidate", item.body, None),
-    ):
-        messages: list[Message] = [
-            {"role": "system", "content": body},
-            {"role": "user", "content": fixture_blob},
-        ]
+    interruption: BaseException | None = None
+    for label, _, version in arms:
         attempted.add(label)
         try:
-            result = completer.complete(
-                messages, "improve", model=model, tools=None, template_version=version,
-            )
+            if bounded_engine is not None:
+                result = bounded_engine.complete_prepared(
+                    prepared[label], reservations[label], activity="improve", template_version=version,
+                )
+            else:
+                result = completer.complete(
+                    messages_by_arm[label], "improve", model=model, tools=None, template_version=version,
+                )
             results[label] = result
             if not result.success:
                 errors[label] = result.error or "completion_failed"
-        except EvaluationAuthorizationError as exc:
+                if bounded_engine is not None:
+                    aborted = EvaluationAuthorizationError("bounded execution stopped after " + label + " failure")
+                    break
+        except BaseException as exc:
             errors[label] = str(exc) or type(exc).__name__
-            aborted = exc
-            break
-        except Exception as exc:  # noqa: BLE001 — persist failed arm evidence
-            errors[label] = str(exc) or type(exc).__name__
+            if isinstance(exc, EvaluationAuthorizationError) or bounded_engine is not None or not isinstance(exc, Exception):
+                aborted = EvaluationAuthorizationError(str(exc) or type(exc).__name__)
+                if not isinstance(exc, Exception):
+                    interruption = exc
+                break
+
+    if bounded_engine is not None:
+        for label, reservation in reservations.items():
+            try:
+                state = bounded_engine.bounded_attempt_evidence(reservation)
+                if state["state"] == "RESERVED":
+                    bounded_engine.cancel_bounded(reservation)
+                financial[label] = bounded_engine.bounded_attempt_evidence(reservation)
+            except Exception as exc:
+                errors[label] = errors[label] or "reservation cleanup/evidence failed: " + type(exc).__name__
+                aborted = aborted or EvaluationAuthorizationError("bounded financial evidence requires reconciliation")
 
     def arm_evidence(label: str) -> dict[str, Any]:
-        """Retain actual response identity and distinguish failures from unattempted arms."""
+        """Retain exact identities, immutable configuration and unresolved financial liability."""
         result = results[label]
+        record = financial.get(label)
+        known_cost = result.cost if result is not None else None
+        if bounded_engine is not None:
+            actual = record.get("actual_cost_nanos") if record else None
+            known_cost = int(actual) / 1_000_000_000 if isinstance(actual, int) else None
         return {
             "attempted": label in attempted,
-            "success": result.success if result is not None else (
-                False if label in attempted else None
-            ),
+            "success": result.success if result is not None else (False if label in attempted else None),
             "model_used": result.model_used if result is not None else None,
             "trace_id": result.trace_id if result is not None else None,
-            "cost_usd": result.cost if result is not None else None,
+            "cost_usd": known_cost,
             "latency_ms": result.latency_ms if result is not None else None,
             "prompt_tokens": result.prompt_tokens if result is not None else None,
             "completion_tokens": result.completion_tokens if result is not None else None,
             "error": errors[label],
             "reported_error": result.error if result is not None else None,
-            "effective_generation_settings": None,
+            "effective_generation_settings": json.loads(prepared[label].config_json) if label in prepared else None,
+            "reservation": record,
         }
 
     base, candidate = results["baseline"], results["candidate"]
@@ -645,59 +698,52 @@ def execute_candidate_evaluation(
             confounders.append("unknown_actual_model")
         elif base.model_used != candidate.model_used:
             confounders.append("model_mismatch")
+    if any(record.get("state") in {"UNCERTAIN", "DISPATCHING"} for record in financial.values()):
+        confounders.append("billing_uncertain")
+    if any(record.get("state") == "BREACH" for record in financial.values()):
+        confounders.append("certified_bound_exceeded")
     if aborted is not None:
         confounders.append("aborted_execution")
+    total_known_nanos = sum(int(record["actual_cost_nanos"]) for record in financial.values()
+                            if isinstance(record.get("actual_cost_nanos"), int))
     evaluator = {
-        "verdict": verdict,
-        "quality_claim": False,
-        "quality_improvement_demonstrated": False,
+        "verdict": verdict, "quality_claim": False, "quality_improvement_demonstrated": False,
         "comparison_valid": False,
-        "comparison_scope": "simulated_mechanics_only",
+        "comparison_scope": "bounded_simulated_mechanics" if bounded_engine else "simulated_mechanics_only",
         "confounders": confounders,
         "arms": {label: arm_evidence(label) for label in results},
-        "aborted": aborted is not None,
-        "abort_reason": str(aborted) if aborted is not None else None,
-        "note": (
-            "Completion-without-error is not success. Simulated results prove "
-            "mechanics only, not provider execution or prompt quality."
-        ),
-        "fixture_count": len(fixtures),
-        "model": model,
-        "tools_granted": False,
-        "promoted": False,
+        "aborted": aborted is not None, "abort_reason": str(aborted) if aborted else None,
+        "note": "All supported adapters are synthetic. Execution establishes no provider or quality claim.",
+        "fixture_count": len(fixtures), "model": model, "tools_granted": False, "promoted": False,
+        "paired_before_dispatch": bounded_engine is not None,
+        "budget_scope_limit_nanos": budget_nanos if bounded_engine else None,
+        "known_cost_nanos": total_known_nanos if bounded_engine else None,
+        "billing_total_known": len(financial) == 2 and all(record.get("state") in {"SETTLED", "CANCELLED", "BREACH"}
+                                   for record in financial.values()) if bounded_engine else True,
     }
     run = EvaluationRun(
-        run_id=str(uuid.uuid4()),
-        item_id=item.item_id,
-        mode="execute",
-        evidence_class="simulated",
-        vs_template_id=current_id,
-        vs_template_version=current_template.version,
-        vs_content_hash=content_hash(current_template.body),
-        candidate_content_hash=item.content_hash,
-        model=model or "simulated/local",
-        authorized=True,
-        budget_usd=0.0,
-        cost_usd=sum(result.cost for result in results.values() if result is not None),
-        baseline_output=base.content if base is not None else None,
-        candidate_output=candidate.content if candidate is not None else None,
-        baseline_error=baseline_error,
-        candidate_error=candidate_error,
-        baseline_latency_ms=base.latency_ms if base is not None else None,
-        candidate_latency_ms=candidate.latency_ms if candidate is not None else None,
-        baseline_prompt_tokens=base.prompt_tokens if base is not None else None,
-        candidate_prompt_tokens=candidate.prompt_tokens if candidate is not None else None,
-        baseline_completion_tokens=base.completion_tokens if base is not None else None,
-        candidate_completion_tokens=candidate.completion_tokens if candidate is not None else None,
-        evaluator_json=json.dumps(evaluator, sort_keys=True),
-        fixture_hash=sha256_text(fixture_blob),
+        run_id=str(uuid.uuid4()), item_id=item.item_id, mode="execute", evidence_class="simulated",
+        vs_template_id=current_id, vs_template_version=current_template.version,
+        vs_content_hash=content_hash(current_template.body), candidate_content_hash=item.content_hash,
+        model=model or "simulated/local", authorized=True,
+        budget_usd=budget_nanos / 1_000_000_000 if bounded_engine else 0.0,
+        cost_usd=(total_known_nanos / 1_000_000_000 if bounded_engine else
+                  sum(result.cost for result in results.values() if result is not None)),
+        baseline_output=base.content if base else None, candidate_output=candidate.content if candidate else None,
+        baseline_error=baseline_error, candidate_error=candidate_error,
+        baseline_latency_ms=base.latency_ms if base else None,
+        candidate_latency_ms=candidate.latency_ms if candidate else None,
+        baseline_prompt_tokens=base.prompt_tokens if base else None,
+        candidate_prompt_tokens=candidate.prompt_tokens if candidate else None,
+        baseline_completion_tokens=base.completion_tokens if base else None,
+        candidate_completion_tokens=candidate.completion_tokens if candidate else None,
+        evaluator_json=json.dumps(evaluator, sort_keys=True), fixture_hash=sha256_text(fixture_blob),
         created_at=utcnow_iso(),
-        note=(
-            "Built-in simulated execution on operator fixtures. Mechanics only; "
-            "no prompt quality claim, promotion or tools. Paid execution is unavailable."
-        ),
+        note="Synthetic mechanics only; no real provider, quality claim, promotion or tools. Cost contains known charges only.",
     )
     source_store.save_evaluation_run(run)
+    if interruption is not None:
+        raise interruption
     if aborted is not None:
         raise EvaluationAuthorizationError(
             f"{aborted}; evidence saved as evaluation run {run.run_id}"

@@ -8,11 +8,9 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from typing import Any
 
 from ylang.core.engine import Engine
 from ylang.core.stores import open_stores
-from ylang.core.types import CompletionResult, Message
 from ylang.importer.evaluate import (
     EvaluationAuthorizationError,
     SimulatedCompleter,
@@ -54,31 +52,6 @@ def _warn_large_catalog(summary: RefreshSummary) -> None:
         ),
         file=sys.stderr,
     )
-
-
-class _EngineCompleter:
-    """Adapt ``Engine.complete`` to the evaluation Completer protocol."""
-
-    def __init__(self, engine: Engine) -> None:
-        self._engine = engine
-
-    def complete(
-        self,
-        messages: list[Message],
-        activity: str,
-        *,
-        model: str | None = None,
-        tools: list[dict[str, Any]] | None = None,
-        template_version: int | None = None,
-    ) -> CompletionResult:
-        """Delegate to the shared Engine without granting extra tools."""
-        return self._engine.complete(
-            messages,
-            activity,
-            model=model,
-            tools=tools,
-            template_version=template_version,
-        )
 
 
 def build_prompts_parser() -> argparse.ArgumentParser:
@@ -152,9 +125,9 @@ def build_prompts_parser() -> argparse.ArgumentParser:
     )
     evaluate.add_argument(
         "--budget-usd",
-        type=float,
-        default=0.0,
-        help="Hard spend cap for --mode execute (default 0 = refuse paid calls)",
+        type=str,
+        default="0",
+        help="Exact decimal lifetime cap for bounded evaluation (default 0 = refuse)",
     )
     evaluate.add_argument("--model", default=None, help="Explicit model for execute")
     evaluate.add_argument(
@@ -323,14 +296,12 @@ def run_prompts_cli(argv: list[str] | None = None) -> int:
                     print(json.dumps(asdict(report), default=str, indent=2))
                     return 0
                 try:
-                    completer: SimulatedCompleter | _EngineCompleter
+                    completer: SimulatedCompleter | Engine
                     if args.simulated:
                         completer = SimulatedCompleter()
                     else:
-                        completer = _EngineCompleter(
-                            Engine.from_settings(
-                                stores.store, surface="eval", settings=settings
-                            )
+                        completer = Engine.from_settings(
+                            stores.store, surface="eval", settings=settings
                         )
                     run = execute_candidate_evaluation(
                         item,

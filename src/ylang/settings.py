@@ -223,6 +223,8 @@ class Settings(BaseModel):
         ge=0,
         description="Optional rolling 24h spend cap; models skipped when budget exceeded.",
     )
+    hard_budget_policy_id: Literal["default"] = "default"
+    hard_budget_max_output_tokens: int = Field(default=512, strict=True, ge=1)
     capture_level: CaptureLevel = Field(
         default=DEFAULT_CAPTURE_LEVEL,
         description=(
@@ -283,6 +285,10 @@ class Settings(BaseModel):
             kwargs["provider_cooldown_seconds"] = int(raw_cooldown)
         if raw_budget := os.environ.get("YLANG_DAILY_BUDGET_USD"):
             kwargs["daily_budget_usd"] = float(raw_budget)
+        if raw_policy := os.environ.get("YLANG_HARD_BUDGET_POLICY_ID"):
+            kwargs["hard_budget_policy_id"] = raw_policy
+        if raw_output_limit := os.environ.get("YLANG_HARD_BUDGET_MAX_OUTPUT_TOKENS"):
+            kwargs["hard_budget_max_output_tokens"] = int(raw_output_limit)
         if raw_capture := os.environ.get("YLANG_CAPTURE_LEVEL"):
             kwargs["capture_level"] = parse_capture_level(raw_capture)
         from ylang.core.config_parsers import parse_bool_flag

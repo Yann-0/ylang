@@ -22,23 +22,58 @@ Defaults:
 - `--budget-usd` = `0`
 - `--authorize-paid` = off
 
-Paid authorization and a **finite positive** budget are necessary but are not
-an enforceable spending bound. The current Engine has no per-attempt cost-bound
-and shared reservation contract. Paid evaluation is therefore **unavailable**,
-even with valid authorization and budget flags, and fails before invoking the
-completer. NaN, infinity, zero, and negative paid budgets are rejected.
+Paid provider execution remains **unavailable**: the real-adapter registry is
+empty. Supplying authorization or a price estimate cannot enable it. Every paid
+Engine path requires a trusted bound and canonical shared policy; unsupported
+models, paid streaming, tools and structured paid requests refuse before
+transport. Known local Ollama execution uses the loopback endpoint; Ollama cloud
+variants are refused. This local endpoint is assumed unmetered.
 
-A simulated flag cannot bypass this gate with an Engine-shaped or custom
-completer. Simulated execution accepts only the built-in local
-`SimulatedCompleter`. It never grants tools or promotes a candidate.
+The CLI preserves `--budget-usd` as an exact decimal string. Programmatic bounded
+evaluation accepts a decimal string or `Decimal`, rejects binary-float authority,
+and floors the cap to integer nano-USD. The old `daily_budget_usd` setting remains
+a retrospective routing meter; it cannot create, increase, disable or replace
+the canonical SQLite policy. An explicit opening-liability acknowledgement is
+required when a policy is initialized. Operator cutover must account for old
+in-flight calls and incomplete historic billing; unknown liability is not free.
 
-Private history is not replayed. Simulation uses only the operator-supplied
-`--fixture-file` text. The built-in simulator makes no provider requests.
+A simulated flag cannot dispatch an Engine-shaped or custom completer. It
+accepts only the built-in local `SimulatedCompleter`. A separate developer
+integration path uses the actual Engine with explicitly injected synthetic
+adapters. Those adapters freeze text requests, output limits, model/account and
+pricing identities, disable caching and hidden retries, and are always labeled
+simulated. No runtime setting or request payload registers a real adapter.
 
-Atomic reservations against both evaluation and shared daily budgets, enforced
-output limits, and complete per-attempt accounting remain future gates before
-paid evaluation can be enabled. The existing daily routing budget meter and
-fallback diagnostics do not establish those guarantees.
+For a bounded synthetic comparison, both arms reserve their maximum charge in
+one SQLite `BEGIN IMMEDIATE` transaction, against the shared rolling 24-hour cap
+and evaluation lifetime cap, before either dispatches. One attempt per arm is
+allowed. A failure stops the pair and cancels only provably undispatched arms.
+The maximum output ceiling is typed `hard_budget_max_output_tokens` (default
+512), loadable from `YLANG_HARD_BUDGET_MAX_OUTPUT_TOKENS` and a validated runtime
+override. It is a token ceiling, not a monetary proof. The policy ID is fixed to
+`default`; settings cannot switch to a cheaper accounting domain.
+
+The durable ledger records `RESERVED`, fenced `DISPATCHING`, `SETTLED`,
+`UNCERTAIN`, `CANCELLED` and `BREACH` attempts. Timeouts, interruptions, missing
+usage and process death keep the full hold, even after a rolling-window change.
+Only trusted explicit reconciliation releases unknown billing. Charges above a
+certified bound freeze further paid admission. Backward UTC movement also
+freezes admission. Such a breach is evidence of a failed bound, not a claim that
+software prevented an out-of-contract provider bill.
+
+Every actual bounded attempt is retained independently of caller cancellation
+or a terminal usage row. The usage insert and internal request link share an
+owned transaction; external trace IDs and caller costs are not financial
+authority. Legacy unlinked usage and acknowledged opening liabilities remain
+counted. Settled charges use dispatch-time attribution for the rolling window;
+active/uncertain holds never age out automatically. All writers in one budget
+domain must share this canonical database and compatible code. Separate
+databases and external provider calls cannot share its aggregate limit.
+
+Private history is not replayed. Execution uses only operator-supplied fixture
+text. No supported adapter makes a real provider request. Provider certification,
+trusted token/price upper bounds and separately approved provider conformance
+checks remain the next gate before real paid evaluation.
 
 ## Execution evidence
 
@@ -46,7 +81,7 @@ Each attempted simulated run retains per-arm `success`, actual `model_used`,
 `trace_id` when supplied, tokens, cost, latency, normalized error, and raw
 reported error in `evaluator_json.arms`. The top-level `model` remains the
 requested model; it does not replace actual response identities. Unavailable
-effective generation settings and trace identifiers remain unknown.
+effective generation settings and trace identifiers remain unknown for the built-in simulator. Bounded synthetic arms retain their exact configuration, reservation, integer charge and pricing/request identity. Unknown bounded cost stays null in arm evidence; the top-level cost contains known charges only and `billing_total_known` states whether the total is complete.
 
 Explicit completion success determines the operational status. A failed
 completion with empty error text remains a failure; an empty output does not
@@ -114,7 +149,10 @@ Inconclusive is a valid outcome.
 - No LLM-as-judge. No automatic promotion from any verdict.
 - Live provider execution and quality improvement are **not** demonstrated by
   CI or by the simulator.
-- This patch does not add shared budget reservations or an attempt ledger.
+- The ledger and output contract are qualified with synthetic adapters only. No real provider pricing, billing or wire limit is certified.
+- Abrupt termination can leave durable dispatch intent requiring explicit reconciliation; a timer or lease cannot prove an attempt was free.
+- The budget ledger must outlive trace retention. Backups, migrations, policy activation and any update of the running application require an explicit operator procedure.
+- Ylang provider USD and account-wide Codex subscription quota are separate controls.
 
 ## Related
 

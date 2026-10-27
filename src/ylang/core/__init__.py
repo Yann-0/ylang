@@ -31,7 +31,11 @@ _EXPORTS = {
     "DEFAULT_ACTIVITY_MODELS": "ylang.settings",
     "DEFAULT_ACTIVITY_MODEL_LISTS": "ylang.settings",
 }
-__all__ = list(_EXPORTS)
+__all__ = [
+    "Engine", "FALLBACK_MODEL", "ModelRouter", "Activity", "CompletionResult",
+    "Message", "ModelResolution", "ResolutionReason",
+    "DEFAULT_ACTIVITY_MODELS", "DEFAULT_ACTIVITY_MODEL_LISTS",
+]
 
 
 def __getattr__(name: str) -> Any:

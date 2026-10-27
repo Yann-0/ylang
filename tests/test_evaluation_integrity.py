@@ -297,3 +297,179 @@ def test_fixture_hash_and_exact_baseline_version_are_preserved(
     assert calls[0]["messages"][1] == calls[1]["messages"][1]
     assert calls[0]["template_version"] == 2
     assert calls[1]["template_version"] is None
+
+
+@pytest.fixture
+def bounded_scenario(scenario, tmp_path: Path):
+    """Wire the actual Engine with an explicitly synthetic adapter and canonical private ledger."""
+    from tests.bounded_adapter_helpers import OfflineAdapter, initialize_budget
+    from ylang.core.engine import Engine
+    from ylang.usage.store import UsageStore
+
+    usage = UsageStore.open(tmp_path / "evaluation.db")
+    initialize_budget(usage)
+    adapter = OfflineAdapter()
+    engine = Engine(usage, surface="eval", bounded_adapters={"synthetic/model": adapter})
+    try:
+        yield scenario, engine, adapter, usage
+    finally:
+        usage.close()
+
+
+def run_bounded(bounded_scenario, **overrides: Any) -> EvaluationRun:
+    """Exercise the paired contract while every transport remains an offline fixture."""
+    (library, store, item), engine, _, _ = bounded_scenario
+    arguments: dict[str, Any] = {
+        "completer": engine, "fixtures": ["Synthetic fixture"], "source_store": store,
+        "vs_template_id": "baseline", "authorize_paid": True, "budget_usd": "0.04",
+        "model": "synthetic/model",
+    }
+    arguments.update(overrides)
+    return execute_candidate_evaluation(item, library, **arguments)
+
+
+def test_bounded_pair_reserves_both_arms_before_dispatch(bounded_scenario, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The baseline cannot consume money needed by an unreserved candidate."""
+    from ylang.usage.hard_budget import HardBudgetStore
+    _, _, adapter, usage = bounded_scenario
+    original = adapter.execute
+    observations = []
+    def execute(prepared):
+        with HardBudgetStore.open(usage.database_path) as ledger:
+            observations.append(ledger.exposure_nanos())
+        return original(prepared)
+    monkeypatch.setattr(adapter, "execute", execute)
+    run = run_bounded(bounded_scenario)
+    payload = json.loads(run.evaluator_json)
+    assert observations == [40_000_000, 30_000_000]
+    assert payload["paired_before_dispatch"] is True
+    assert payload["budget_scope_limit_nanos"] == 40_000_000
+    arms = payload["arms"]
+    assert arms["baseline"]["reservation"]["request_id"] != arms["candidate"]["reservation"]["request_id"]
+    assert arms["baseline"]["reservation"]["state"] == arms["candidate"]["reservation"]["state"] == "SETTLED"
+    assert arms["baseline"]["reservation"]["scope_id"] == arms["candidate"]["reservation"]["scope_id"]
+    assert payload["billing_total_known"] is True
+    assert payload["known_cost_nanos"] == 20_000_000
+    assert payload["comparison_valid"] is False and payload["quality_claim"] is False
+    assert run.evidence_class == "simulated" and len(adapter.calls) == 2
+
+
+def test_pair_budget_refusal_dispatches_neither_arm(bounded_scenario) -> None:
+    """Exact decimal scope limits are checked before the first synthetic call."""
+    with pytest.raises(EvaluationAuthorizationError, match="No arms dispatched"):
+        run_bounded(bounded_scenario, budget_usd="0.039999999999999999999999999999999999")
+    _, _, adapter, _ = bounded_scenario
+    assert adapter.calls == []
+
+
+@pytest.mark.parametrize("budget", [0.04, "NaN", "Infinity", "-1", "0", "bad"])
+def test_bounded_budget_requires_exact_finite_positive_authority(bounded_scenario, budget) -> None:
+    """A binary float or invalid decimal cannot silently become the financial scope."""
+    with pytest.raises(EvaluationAuthorizationError):
+        run_bounded(bounded_scenario, budget_usd=budget)
+    assert bounded_scenario[2].calls == []
+
+
+def test_pair_mismatched_pricing_refused_without_partial_holds(bounded_scenario, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Different price/config identities invalidate preparation before reservation."""
+    from dataclasses import replace
+    from ylang.usage.hard_budget import HardBudgetStore
+    _, _, adapter, usage = bounded_scenario
+    original = adapter.prepare
+    count = 0
+    def prepare(*args, **kwargs):
+        nonlocal count
+        count += 1
+        prepared = original(*args, **kwargs)
+        return replace(prepared, quote=replace(prepared.quote, pricing_version="different")) if count == 2 else prepared
+    monkeypatch.setattr(adapter, "prepare", prepare)
+    with pytest.raises(EvaluationAuthorizationError, match="identical model"):
+        run_bounded(bounded_scenario)
+    assert adapter.calls == []
+    with HardBudgetStore.open(usage.database_path) as ledger:
+        assert ledger.exposure_nanos() == 0
+
+
+def test_unknown_billing_aborts_pair_retains_hold_and_saves_evidence(bounded_scenario) -> None:
+    """An ambiguous baseline does not free its liability or dispatch the candidate."""
+    from ylang.usage.hard_budget import HardBudgetStore
+    (_, store, item), _, adapter, usage = bounded_scenario
+    adapter.outcomes = [TimeoutError("synthetic ambiguous timeout")]
+    with pytest.raises(EvaluationAuthorizationError, match="evidence saved"):
+        run_bounded(bounded_scenario)
+    payload = json.loads(store.list_evaluation_runs(item.item_id)[0].evaluator_json)
+    assert len(adapter.calls) == 1
+    assert payload["arms"]["baseline"]["reservation"]["state"] == "UNCERTAIN"
+    assert payload["arms"]["baseline"]["cost_usd"] is None
+    assert payload["arms"]["candidate"]["reservation"]["state"] == "CANCELLED"
+    assert payload["arms"]["candidate"]["attempted"] is False
+    assert payload["billing_total_known"] is False and "billing_uncertain" in payload["confounders"]
+    with HardBudgetStore.open(usage.database_path) as ledger:
+        assert ledger.exposure_nanos() == 20_000_000
+
+
+def test_explicit_charged_failure_does_not_retry_an_evaluation_arm(bounded_scenario) -> None:
+    """Retry-capable Engine adapters cannot alter a one-attempt-per-arm experiment."""
+    from ylang.core.bounded_completion import BoundedFailure
+    from ylang.usage.hard_budget import HardBudgetStore
+    (_, store, item), _, adapter, usage = bounded_scenario
+    adapter.outcomes = [BoundedFailure("synthetic charged failure", charge_nanos=5_000_000,
+                                       evidence={"receipt": "synthetic charge"}, retry_allowed=True)]
+    with pytest.raises(EvaluationAuthorizationError):
+        run_bounded(bounded_scenario)
+    payload = json.loads(store.list_evaluation_runs(item.item_id)[0].evaluator_json)
+    assert len(adapter.calls) == 1
+    assert payload["known_cost_nanos"] == 5_000_000
+    assert payload["arms"]["candidate"]["reservation"]["state"] == "CANCELLED"
+    with HardBudgetStore.open(usage.database_path) as ledger:
+        assert ledger.exposure_nanos() == 5_000_000
+
+
+def test_interrupted_pair_persists_evidence_then_reraises(bounded_scenario) -> None:
+    """Caller interruption cannot cancel dispatched financial liability."""
+    (_, store, item), _, adapter, _ = bounded_scenario
+    adapter.outcomes = [KeyboardInterrupt("synthetic interruption")]
+    with pytest.raises(KeyboardInterrupt):
+        run_bounded(bounded_scenario)
+    payload = json.loads(store.list_evaluation_runs(item.item_id)[0].evaluator_json)
+    assert payload["aborted"] is True
+    assert payload["arms"]["baseline"]["reservation"]["state"] == "UNCERTAIN"
+    assert payload["arms"]["candidate"]["reservation"]["state"] == "CANCELLED"
+
+
+def test_bounded_engine_cannot_be_dispatched_by_simulated_flag(bounded_scenario) -> None:
+    """The built-in simulator gate remains distinct from trusted bounded preparation."""
+    with pytest.raises(EvaluationAuthorizationError, match="built-in"):
+        run_bounded(bounded_scenario, simulated=True)
+    assert bounded_scenario[2].calls == []
+
+
+def test_unregistered_real_engine_still_refuses_before_dispatch(bounded_scenario) -> None:
+    """Ordinary Engine settings contain no real provider certification."""
+    from ylang.core.engine import Engine
+    engine = Engine(bounded_scenario[3], surface="eval")
+    with pytest.raises(EvaluationAuthorizationError, match="no certified bounded adapter"):
+        run_bounded(bounded_scenario, completer=engine, model="openai/unqualified")
+
+
+def test_typed_output_limit_is_shared_with_runtime_preparation(bounded_scenario) -> None:
+    """Output settings constrain prepared requests but cannot replace canonical money policy."""
+    from ylang.core.engine import Engine
+    from ylang.core.runtime_settings import RuntimeSettingsStore
+    from ylang.settings import Settings
+    from ylang.usage.hard_budget import BudgetRefused
+    _, _, adapter, usage = bounded_scenario
+    engine = Engine(usage, surface="eval", base_settings=Settings(hard_budget_max_output_tokens=128),
+                    bounded_adapters={"synthetic/model": adapter})
+    messages: list[Message] = [{"role": "user", "content": "Synthetic"}]
+    assert engine.prepare_bounded("synthetic/model", messages).quote.max_output_tokens == 128
+    overrides = RuntimeSettingsStore(usage._connection)
+    overrides.set("hard_budget_max_output_tokens", "64")
+    overrides.set("hard_budget_policy_id", "off")
+    assert engine.prepare_bounded("synthetic/model", messages).quote.max_output_tokens == 64
+    with pytest.raises(BudgetRefused):
+        engine.prepare_bounded("synthetic/model", messages, max_output_tokens=65)
+    overrides.set("hard_budget_max_output_tokens", "invalid")
+    with pytest.raises(ValueError):
+        engine.prepare_bounded("synthetic/model", messages)
+    assert adapter.calls == []

@@ -15,6 +15,7 @@ from ylang.usage.capture import parse_capture_level
 HOT_RELOADABLE_KEYS: frozenset[str] = frozenset(
     {
         "daily_budget_usd",
+        "hard_budget_max_output_tokens",
         "quality_band",
         "fallback_model",
         "provider_cooldown_seconds",
@@ -150,6 +151,9 @@ def get_effective_settings(base: Settings, overrides: dict[str, str]) -> Setting
 def merge_settings(base: Settings, overrides: dict[str, str]) -> Settings:
     """Return a copy of ``base`` with runtime overrides applied where supported."""
     data = base.model_dump()
+    if "hard_budget_max_output_tokens" in overrides:
+        raw_limit = overrides["hard_budget_max_output_tokens"]
+        data["hard_budget_max_output_tokens"] = int(raw_limit)
     if budget := overrides.get("daily_budget_usd"):
         try:
             data["daily_budget_usd"] = float(budget)
@@ -236,7 +240,8 @@ def mask_secret(value: str | None, *, visible: int = 4, max_bullets: int = 12) -
 
 
 SETTING_DESCRIPTIONS: dict[str, str] = {
-    "daily_budget_usd": "Rolling 24h spend cap in USD; cloud models skipped when exceeded.",
+    "daily_budget_usd": "Retrospective routing meter; canonical hard-budget policy is authoritative.",
+    "hard_budget_max_output_tokens": "Maximum output token ceiling for bounded requests; not a price bound.",
     "quality_band": "Rank offset for cost tie-break within the quality-ordered model list.",
     "fallback_model": "Local LiteLLM floor model when cloud routes fail.",
     "provider_cooldown_seconds": "Seconds to skip a provider after retryable LLM failure.",

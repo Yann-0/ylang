@@ -406,7 +406,9 @@ class HardBudgetStore:
         """Read retained financial state without treating external traces as identity."""
         with self._lock:
             row = self._connection.execute(
-                "SELECT * FROM budget_attempts WHERE attempt_id=?", (attempt_id,),
+                "SELECT a.*,r.scope_id,r.metadata_json AS request_metadata_json,r.usage_row_id"
+                " FROM budget_attempts a JOIN budget_requests r USING(request_id) WHERE attempt_id=?",
+                (attempt_id,),
             ).fetchone()
             if row is None:
                 raise BudgetRefused("unknown attempt")
