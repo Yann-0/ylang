@@ -1,5 +1,14 @@
 # Deployment
 
+## Prepared maintenance update for 0075ccab
+
+The [maintenance approval record](maintenance-approval.md) documents the finalized
+review packet and its qualification limits. Internet IPv4/IPv6 checks remain
+NOT_RUN. Its publication does not authorize maintenance, firewall changes,
+application cutover, provider activation or paid calls. Review that record before
+planning the prepared update; the generic examples below are not its privileged
+cutover procedure.
+
 Ylang can run as a **local subprocess** (stdio MCP) or as a **long-lived HTTP service** suitable for systemd and shared Cursor hook access.
 
 ## stdio (development)

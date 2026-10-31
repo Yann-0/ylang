@@ -1,0 +1,58 @@
+{
+  "access_checks": {
+    "independent_LAN": "NOT_RUN",
+    "internet_IPv4": "NOT_RUN",
+    "internet_IPv6": "NOT_RUN",
+    "public_internet_closure": "NOT_PROVED"
+  },
+  "authorization": {
+    "cutover_or_migration": false,
+    "firewall_changes": false,
+    "live_maintenance": false,
+    "paid_or_local_inference": false,
+    "provider_activation": false,
+    "reboot_or_reopen": false
+  },
+  "candidate_commit": "0075ccab0239e525cdb89f1c5fbbec2082f5738d",
+  "evidence": {
+    "historical_human_root_preflight": {
+      "checks_passed": 14,
+      "checks_total": 14,
+      "observed_at_utc": "2026-10-30T15:55:10.360121+00:00",
+      "scope": "OPERATOR_CAPTURE_NOT_ROOT_SEALED_AUTHORITY"
+    },
+    "isolated_installer_cases": {
+      "passed": 4,
+      "scope": "PRIVATE_FIXTURES_NOT_ACTUAL_HOST_ACTIVATION_OR_REBOOT"
+    },
+    "ordinary_user_preflight": {
+      "checks_passed": 11,
+      "checks_total": 11,
+      "observed_at_utc": "2026-10-30T23:37:25.550705+00:00"
+    },
+    "readonly_collector_boundary_tests": {
+      "passed": 8,
+      "scope": "PRIOR_UNCHANGED_SOURCE_NOT_RERUN_FOR_PUBLICATION"
+    }
+  },
+  "packet": {
+    "artifact_name": "maintenance-activation-finalized-packet.zip",
+    "bytes": 47708,
+    "checksum_manifest_sha256": "d02a3b103a0a965b8b9b307e0d963f807cb82b6246a94d7ee67529ae237f552c",
+    "files": 32,
+    "sha256": "ecb29ffe86d15e72dc44269ec713cbe78f862a8c83e6b7414a4f9a6f726c03b4",
+    "storage": "RETAINED_ON_PREM_NOT_PUBLISHED"
+  },
+  "publication_scope": "Public summary and packet identity only; raw operational inventory, account metadata, client configuration and command captures stay on-prem.",
+  "record_date": "2026-10-31",
+  "record_timezone": "Europe/Paris",
+  "recorded_live_commit": "25dc64b32f5105d717fe21d0d23543920f4fa16e",
+  "remaining_execution_holds": [
+    "CLIENT_RECONNECT_PAUSE_CONFIRMATION",
+    "ROOT_FORWARD_PROXY_ACCOUNTING",
+    "FRESH_PRIVILEGED_AND_ACTUAL_ADAPTER_ADMISSION",
+    "SEPARATE_EXPLICIT_CLOSE_DISRUPTION_BOUND_STOP_AUTHORITY"
+  ],
+  "schema_version": 1,
+  "status": "FINALIZED_REVIEW_PACKET_NO_LIVE_AUTHORITY"
+}
