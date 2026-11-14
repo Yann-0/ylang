@@ -71,6 +71,7 @@ nav:
   - MCP tools: mcp-tools.md
   - CLI: cli.md
   - Cursor integration: cursor-integration.md
+  - External clients: external-clients.md
   - Gateway: gateway.md
   - Deployment: deployment.md
   - Publishing: publishing.md

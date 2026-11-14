@@ -14,8 +14,11 @@ RestartSec=5
 # hardening
 NoNewPrivileges=true
 ProtectSystem=strict
+PrivateTmp=true
 ReadWritePaths=/srv/ylang/data
 ProtectHome=true
+# Prefer data-backed temp when PrivateTmp is unavailable; set in ylang.env:
+# TMPDIR=/srv/ylang/data/tmp
 
 [Install]
 WantedBy=multi-user.target

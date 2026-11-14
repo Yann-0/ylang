@@ -7,8 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **External client docs** — Claude Code, Codex CLI, and Grok CLI/bot MCP HTTP wiring (`docs/external-clients.md`); LAN-first guidance and gateway caveats.
+
 ### Fixed
 
+- **systemd temp under ProtectSystem=strict** — unit enables `PrivateTmp=true`; `setup-data-dir.sh` creates `data/tmp` (`2770`) for optional `TMPDIR` when LiteLLM needs a writable temp dir.
 - **Evaluation execution safety** — refuse paid evaluation before dispatch until enforceable cost bounds and shared reservations exist; reject nonfinite budgets and prevent a simulated flag from dispatching another completer.
 - **Evaluation evidence** — retain per-arm actual model/trace identities and explicit success, preserve partial aborted runs and zero metrics, and mark simulated/model-mismatched comparisons as unqualified.
 - **Fallback terminal status** — successful completion clears a prior attempt error while retaining fallback diagnostics.

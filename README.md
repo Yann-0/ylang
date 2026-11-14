@@ -68,6 +68,7 @@ retirement and local scheduler activation require separate approval. See
 | [Prompt intelligence](docs/prompt-intelligence.md) | Discover → candidate → promote → measure |
 | [Evaluation methodology](docs/evaluation-methodology.md) | Inspect vs execute; versioned attribution |
 | [Cursor integration](docs/cursor-integration.md) | Hooks, auto prompt improvement |
+| [External clients](docs/external-clients.md) | Claude Code, Codex CLI, Grok — MCP outside Cursor |
 | [Gateway](docs/gateway.md) | OpenAI HTTP face: `/v1/chat/completions`, `/v1/models`, `/usage`, `/health`; virtual `route-*` models |
 | [Deployment](docs/deployment.md) | HTTP transport, systemd |
 | [Development](docs/development.md) | Tests, linting, contributing |

@@ -256,6 +256,7 @@ See [gateway.md](gateway.md#cursor-setup) for Ylang Base URL setup when the over
 
 ## Related docs
 
+- [External clients](external-clients.md) — Claude Code, Codex CLI, Grok outside Cursor
 - [MCP tools reference](mcp-tools.md) — `improve_prompt` parameters
 - [Configuration](configuration.md) — API keys, model prioritization, `ylang.env` layout
 - [Installation](installation.md) — first-time setup

@@ -77,7 +77,15 @@ EnvironmentFile=/srv/ylang/ylang.env
 ExecStartPre=+/srv/ylang/app/deploy/setup-data-dir.sh /srv/ylang/data
 ExecStart=/srv/ylang/.venv/bin/python -m ylang
 Restart=always
+# hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+PrivateTmp=true
+ReadWritePaths=/srv/ylang/data
+ProtectHome=true
 ```
+
+`ProtectSystem=strict` makes the default `/tmp` unusable for LiteLLM’s token store. Prefer **`PrivateTmp=true`** (as in the unit above). As a belt-and-suspenders fallback, set `TMPDIR=/srv/ylang/data/tmp` in `ylang.env`; `setup-data-dir.sh` creates that directory (`2770`, owner `ylang`).
 
 Install and enable:
 

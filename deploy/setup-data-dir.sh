@@ -11,6 +11,9 @@ if [[ "${EUID}" -ne 0 ]]; then
 fi
 
 install -d -o ylang -g ylang -m 770 "${DATA_DIR}"
+# LiteLLM (and tempfile) need a writable dir under ProtectSystem=strict.
+# Prefer TMPDIR=/srv/ylang/data/tmp in ylang.env; PrivateTmp=true is also fine.
+install -d -o ylang -g ylang -m 2770 "${DATA_DIR}/tmp"
 
 if [[ -f "${DATA_DIR}/ylang.db" ]]; then
   chown ylang:ylang "${DATA_DIR}/ylang.db" 2>/dev/null || true
@@ -19,4 +22,4 @@ if [[ -f "${DATA_DIR}/ylang.db" ]]; then
   chmod 660 "${DATA_DIR}"/ylang.db-* 2>/dev/null || true
 fi
 
-echo "Data directory ready: ${DATA_DIR} (owner ylang:ylang, mode 770)"
+echo "Data directory ready: ${DATA_DIR} (owner ylang:ylang, mode 770; tmp 2770)"

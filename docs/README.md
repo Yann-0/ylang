@@ -16,6 +16,7 @@ Ylang is a **local-first personal AI efficiency layer**: an [MCP](https://modelc
 | [Prompt intelligence](prompt-intelligence.md) | Allowlisted sources, candidates, promotion, trust boundary |
 | [Evaluation methodology](evaluation-methodology.md) | Inspect vs execute; versioned attribution |
 | [Cursor integration](cursor-integration.md) | Hooks, rules, auto prompt improvement, per-message `ylang-off` bypass |
+| [External clients](external-clients.md) | Claude Code, Codex CLI, Grok CLI/bot — MCP HTTP wiring |
 | [Console](console.md) | Short alias → [Portal](portal.md) |
 | [Publishing](publishing.md) | GitHub Pages (https://yann-0.github.io/ylang/) |
 | [Gateway](gateway.md) | OpenAI-compatible HTTP face: `/v1/chat/completions`, `/v1/models`, `/console`, `/health`; virtual `route-*` models; bearer auth; Cursor custom-endpoint setup |

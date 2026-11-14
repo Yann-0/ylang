@@ -261,7 +261,7 @@ If you ever decide to accept a public origin, it needs a hostname with valid TLS
 - MCP (`/mcp`) and the gateway (`/v1/*`) share auth and the same process.
 - **First-party Cursor models (Grok, Composer):** enabling OpenAI API Key / Override OpenAI Base URL causes `Bad Request — This model does not support custom API keys`. Turn the override off (or `Ctrl+Shift+0`) before using Grok/Composer; see [cursor-integration.md — First-party models vs Ylang gateway](cursor-integration.md#first-party-models-vs-ylang-gateway).
 
-See also [cursor-integration.md](cursor-integration.md) for MCP and hook setup (complementary to gateway routing).
+See also [cursor-integration.md](cursor-integration.md) for MCP and hook setup (complementary to gateway routing), and [external-clients.md](external-clients.md) for Claude Code, Codex CLI, and Grok MCP wiring outside Cursor.
 
 ## Examples
 
