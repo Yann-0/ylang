@@ -5,22 +5,26 @@ from __future__ import annotations
 import json
 import os
 import threading
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from ylang.importer.adapters.awesome_copilot import AwesomeCopilotAdapter, awesome_copilot_raw_url
 from ylang.importer.adapters.fabric import FabricPatternsAdapter, fabric_raw_url
+from ylang.importer.adapters.local_skills import LocalSkillsAdapter
 from ylang.importer.adapters.prompts_chat import (
     PROMPTS_CHAT_CSV_NAME,
     PROMPTS_CHAT_OWNER_REPOS,
     PromptsChatAdapter,
     prompts_chat_raw_csv_url,
 )
+from ylang.importer.auto_apply import auto_apply_linked_updates
 from ylang.importer.ingest import ingest_parsed_items
+from ylang.importer.local_refresh import load_local_skill_items
 from ylang.importer.policy import (
     MAX_FILE_BYTES,
     MAX_INGEST_ITEMS,
-    MAX_RESPONSE_BYTES,
+    MAX_SCHEDULED_CSV_BYTES,
     MAX_TREE_BYTES,
     REFRESH_LEASE_TTL_SEC,
     SourcePolicyError,
@@ -45,6 +49,7 @@ _ADAPTERS = {
     "prompts-chat": PromptsChatAdapter(),
     "github-awesome-copilot": AwesomeCopilotAdapter(),
     "fabric-patterns": FabricPatternsAdapter(),
+    "local-skills": LocalSkillsAdapter(),
 }
 
 _REPO = {
@@ -176,7 +181,7 @@ def _fetch_prompts_chat_files(
             response = fetcher.get(
                 url,
                 source_id=source.source_id,
-                max_bytes=MAX_RESPONSE_BYTES,
+                max_bytes=MAX_SCHEDULED_CSV_BYTES,
                 content_kind="csv",
             )
             return {PROMPTS_CHAT_CSV_NAME: response.text()}
@@ -384,6 +389,8 @@ def _refresh_source_locked(
                 revision=rev,
                 mark_removed=mark_removed,
             )
+            applied = auto_apply_linked_updates(store, library, source)
+            summary = replace(summary, auto_applied=applied)
             store.mark_success(source_id, revision=rev, etag=source.last_etag)
             store.record_run(summary)
             return summary
@@ -393,6 +400,34 @@ def _refresh_source_locked(
                 "source",
                 "manual CSV import is not a scheduled source",
             )
+        if source.adapter == "local-skills":
+            if not source.local_path:
+                raise SourcePolicyError(
+                    "config",
+                    "operator-local-skills has no local_path; "
+                    "run: ylang prompts sources configure operator-local-skills --path DIR",
+                )
+            from pathlib import Path
+
+            items, rev, _paths = load_local_skill_items(Path(source.local_path))
+            if len(items) > MAX_INGEST_ITEMS:
+                raise SourcePolicyError(
+                    "budget",
+                    f"item count {len(items)} exceeds {MAX_INGEST_ITEMS}",
+                )
+            summary = ingest_parsed_items(
+                store,
+                library,
+                source,
+                items,
+                revision=rev,
+                mark_removed=mark_removed,
+            )
+            applied = auto_apply_linked_updates(store, library, source)
+            summary = replace(summary, auto_applied=applied)
+            store.mark_success(source_id, revision=rev, etag=source.last_etag)
+            store.record_run(summary)
+            return summary
         if source.adapter not in _ADAPTERS:
             raise SourcePolicyError("adapter", f"unknown adapter {source.adapter}")
 
@@ -425,7 +460,7 @@ def _refresh_source_locked(
             note = (
                 f"source shape unexpected: 0 parsed items for {source_id} "
                 f"({len(files)} files). Expected: {hint}. "
-                "Refusing to convert agents/skills/tools into ordinary prompts."
+                "Refusing to ingest agents/instructions/MCP as ordinary prompts."
             )
             store.set_compatibility(source_id, "incompatible", note, disable=True)
             raise SourcePolicyError("layout", note)
@@ -438,12 +473,21 @@ def _refresh_source_locked(
             revision=sha,
             mark_removed=mark_removed,
         )
+        applied = auto_apply_linked_updates(store, library, source)
+        summary = replace(summary, auto_applied=applied)
         store.mark_success(source_id, revision=sha, etag=etag)
         store.record_run(summary)
         return summary
     except (FetchError, SourcePolicyError, ValueError, OSError, json.JSONDecodeError) as exc:
         store.mark_error(source_id, str(exc))
-        if isinstance(exc, SourcePolicyError) and exc.code in {"layout", "truncated"}:
+        # Empty or missing operator directories are setup waits, not a broken
+        # public catalog. Leave the source enabled so the timer retries.
+        layout_is_public = source.adapter != "local-skills"
+        if (
+            layout_is_public
+            and isinstance(exc, SourcePolicyError)
+            and exc.code in {"layout", "truncated"}
+        ):
             store.set_compatibility(
                 source_id,
                 "incompatible",

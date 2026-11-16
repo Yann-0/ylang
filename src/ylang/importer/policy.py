@@ -15,16 +15,20 @@ HTTPS_SCHEME = "https"
 MAX_REDIRECTS = 3
 DEFAULT_TIMEOUT_SEC = 30
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+"""Default body cap for generic HTTPS fetch (manual URL imports, JSON, license)."""
+
+MAX_SCHEDULED_CSV_BYTES = 16 * 1024 * 1024
+"""Body cap for allowlisted ``prompts-chat`` scheduled CSV refresh (~11 MiB live)."""
+
 MAX_FILE_BYTES = 256 * 1024
 MAX_TREE_BYTES = 5 * 1024 * 1024
 MAX_INGEST_ITEMS = 200_000
 REFRESH_LEASE_TTL_SEC = 600
 USER_AGENT = "Ylang-PromptIntelligence/0.7 (+https://github.com/Yann-0/ylang)"
 
-COPILOT_INCOMPATIBLE_NOTE = (
-    "LIVE_SOURCE 2026-09-13 github/awesome-copilot@7568a482ce2d: 0 *.prompt.md "
-    "files; tree is agents/skills/instructions/extensions. v1 will not convert "
-    "those into ordinary prompts."
+COPILOT_LEGACY_NOTE = (
+    "awesome-copilot v1 imports skills/**/SKILL.md and *.prompt.md only; "
+    "agents/instructions/MCP are not ingested and never grant tools."
 )
 
 SCHEDULED_HOSTS: frozenset[str] = frozenset(
@@ -97,8 +101,20 @@ BUILTIN_SOURCE_SPECS: tuple[dict[str, object], ...] = (
         "enabled": 0,
         "refresh_interval_hours": 24,
         "policy_version": POLICY_VERSION,
-        "compatibility_status": "incompatible",
-        "compatibility_note": COPILOT_INCOMPATIBLE_NOTE,
+    },
+    {
+        "source_id": "operator-local-skills",
+        "name": "Operator local skills",
+        "adapter": "local-skills",
+        "canonical_url": "local://operator-local-skills",
+        "repo_url": None,
+        "license_spdx": "LicenseRef-Local",
+        "license_url": None,
+        "trust_tier": "operator-owned",
+        "enabled": 0,
+        "refresh_interval_hours": 24,
+        "policy_version": POLICY_VERSION,
+        "auto_apply_updates": 1,
     },
     {
         "source_id": "fabric-patterns",
@@ -195,7 +211,25 @@ def is_scheduled_source(source: PromptSource) -> bool:
 
 def scheduled_license_required(source: PromptSource) -> bool:
     """Scheduled sources always require a license check (fail closed)."""
+    if source.adapter == "local-skills":
+        return False
     return is_scheduled_source(source)
+
+
+def auto_apply_allowed(source: PromptSource) -> bool:
+    """Return True when this source may auto-apply linked template updates."""
+    return source.trust_tier == "operator-owned" and source.auto_apply_updates
+
+
+def validate_auto_apply_updates(source: PromptSource, enabled: bool) -> None:
+    """Refuse auto-apply for non-operator sources (fail closed)."""
+    if not enabled:
+        return
+    if source.trust_tier != "operator-owned":
+        raise SourcePolicyError(
+            "trust",
+            "auto_apply_updates is only allowed for operator-owned sources",
+        )
 
 
 def license_policy_error(source: PromptSource) -> str | None:
@@ -214,11 +248,14 @@ __all__ = [
     "ADAPTER_VERSION",
     "BUILTIN_SOURCE_SPECS",
     "DEFAULT_TIMEOUT_SEC",
-    "COPILOT_INCOMPATIBLE_NOTE",
+    "COPILOT_LEGACY_NOTE",
+    "auto_apply_allowed",
+    "validate_auto_apply_updates",
     "MAX_FILE_BYTES",
     "MAX_INGEST_ITEMS",
     "MAX_REDIRECTS",
     "MAX_RESPONSE_BYTES",
+    "MAX_SCHEDULED_CSV_BYTES",
     "MAX_TREE_BYTES",
     "POLICY_VERSION",
     "REFRESH_LEASE_TTL_SEC",

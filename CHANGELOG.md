@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Operator local skills** — `operator-local-skills` source (`local-skills` adapter) reads on-disk `SKILL.md` / `*.prompt.md`; `auto_apply_updates` writes new immutable versions only for already-linked operator-owned items (public sources cannot enable auto-apply)
+- **awesome-copilot skills** — ingest `skills/**/SKILL.md` as quarantined skill candidates (no auto-promote, no tool grants) without requiring legacy `*.prompt.md`
+- **Skill-aware retrieval** — improver reference selection uses `templates_fts` plus accept-rate, boosts provenance-linked skills, caps linked-skill injection at two, excludes archived templates
+- **Prompt drift CLI** — `ylang prompts drift` and `ylang prompts sources configure` for local path and auto-apply policy
+- **prompts.chat CSV cap** — scheduled refresh allows 16 MiB for allowlisted `prompts-chat` CSV (~11 MiB live); generic manual URL fetch remains 8 MiB
 - **External client docs** — Claude Code, Codex CLI, and Grok CLI/bot MCP HTTP wiring (`docs/external-clients.md`); LAN-first guidance and gateway caveats.
 
 ### Fixed

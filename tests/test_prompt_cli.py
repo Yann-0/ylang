@@ -25,7 +25,7 @@ def test_prompts_sources_list(
     assert "github-awesome-copilot" in out
     assert "fabric-patterns" in out
     assert "compat=" in out
-    assert "incompatible" in out
+    assert "operator-local-skills" in out
 
 
 def test_prompts_candidates_workflow(

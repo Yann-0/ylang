@@ -416,7 +416,7 @@ def _migrate_prompt_evaluation_baselines(connection: sqlite3.Connection) -> None
 @migration(16, "prompt_intelligence_fail_closed")
 def _migrate_prompt_intelligence_fail_closed(connection: sqlite3.Connection) -> None:
     """Compatibility flags, refresh leases, and bounded evaluation runs."""
-    from ylang.importer.policy import COPILOT_INCOMPATIBLE_NOTE
+    from ylang.importer.policy import COPILOT_LEGACY_NOTE
 
     if _table_exists(connection, "prompt_sources"):
         if not _column_exists(connection, "prompt_sources", "compatibility_status"):
@@ -437,7 +437,7 @@ def _migrate_prompt_intelligence_fail_closed(connection: sqlite3.Connection) -> 
             WHERE source_id = 'github-awesome-copilot'
               AND compatibility_status = 'unverified'
             """,
-            (COPILOT_INCOMPATIBLE_NOTE,),
+            (COPILOT_LEGACY_NOTE,),
         )
     connection.executescript(
         """
@@ -507,6 +507,61 @@ def protect_budget_usage(connection: sqlite3.Connection) -> None:
             SELECT RAISE(ROLLBACK, 'budget monetary inputs are immutable');
         END"""
     )
+
+
+@migration(18, "prompt_kb_operator_skills")
+def _migrate_prompt_kb_operator_skills(connection: sqlite3.Connection) -> None:
+    """Operator-local skills source, auto-apply flag, and copilot skill adapter."""
+    from ylang.importer.policy import BUILTIN_SOURCE_SPECS, COPILOT_LEGACY_NOTE
+
+    if _table_exists(connection, "prompt_sources"):
+        if not _column_exists(connection, "prompt_sources", "auto_apply_updates"):
+            connection.execute(
+                "ALTER TABLE prompt_sources ADD COLUMN auto_apply_updates "
+                "INTEGER NOT NULL DEFAULT 0"
+            )
+        if not _column_exists(connection, "prompt_sources", "local_path"):
+            connection.execute("ALTER TABLE prompt_sources ADD COLUMN local_path TEXT")
+        connection.execute(
+            """
+            UPDATE prompt_sources
+            SET compatibility_status = 'unverified',
+                compatibility_note = ?,
+                enabled = 0
+            WHERE source_id = 'github-awesome-copilot'
+            """,
+            (COPILOT_LEGACY_NOTE,),
+        )
+        now = connection.execute("SELECT datetime('now')").fetchone()[0]
+        for spec in BUILTIN_SOURCE_SPECS:
+            if spec["source_id"] != "operator-local-skills":
+                continue
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO prompt_sources (
+                    source_id, name, adapter, canonical_url, repo_url,
+                    license_spdx, license_url, trust_tier, enabled,
+                    refresh_interval_hours, policy_version, created_at, updated_at,
+                    auto_apply_updates
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    spec["source_id"],
+                    spec["name"],
+                    spec["adapter"],
+                    spec["canonical_url"],
+                    spec["repo_url"],
+                    spec["license_spdx"],
+                    spec["license_url"],
+                    spec["trust_tier"],
+                    spec["enabled"],
+                    spec["refresh_interval_hours"],
+                    spec["policy_version"],
+                    now,
+                    now,
+                    int(spec.get("auto_apply_updates", 0)),
+                ),
+            )
 
 
 @migration(17, "hard_budget_attempt_ledger")

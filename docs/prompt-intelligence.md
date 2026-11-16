@@ -44,7 +44,8 @@ of a working live integration.
 | Source id | License | Live status (2026-09-13) | What is imported | Default cadence |
 |-----------|---------|---------------------------|------------------|-----------------|
 | `prompts-chat` | CC0 1.0 (prompt data; dual-license LICENSE) | **eligible** — `prompts.csv` at `f/prompts.chat@f78a1c5136fa` (2 169 act/prompt records; ~5.7 MiB; 121 758 physical newlines are multiline bodies, not extra prompts) | structured `prompts.csv` | 24h if enabled |
-| `github-awesome-copilot` | MIT | **incompatible** — `github/awesome-copilot@7568a482ce2d` has **0** `*.prompt.md` files; tree is agents/skills/instructions | v1 would import `*.prompt.md` only; **will not** convert agents/skills/MCP/instructions into ordinary prompts | cannot enable until a refresh finds eligible files |
+| `github-awesome-copilot` | MIT | **unverified until refresh** — tree is mostly `skills/**/SKILL.md`; legacy `*.prompt.md` may also exist | imports `skills/**/SKILL.md` and eligible `*.prompt.md` only; agents/instructions/MCP are skipped; **no auto-promote**, **no tool grants** | 24h if enabled |
+| `operator-local-skills` | operator-owned (`LicenseRef-Local`) | **local path required** — directory or git checkout on disk | `SKILL.md` and `*.prompt.md` under configured path; auto-apply **only** for already-linked templates (`trust_tier=operator-owned`) | 24h if enabled |
 | `fabric-patterns` | MIT | **eligible** — 255 `data/patterns/*/system.md` at `danielmiessler/Fabric@b682dad740f2` | `system.md` under `**/patterns/` | 168h if enabled |
 
 Scheduled refresh is **off** until you enable a source. **Incompatible
@@ -63,8 +64,11 @@ are not bulk-imported.
 
 ```bash
 ylang prompts sources list
+ylang prompts sources configure operator-local-skills --path ~/.cursor/skills
+ylang prompts sources configure operator-local-skills --auto-apply on
 ylang prompts sources enable prompts-chat
 ylang prompts sources disable github-awesome-copilot
+ylang prompts drift
 ylang prompts refresh prompts-chat
 ylang prompts refresh --all          # enabled + due scheduled sources only
 ylang prompts refresh --all --force  # ignore per-source intervals
@@ -118,6 +122,7 @@ Fail closed:
 - refreshes are serialized (in-process lock + SQLite lease)
 - `--all` honors `refresh_interval_hours` unless `--force`
 - item count above 200_000 blocks ingest (no silent truncation)
+- scheduled ``prompts-chat`` CSV fetch allows up to **16 MiB**; other generic HTTPS bodies stay capped at **8 MiB** (manual arbitrary URL imports included)
 
 Ylang starts fully offline. A failed refresh does not block the library,
 improver, or gateway. Last successful revision is preserved.
@@ -154,10 +159,21 @@ A working evaluation runner does **not** prove a prompt is better. See
 
 A successful GitHub tree fetch that matches **zero** adapter files is a refresh
 **error** and marks the source **incompatible** (and disables it). Copilot
-would accept `prompts/*.prompt.md` and `.github/prompts/*.prompt.md` **if they
-exist**; as of 2026-09-13 they do not. Fabric matches `data/patterns/*/system.md`
-and any `**/patterns/*/system.md`. Live layout contracts stay opt-in:
+accepts `skills/**/SKILL.md` plus eligible `*.prompt.md` outside
+agents/instructions/MCP. Fabric matches `data/patterns/*/system.md` and any
+`**/patterns/*/system.md`. Live layout contracts stay opt-in:
 `YLANG_NETWORK_TESTS=1 pytest -m network`.
+
+`ylang prompts drift` reports:
+
+- promoted items whose upstream body hash changed (`candidate_changed` with a
+  linked template)
+- new operator-local files waiting for a first promote (`candidate_new` on
+  `operator-owned` sources)
+
+Improver retrieval ranks active (non-archived) templates with `templates_fts`
+first, then accept-rate blending, preferring provenance-linked skills and
+capping linked-skill injection to two templates per improve call.
 
 ## Permissions and failure states
 

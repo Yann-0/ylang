@@ -255,6 +255,14 @@ def test_malformed_source_does_not_corrupt_library(tmp_path: Path) -> None:
         library.close()
 
 
+def test_prompts_chat_scheduled_csv_cap_above_live_catalog() -> None:
+    from ylang.importer.policy import MAX_RESPONSE_BYTES, MAX_SCHEDULED_CSV_BYTES
+
+    live_bytes = 10_994_391
+    assert MAX_SCHEDULED_CSV_BYTES >= live_bytes
+    assert MAX_RESPONSE_BYTES < live_bytes
+
+
 def test_oversized_source_rejected(tmp_path: Path) -> None:
     library = open_library(tmp_path / "db.sqlite")
     store = open_source_store(library)
@@ -457,17 +465,22 @@ def test_refresh_failure_ylang_remains_functional(tmp_path: Path) -> None:
 
 def test_awesome_copilot_prompt_files_only() -> None:
     adapter = AwesomeCopilotAdapter()
+    skill = (
+        FIXTURES / "awesome_copilot" / "skills" / "review-pr" / "SKILL.md"
+    ).read_text(encoding="utf-8")
     files = {
         "prompts/review-pr.prompt.md": COPILOT_PROMPT,
         "agents/coder.agent.md": "should skip",
-        "skills/foo.md": "skip",
+        "skills/review-pr/SKILL.md": skill,
     }
     selected = adapter.select_paths(list(files))
-    assert selected == ["prompts/review-pr.prompt.md"]
+    assert "prompts/review-pr.prompt.md" in selected
+    assert "skills/review-pr/SKILL.md" in selected
     items = adapter.parse(files, revision=SHA)
-    assert len(items) == 1
-    assert items[0].metadata.get("tools") == ["search", "edit"]
-    assert items[0].model_hint == "gpt-4.1"
+    assert len(items) == 2
+    prompt_item = next(i for i in items if i.metadata.get("artifact") == "prompt")
+    assert prompt_item.metadata.get("tools") == ["search", "edit"]
+    assert prompt_item.model_hint == "gpt-4.1"
 
 
 def test_fabric_pattern_parse() -> None:
@@ -922,16 +935,19 @@ def test_partial_oversized_does_not_delete_last_known_good(tmp_path: Path) -> No
         library.close()
 
 
-def test_cannot_enable_incompatible_copilot(tmp_path: Path) -> None:
+def test_cannot_enable_layout_incompatible_copilot(tmp_path: Path) -> None:
     from ylang.importer.policy import SourcePolicyError
 
     library = open_library(tmp_path / "db.sqlite")
     store = open_source_store(library)
     try:
-        source = store.get_source("github-awesome-copilot")
-        assert source is not None
-        assert source.compatibility_status == "incompatible"
-        with pytest.raises(SourcePolicyError, match="prompt.md"):
+        store.set_compatibility(
+            "github-awesome-copilot",
+            "incompatible",
+            "layout test",
+            disable=True,
+        )
+        with pytest.raises(SourcePolicyError, match="layout test"):
             store.set_enabled("github-awesome-copilot", True)
         enabled = store.get_source("github-awesome-copilot")
         assert enabled is not None

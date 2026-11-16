@@ -16,12 +16,14 @@ SourceAdapterName = Literal[
     "github-awesome-copilot",
     "fabric-patterns",
     "csv-manual",
+    "local-skills",
 ]
 SourceTrustTier = Literal[
     "community-broad",
     "curated-coding",
     "curated-patterns",
     "manual",
+    "operator-owned",
 ]
 CandidateState = Literal[
     "candidate_new",
@@ -97,6 +99,8 @@ class PromptSource:
     updated_at: str
     compatibility_status: CompatibilityStatus = "unverified"
     compatibility_note: str | None = None
+    auto_apply_updates: bool = False
+    local_path: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +167,7 @@ class RefreshSummary:
     errors: int = 0
     error: str | None = None
     unchanged: int = 0
+    auto_applied: int = 0
 
     @property
     def imported(self) -> int:

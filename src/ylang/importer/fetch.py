@@ -8,7 +8,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ylang.importer.policy import SourcePolicyError, validate_fetch_url
+from ylang.importer.policy import (
+    MAX_RESPONSE_BYTES,
+    MAX_SCHEDULED_CSV_BYTES,
+    SourcePolicyError,
+    validate_fetch_url,
+)
 from ylang.importer.secure_fetch import DEFAULT_FETCHER, FetchError
 
 DEFAULT_PROMPTS_URL = (
@@ -32,10 +37,14 @@ def load_csv_text(*, url: str | None = None, csv_path: Path | None = None) -> st
             source_id = "prompts-chat"
         except SourcePolicyError:
             source_id = None
+        max_bytes = (
+            MAX_SCHEDULED_CSV_BYTES if source_id == "prompts-chat" else MAX_RESPONSE_BYTES
+        )
         response = DEFAULT_FETCHER.get(
             target,
             source_id=source_id,
             content_kind="csv",
+            max_bytes=max_bytes,
         )
         return response.text()
     except (FetchError, SourcePolicyError, OSError) as exc:

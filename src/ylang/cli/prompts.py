@@ -17,6 +17,7 @@ from ylang.importer.evaluate import (
     evaluate_candidate,
     execute_candidate_evaluation,
 )
+from ylang.importer.drift import collect_prompt_drift
 from ylang.importer.metrics import collect_metrics
 from ylang.importer.policy import SourcePolicyError
 from ylang.importer.promote import (
@@ -69,6 +70,24 @@ def build_prompts_parser() -> argparse.ArgumentParser:
     enable.add_argument("source_id")
     disable = sources_sub.add_parser("disable", help="Disable scheduled refresh")
     disable.add_argument("source_id")
+    configure = sources_sub.add_parser(
+        "configure",
+        help="Configure operator-local skill path or auto-apply policy",
+    )
+    configure.add_argument("source_id")
+    configure.add_argument(
+        "--path",
+        default=None,
+        help="Root directory for local-skills adapter",
+    )
+    configure.add_argument(
+        "--auto-apply",
+        choices=("on", "off"),
+        default=None,
+        help="Auto-apply linked updates (operator-owned only)",
+    )
+
+    groups.add_parser("drift", help="Report upstream drift and unlinked operator files")
 
     refresh = groups.add_parser("refresh", help="Refresh candidates from a source")
     refresh.add_argument("source_id", nargs="?", help="Source id (omit with --all)")
@@ -143,9 +162,12 @@ def build_prompts_parser() -> argparse.ArgumentParser:
 def _print_source_row(source: PromptSource) -> None:
     enabled = "on" if getattr(source, "enabled") else "off"
     compat = source.compatibility_status
+    auto = "on" if source.auto_apply_updates else "off"
+    local = source.local_path or "-"
     print(
         f"{source.source_id:28} {enabled:3} {source.license_spdx:8} "
-        f"compat={compat:13} "
+        f"compat={compat:13} auto_apply={auto} "
+        f"path={local} "
         f"rev={source.last_revision or '-'} "
         f"err={source.last_error or '-'}"
     )
@@ -194,11 +216,39 @@ def run_prompts_cli(argv: list[str] | None = None) -> int:
                     return 1
                 print(f"enabled {args.source_id} (scheduled refresh still opt-in via cron/timer)")
                 return 0
-            updated = source_store.set_enabled(args.source_id, False)
-            if updated is None:
-                print(f"unknown source: {args.source_id}", file=sys.stderr)
-                return 1
-            print(f"disabled {args.source_id}")
+            if args.command == "disable":
+                updated = source_store.set_enabled(args.source_id, False)
+                if updated is None:
+                    print(f"unknown source: {args.source_id}", file=sys.stderr)
+                    return 1
+                print(f"disabled {args.source_id}")
+                return 0
+            if args.command == "configure":
+                try:
+                    if args.path is not None:
+                        source_store.set_local_path(args.source_id, args.path)
+                    if args.auto_apply is not None:
+                        source_store.set_auto_apply_updates(
+                            args.source_id, args.auto_apply == "on"
+                        )
+                except SourcePolicyError as exc:
+                    print(str(exc), file=sys.stderr)
+                    return 1
+                updated = source_store.get_source(args.source_id)
+                if updated is None:
+                    print(f"unknown source: {args.source_id}", file=sys.stderr)
+                    return 1
+                print(
+                    f"configured {args.source_id} "
+                    f"path={updated.local_path or '-'} "
+                    f"auto_apply={'on' if updated.auto_apply_updates else 'off'}"
+                )
+                return 0
+            print(f"unknown sources command: {args.command}", file=sys.stderr)
+            return 2
+        if group == "drift":
+            report = collect_prompt_drift(source_store)
+            print(json.dumps(asdict(report), indent=2, default=str))
             return 0
         if group == "refresh":
             if args.refresh_all:

@@ -6,7 +6,11 @@ import json
 import sqlite3
 from typing import Any
 
-from ylang.importer.policy import BUILTIN_SOURCE_SPECS, COPILOT_INCOMPATIBLE_NOTE, SourcePolicyError
+from ylang.importer.policy import (
+    BUILTIN_SOURCE_SPECS,
+    SourcePolicyError,
+    validate_auto_apply_updates,
+)
 from ylang.importer.source_types import (
     CandidateState,
     CompatibilityStatus,
@@ -23,7 +27,7 @@ _SOURCE_COLUMNS = (
     "source_id, name, adapter, canonical_url, repo_url, license_spdx, license_url, "
     "trust_tier, enabled, refresh_interval_hours, last_attempt_at, last_success_at, "
     "last_revision, last_etag, last_error, policy_version, created_at, updated_at, "
-    "compatibility_status, compatibility_note"
+    "compatibility_status, compatibility_note, auto_apply_updates, local_path"
 )
 
 
@@ -52,6 +56,8 @@ def _source_from_row(row: sqlite3.Row | tuple[Any, ...]) -> PromptSource:
         compatibility_note=(
             str(values[19]) if len(values) > 19 and values[19] is not None else None
         ),
+        auto_apply_updates=bool(values[20]) if len(values) > 20 else False,
+        local_path=str(values[21]) if len(values) > 21 and values[21] is not None else None,
     )
 
 
@@ -135,21 +141,6 @@ class PromptSourceStore:
                     now,
                 ),
             )
-        cols = {
-            str(row[1])
-            for row in self._connection.execute("PRAGMA table_info(prompt_sources)")
-        }
-        if "compatibility_status" in cols:
-            self._connection.execute(
-                """
-                UPDATE prompt_sources
-                SET compatibility_status = 'incompatible',
-                    compatibility_note = ?
-                WHERE source_id = 'github-awesome-copilot'
-                  AND compatibility_status = 'unverified'
-                """,
-                (COPILOT_INCOMPATIBLE_NOTE,),
-            )
         self._connection.commit()
 
     def list_sources(self) -> list[PromptSource]:
@@ -188,6 +179,51 @@ class PromptSourceStore:
             UPDATE prompt_sources
             SET enabled = ?, updated_at = ?
             WHERE source_id = ? AND source_id != 'manual-import'
+            """,
+            (int(enabled), now, source_id),
+        )
+        self._connection.commit()
+        return self.get_source(source_id)
+
+    def set_local_path(self, source_id: str, local_path: str | None) -> PromptSource | None:
+        """Configure the on-disk root for ``local-skills`` sources."""
+        source = self.get_source(source_id)
+        if source is None:
+            return None
+        if source.adapter != "local-skills":
+            raise SourcePolicyError(
+                "adapter",
+                f"{source_id} is not a local-skills source",
+            )
+        cleaned = local_path.strip() if local_path else None
+        now = utcnow_iso()
+        # A new path invalidates a previous layout failure (missing dir, empty tree).
+        self._connection.execute(
+            """
+            UPDATE prompt_sources
+            SET local_path = ?, compatibility_status = 'unverified',
+                compatibility_note = NULL, last_error = NULL, updated_at = ?
+            WHERE source_id = ?
+            """,
+            (cleaned, now, source_id),
+        )
+        self._connection.commit()
+        return self.get_source(source_id)
+
+    def set_auto_apply_updates(
+        self, source_id: str, enabled: bool
+    ) -> PromptSource | None:
+        """Enable auto-apply for linked operator-owned items only."""
+        source = self.get_source(source_id)
+        if source is None:
+            return None
+        validate_auto_apply_updates(source, enabled)
+        now = utcnow_iso()
+        self._connection.execute(
+            """
+            UPDATE prompt_sources
+            SET auto_apply_updates = ?, updated_at = ?
+            WHERE source_id = ?
             """,
             (int(enabled), now, source_id),
         )

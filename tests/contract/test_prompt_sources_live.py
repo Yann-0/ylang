@@ -84,7 +84,7 @@ def test_live_prompts_chat_csv_and_cc0_license() -> None:
 
 
 @pytest.mark.network
-def test_live_awesome_copilot_has_no_v1_prompt_files() -> None:
+def test_live_awesome_copilot_has_skill_md_files() -> None:
     _require_network()
     fetcher = SecureFetcher()
     sha = _live_sha(fetcher, "github", "awesome-copilot", "github-awesome-copilot")
@@ -99,10 +99,10 @@ def test_live_awesome_copilot_has_no_v1_prompt_files() -> None:
     paths, truncated = parse_github_tree(tree.body)
     assert truncated is False
     selected = AwesomeCopilotAdapter().select_paths(paths)
-    assert selected == []
+    assert selected, "awesome-copilot must expose SKILL.md or *.prompt.md"
+    assert any("/SKILL.md" in path for path in selected)
     agents = [path for path in paths if path.startswith("agents/")]
-    skills = [path for path in paths if path.startswith("skills/")]
-    assert agents and skills
+    assert agents
 
 
 @pytest.mark.network
